@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
@@ -17,13 +18,17 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.os.Looper
+import android.view.WindowManager
 import androidx.annotation.NonNull
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.util.*
 import android.util.Log
+import java.util.*
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.the_good_alarm/alarm"
@@ -31,8 +36,8 @@ class MainActivity : FlutterActivity() {
     private val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
     private lateinit var alarmManager: AlarmManager
     private lateinit var alarmReceiver: BroadcastReceiver
+    private var methodChannel: MethodChannel? = null
     
-    // Añadir este método en MainActivity.kt
     private fun checkDoNotDisturbPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -43,25 +48,46 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    // Llamar a este método en configureFlutterEngine después de createNotificationChannel()
+    private val REQUEST_CODE_OVERLAY_PERMISSION = 123
+
+    private fun checkOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivityForResult(intent, REQUEST_CODE_OVERLAY_PERMISSION)
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_OVERLAY_PERMISSION) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.canDrawOverlays(this)) {
+                    Log.d("MainActivity", "Overlay permission granted")
+                } else {
+                    Log.w("MainActivity", "Overlay permission not granted")
+                    // Puedes mostrar un mensaje al usuario aquí si el permiso es crucial
+                }
+            }
+        }
+    }
+
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         Log.d("MainActivity", "configureFlutterEngine called")
         
-        // Inicializar el AlarmManager
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        
-        // Crear canal de notificación para Android 8.0+
-        createNotificationChannel()
-        
-        // Verificar permiso de No molestar
+        createNotificationChannel() // Asegúrate que esto crea el canal con IMPORTANCE_HIGH
         checkDoNotDisturbPermission()
+        checkOverlayPermission() // <-- Añade esta llamada
+        // registerAlarmReceiver() // Esta función parece redundante si AlarmReceiver se declara en el Manifest
         
-        // Registrar el BroadcastReceiver para las alarmas
-        registerAlarmReceiver()
-        
-        // Configurar el MethodChannel para comunicarse con Flutter
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel?.setMethodCallHandler { call, result ->
             Log.d("MainActivity", "MethodChannel call: ${call.method}")
             when (call.method) {
                 "setAlarm" -> {
@@ -78,7 +104,7 @@ class MainActivity : FlutterActivity() {
                                 result.success(true)
                             } else {
                                 val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-                                intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                                 startActivity(intent)
                                 result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
                             }
@@ -93,6 +119,30 @@ class MainActivity : FlutterActivity() {
                 "cancelAlarm" -> {
                     val alarmId = call.argument<Int>("alarmId") ?: 0
                     cancelAlarm(alarmId)
+                    result.success(true)
+                }
+                "stopAlarm" -> {
+                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    Log.d("MainActivity", "Stopping alarm: $alarmId")
+                    AlarmReceiver.stopAlarmSound()
+                    cancelAlarm(alarmId)
+                    result.success(true)
+                }
+                "snoozeAlarm" -> {
+                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    Log.d("MainActivity", "Snoozing alarm: $alarmId")
+                    AlarmReceiver.stopAlarmSound()
+                    cancelAlarm(alarmId)
+                    
+                    val calendar = Calendar.getInstance()
+                    calendar.add(Calendar.MINUTE, 1)
+                    setAlarm(
+                        timeInMillis = calendar.timeInMillis,
+                        alarmId = alarmId,
+                        title = "Alarma pospuesta",
+                        message = "¡Es hora de despertar!",
+                        screenRoute = "/alarm"
+                    )
                     result.success(true)
                 }
                 "getSystemSounds" -> {
@@ -113,12 +163,114 @@ class MainActivity : FlutterActivity() {
                     vibrate(pattern)
                     result.success(true)
                 }
-                "stopSound" -> {
-                    stopSound()
-                    result.success(true)
+                else -> result.notImplemented()
+            }
+        }
+    }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Solicitar permiso de notificaciones en Android 13 (Tiramisu) y superiores
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
+                Log.d("MainActivity", "Requesting POST_NOTIFICATIONS permission")
+            }
+        }
+        
+        handleAlarmIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d("MainActivity", "onNewIntent called with action: ${intent.action}")
+        setIntent(intent) // Es crucial actualizar el intent de la actividad
+        handleAlarmIntent(intent) // Procesa el intent actual
+    }
+
+    private fun handleAlarmIntent(intent: Intent?) {
+        if (intent == null) {
+            Log.d("MainActivity", "handleAlarmIntent: intent is null")
+            return
+        }
+        
+        val alarmIdFromIntent = intent.getIntExtra("alarmId", -1)
+        Log.d("MainActivity", "handleAlarmIntent: action=${intent.action}, alarmId=$alarmIdFromIntent")
+
+        when (intent.action) {
+            "STOP_ALARM_FROM_NOTIFICATION" -> {
+                if (alarmIdFromIntent != -1) {
+                    Log.d("MainActivity", "Stopping alarm from notification: $alarmIdFromIntent")
+                    AlarmReceiver.stopAlarmSound() // Detiene sonido/vibración
+                    cancelAlarm(alarmIdFromIntent) // Cancela la alarma en AlarmManager
+                    // Informa a Flutter para actualizar la UI y posiblemente eliminar la alarma de la lista
+                    Log.d("MainActivity", "Invoking Flutter method: alarmManuallyStopped")
+                    methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmIdFromIntent))
+                    // Cierra la pantalla de alarma si está abierta
+                    Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
+                    methodChannel?.invokeMethod("closeAlarmScreenIfOpen", mapOf("alarmId" to alarmIdFromIntent))
                 }
-                else -> {
-                    result.notImplemented()
+            }
+            "SNOOZE_ALARM_FROM_NOTIFICATION" -> {
+                if (alarmIdFromIntent != -1) {
+                    Log.d("MainActivity", "Snoozing alarm from notification: $alarmIdFromIntent")
+                    AlarmReceiver.stopAlarmSound()
+                    cancelAlarm(alarmIdFromIntent) // Cancela la alarma actual
+                    
+                    val calendar = Calendar.getInstance()
+                    calendar.add(Calendar.MINUTE, 1) // Posponer 1 minuto
+                    Log.d("MainActivity", "Setting new alarm for 1 minute later: ${calendar.time}")
+                    setAlarm(
+                        timeInMillis = calendar.timeInMillis,
+                        alarmId = alarmIdFromIntent, // Reutiliza el ID o genera uno nuevo si es necesario
+                        title = intent.getStringExtra("title") ?: "Alarma Pospuesta",
+                        message = intent.getStringExtra("message") ?: "¡Es hora de despertar!",
+                        screenRoute = "/alarm"
+                    )
+                    // Informa a Flutter para actualizar la UI
+                    Log.d("MainActivity", "Invoking Flutter method: alarmManuallySnoozed")
+                    methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf("alarmId" to alarmIdFromIntent, "newTimeInMillis" to calendar.timeInMillis))
+                    Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
+                    methodChannel?.invokeMethod("closeAlarmScreenIfOpen", mapOf("alarmId" to alarmIdFromIntent))
+                }
+            }
+            else -> {
+                 // Lógica existente para mostrar la pantalla de alarma cuando la app se abre por la notificación
+                val title = intent.getStringExtra("title")
+                val message = intent.getStringExtra("message")
+                val screenRoute = intent.getStringExtra("screenRoute")
+                val autoShow = intent.getBooleanExtra("autoShowAlarm", false)
+
+                Log.d("MainActivity", "Checking if should show alarm screen - alarmId: $alarmIdFromIntent, screenRoute: $screenRoute, autoShow: $autoShow")
+                if (alarmIdFromIntent != -1 && screenRoute == "/alarm" && autoShow) {
+                    Log.d("MainActivity", "Setting window flags to show over lock screen")
+                    try {
+                        window.addFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        )
+                        Log.d("MainActivity", "Window flags set successfully")
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Error setting window flags", e)
+                    }
+                    
+                    Log.d("MainActivity", "Scheduling delayed call to show alarm screen")
+                    android.os.Handler(Looper.getMainLooper()).postDelayed({
+                        Log.d("MainActivity", "Now showing alarm screen via Flutter")
+                        methodChannel?.invokeMethod(
+                            "showAlarmScreen",
+                            mapOf(
+                                "alarmId" to alarmIdFromIntent,
+                                "title" to (title ?: "Alarma"),
+                                "message" to (message ?: "¡Es hora de despertar!")
+                            )
+                        )
+                    }, 500)
+                    // Limpia el extra para que no se vuelva a procesar si la actividad se recrea
+                    intent.removeExtra("autoShowAlarm") 
                 }
             }
         }
@@ -140,14 +292,12 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        // Configurar la alarma para que se active en el tiempo especificado
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
         } else {
             alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
         }
         
-        // Iniciar el servicio en primer plano para mantener la aplicación activa
         val serviceIntent = Intent(this, AlarmService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
@@ -174,8 +324,6 @@ class MainActivity : FlutterActivity() {
     private fun getSystemAlarmSounds(): List<Map<String, String>> {
         val soundsList = mutableListOf<Map<String, String>>()
         
-        // Obtener sonidos de alarma del sistema
-        val alarmSoundsUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         val ringtoneManager = RingtoneManager(this)
         ringtoneManager.setType(RingtoneManager.TYPE_ALARM)
         val cursor = ringtoneManager.cursor
@@ -192,10 +340,6 @@ class MainActivity : FlutterActivity() {
     private fun playSound(soundUri: Uri) {
         val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
         ringtone.play()
-    }
-    
-    private fun stopSound() {
-        // Implementación para detener el sonido actual
     }
     
     private fun vibrate(pattern: LongArray) {
@@ -225,10 +369,9 @@ class MainActivity : FlutterActivity() {
                 description = descriptionText
                 enableVibration(true)
                 enableLights(true)
-                setBypassDnd(true)  // Permitir que las notificaciones pasen el modo No molestar
+                setBypassDnd(true)
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 
-                // Configurar atributos de audio para el canal
                 val audioAttributes = AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .setUsage(AudioAttributes.USAGE_ALARM)
@@ -248,26 +391,13 @@ class MainActivity : FlutterActivity() {
                     val alarmId = intent.getIntExtra("alarmId", 0)
                     val title = intent.getStringExtra("title") ?: "Alarma"
                     val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
-                    val screenRoute = intent.getStringExtra("screenRoute") ?: "/alarm"
                     
-                    // Mostrar notificación
                     showNotification(alarmId, title, message)
-                    
-                    // Iniciar la actividad Flutter con la ruta específica
-                    val launchIntent = Intent(context, MainActivity::class.java).apply {
-                        action = Intent.ACTION_MAIN
-                        addCategory(Intent.CATEGORY_LAUNCHER)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra("screenRoute", screenRoute)
-                        putExtra("alarmId", alarmId)
-                    }
-                    context.startActivity(launchIntent)
                 }
             }
         }
         
-        // Modificar esta línea para incluir la flag RECEIVER_NOT_EXPORTED en Android 14+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14 (API 34)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             registerReceiver(alarmReceiver, IntentFilter(ALARM_ACTION), Context.RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(alarmReceiver, IntentFilter(ALARM_ACTION))
@@ -307,6 +437,19 @@ class MainActivity : FlutterActivity() {
             unregisterReceiver(alarmReceiver)
         } catch (e: Exception) {
             // El receptor puede no estar registrado
+        }
+    }
+    
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 100) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d("MainActivity", "POST_NOTIFICATIONS permission granted")
+                // Aquí puedes realizar acciones adicionales si el permiso fue concedido
+            } else {
+                Log.d("MainActivity", "POST_NOTIFICATIONS permission denied")
+                // Aquí puedes manejar el caso en que el permiso fue denegado
+            }
         }
     }
 }

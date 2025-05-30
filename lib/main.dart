@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
+import 'dart:convert'; // Para jsonEncode y jsonDecode
+import 'package:shared_preferences/shared_preferences.dart';
 
-// Canal de comunicación con el código nativo
 const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
 void main() {
-  // Asegurarse de que las vinculaciones de Flutter estén inicializadas
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MainApp());
 }
@@ -24,23 +25,46 @@ class MainApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const HomePage(),
-        '/alarm': (context) => const AlarmPage(),
-      },
-      // Manejar rutas dinámicas que pueden venir desde el código nativo
-      onGenerateRoute: (settings) {
-        if (settings.name == '/alarm') {
-          // Extraer argumentos si están disponibles
-          final args = settings.arguments as Map<String, dynamic>?;
-          return MaterialPageRoute(
-            builder: (context) => AlarmPage(
-              alarmId: args?['alarmId'] as int? ?? 0,
-            ),
-          );
-        }
-        return null;
+        // Asegúrate de que AlarmScreen pueda manejar argumentos nulos si se navega directamente
+        '/alarm': (context) => AlarmScreen(
+          arguments: ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?,
+        ),
       },
     );
   }
+}
+
+// Modelo simple para la alarma
+class Alarm {
+  final int id;
+  final DateTime time;
+  final String title;
+  final String message;
+  bool isActive; // Para saber si la alarma está activa o ya sonó
+
+  Alarm({
+    required this.id,
+    required this.time,
+    required this.title,
+    required this.message,
+    this.isActive = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'time': time.toIso8601String(),
+        'title': title,
+        'message': message,
+        'isActive': isActive,
+      };
+
+  factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
+        id: json['id'] as int,
+        time: DateTime.parse(json['time'] as String),
+        title: json['title'] as String,
+        message: json['message'] as String,
+        isActive: json['isActive'] as bool? ?? true, // Valor por defecto si no existe
+      );
 }
 
 class HomePage extends StatefulWidget {
@@ -51,54 +75,71 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final List<Map<String, dynamic>> _alarms = [];
-  List<Map<String, String>> _systemSounds = [];
+  final List<Alarm> _alarms = [];
+  // List<Map<String, String>> _systemSounds = []; // Si aún lo usas
+  static const String _alarmsKey = 'alarms_list';
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkInitialRoute();
-  }
   @override
   void initState() {
     super.initState();
-    _loadSystemSounds();
-    // Elimina _checkInitialRoute() de aquí
+    platform.setMethodCallHandler(_handleNativeCalls);
+    _loadAlarms();
   }
 
-  Future<void> _checkInitialRoute() async {
-    try {
-      // Obtener la ruta inicial si la aplicación se inició desde una notificación
-      final args = ModalRoute.of(context)?.settings.arguments;
-      if (args != null && args is Map<String, dynamic>) {
-        final screenRoute = args['screenRoute'] as String?;
-        final alarmId = args['alarmId'] as int?;
-        
-        if (screenRoute != null && alarmId != null) {
-          // Navegar a la pantalla de alarma
-          Navigator.pushNamed(
-            context,
-            screenRoute,
-            arguments: {'alarmId': alarmId},
+  Future<void> _handleNativeCalls(MethodCall call) async {
+    final args = call.arguments != null ? Map<String, dynamic>.from(call.arguments) : {};
+    final alarmId = args['alarmId'] as int?;
+
+    switch (call.method) {
+      case 'showAlarmScreen':
+        // Asegúrate de que el contexto es válido antes de navegar
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            '/alarm',
+            (route) => false,
+            arguments: args,
           );
         }
-      }
-    } catch (e) {
-      print('Error al verificar la ruta inicial: $e');
+        break;
+      case 'alarmManuallyStopped':
+        if (alarmId != null) {
+          _markAlarmAsInactive(alarmId);
+        }
+        break;
+      case 'alarmManuallySnoozed':
+        if (alarmId != null) {
+          final newTimeInMillis = args['newTimeInMillis'] as int?;
+          if (newTimeInMillis != null) {
+            _updateAlarmTime(alarmId, DateTime.fromMillisecondsSinceEpoch(newTimeInMillis));
+          }
+        }
+        break;
+      case 'closeAlarmScreenIfOpen':
+         // Si la pantalla de alarma está abierta y coincide el ID, ciérrala.
+         // Esto es un poco más complejo de implementar directamente aquí
+         // ya que necesitarías una forma de que AlarmScreen escuche este evento.
+         // Por ahora, la navegación desde AlarmScreen se encarga de cerrarla.
+        break;
     }
   }
 
-  Future<void> _loadSystemSounds() async {
-    try {
-      final result = await platform.invokeMethod('getSystemSounds');
+  Future<void> _loadAlarms() async {
+    final prefs = await SharedPreferences.getInstance();
+    final alarmsString = prefs.getStringList(_alarmsKey);
+    if (alarmsString != null) {
       setState(() {
-        _systemSounds = List<Map<String, String>>.from(
-          (result as List).map((item) => Map<String, String>.from(item)),
-        );
+        _alarms.clear();
+        _alarms.addAll(alarmsString.map((s) => Alarm.fromJson(jsonDecode(s))));
+        // Opcional: Re-programar alarmas activas si la app se reinició
+        // _rescheduleActiveAlarms(); 
       });
-    } on PlatformException catch (e) {
-      print('Error al cargar sonidos del sistema: ${e.message}');
     }
+  }
+
+  Future<void> _saveAlarms() async {
+    final prefs = await SharedPreferences.getInstance();
+    final alarmsString = _alarms.map((a) => jsonEncode(a.toJson())).toList();
+    await prefs.setStringList(_alarmsKey, alarmsString);
   }
 
   Future<void> _setAlarm() async {
@@ -107,48 +148,43 @@ class _HomePageState extends State<HomePage> {
       initialTime: TimeOfDay.now(),
     );
 
-    if (time != null) {
-      // Calcular el tiempo en milisegundos
+    if (time != null && mounted) {
       final now = DateTime.now();
-      var alarmTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        time.hour,
-        time.minute,
-      );
-
-      // Si la hora seleccionada es anterior a la hora actual, programar para mañana
+      var alarmTime = DateTime(now.year, now.month, now.day, time.hour, time.minute);
       if (alarmTime.isBefore(now)) {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      final alarmId = DateTime.now().millisecondsSinceEpoch % 10000;
+      final alarmId = DateTime.now().millisecondsSinceEpoch % 100000; // ID único
+      const title = 'Alarma';
+      const message = '¡Es hora de despertar!';
 
       try {
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': alarmTime.millisecondsSinceEpoch,
           'alarmId': alarmId,
-          'title': 'Alarma',
-          'message': '¡Es hora de despertar!',
+          'title': title,
+          'message': message,
           'screenRoute': '/alarm',
         });
 
+        final newAlarm = Alarm(
+          id: alarmId,
+          time: alarmTime,
+          title: title,
+          message: message,
+        );
         setState(() {
-          _alarms.add({
-            'id': alarmId,
-            'time': alarmTime,
-            'title': 'Alarma',
-            'message': '¡Es hora de despertar!',
-          });
+          _alarms.add(newAlarm);
         });
+        await _saveAlarms();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Alarma configurada correctamente')),
+          const SnackBar(content: Text('Alarma configurada')), 
         );
       } on PlatformException catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al configurar la alarma: ${e.message}')),
+          SnackBar(content: Text('Error al configurar alarma: ${e.message}')),
         );
       }
     }
@@ -158,16 +194,45 @@ class _HomePageState extends State<HomePage> {
     try {
       await platform.invokeMethod('cancelAlarm', {'alarmId': alarmId});
       setState(() {
-        _alarms.removeWhere((alarm) => alarm['id'] == alarmId);
+        _alarms.removeWhere((alarm) => alarm.id == alarmId);
       });
+      await _saveAlarms();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Alarma cancelada correctamente')),
+        const SnackBar(content: Text('Alarma cancelada')), 
       );
     } on PlatformException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cancelar la alarma: ${e.message}')),
+        SnackBar(content: Text('Error al cancelar alarma: ${e.message}')),
       );
     }
+  }
+
+  // Marcar alarma como inactiva en lugar de borrarla
+  Future<void> _markAlarmAsInactive(int alarmId) async {
+    setState(() {
+      final index = _alarms.indexWhere((a) => a.id == alarmId);
+      if (index != -1) {
+        _alarms[index].isActive = false;
+      }
+    });
+    await _saveAlarms();
+  }
+
+  // Actualizar la hora de una alarma (para posponer)
+  Future<void> _updateAlarmTime(int alarmId, DateTime newTime) async {
+    setState(() {
+      final index = _alarms.indexWhere((a) => a.id == alarmId);
+      if (index != -1) {
+        _alarms[index] = Alarm(
+          id: _alarms[index].id,
+          time: newTime,
+          title: _alarms[index].title, // O actualizar si es necesario
+          message: _alarms[index].message,
+          isActive: true, // Se reactiva al posponer
+        );
+      }
+    });
+    await _saveAlarms();
   }
 
   @override
@@ -183,14 +248,19 @@ class _HomePageState extends State<HomePage> {
               itemBuilder: (context, index) {
                 final alarm = _alarms[index];
                 return ListTile(
-                  title: Text('Alarma ${index + 1}'),
+                  title: Text(alarm.title),
                   subtitle: Text(
-                    '${alarm['time'].hour.toString().padLeft(2, '0')}:${alarm['time'].minute.toString().padLeft(2, '0')}',
+                    '${alarm.time.hour.toString().padLeft(2, '0')}:${alarm.time.minute.toString().padLeft(2, '0')} - ${alarm.isActive ? "Activa" : "Sonó"}',
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () => _cancelAlarm(alarm['id']),
-                  ),
+                  trailing: alarm.isActive 
+                    ? IconButton(
+                        icon: const Icon(Icons.delete),
+                        onPressed: () => _cancelAlarm(alarm.id),
+                      )
+                    : IconButton( // Opción para reactivar o borrar alarmas pasadas
+                        icon: const Icon(Icons.refresh),
+                        onPressed: () { /* Lógica para reactivar o borrar */ },
+                      ),
                 );
               },
             ),
@@ -203,116 +273,78 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class AlarmPage extends StatefulWidget {
-  final int alarmId;
-
-  const AlarmPage({super.key, this.alarmId = 0});
+class AlarmScreen extends StatefulWidget {
+  final Map<String, dynamic>? arguments;
+  const AlarmScreen({Key? key, this.arguments}) : super(key: key);
 
   @override
-  State<AlarmPage> createState() => _AlarmPageState();
+  State<AlarmScreen> createState() => _AlarmScreenState();
 }
 
-class _AlarmPageState extends State<AlarmPage> {
-  bool _isPlaying = false;
+class _AlarmScreenState extends State<AlarmScreen> {
+  int alarmId = 0;
+  String title = 'Alarma';
+  String message = '¡Es hora de despertar!';
+  // bool initialized = false; // No es necesario con el constructor
 
   @override
   void initState() {
     super.initState();
-    // Iniciar vibración y sonido cuando se muestra la pantalla de alarma
-    _startAlarm();
-  }
-
-  Future<void> _startAlarm() async {
-    try {
-      // Patrón de vibración: 0ms de retraso, 500ms encendido, 500ms apagado, 500ms encendido
-      await platform.invokeMethod('vibrate', {
-        'pattern': [0, 500, 500, 500],
-      });
-
-      // Reproducir sonido de alarma predeterminado
-      await platform.invokeMethod('playSound', {
-        'soundUri': '',  // Uri vacío para usar el sonido predeterminado
-      });
-
-      setState(() {
-        _isPlaying = true;
-      });
-    } on PlatformException catch (e) {
-      print('Error al iniciar la alarma: ${e.message}');
+    if (widget.arguments != null) {
+        alarmId = widget.arguments!['alarmId'] ?? 0;
+        title = widget.arguments!['title'] ?? 'Alarma';
+        message = widget.arguments!['message'] ?? '¡Es hora de despertar!';
     }
   }
+
+  // @override
+  // void didChangeDependencies() {
+  //   super.didChangeDependencies();
+  //   if (!initialized) {
+  //     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+  //     if (args != null) {
+  //       alarmId = args['alarmId'] ?? 0;
+  //       title = args['title'] ?? 'Alarma';
+  //       message = args['message'] ?? '¡Es hora de despertar!';
+  //     }
+  //     initialized = true;
+  //   }
+  // }
 
   Future<void> _stopAlarm() async {
-    try {
-      await platform.invokeMethod('stopSound');
-      setState(() {
-        _isPlaying = false;
-      });
-    } on PlatformException catch (e) {
-      print('Error al detener la alarma: ${e.message}');
+    if (alarmId != 0) {
+      await platform.invokeMethod('stopAlarm', {'alarmId': alarmId});
     }
+    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  @override
-  void dispose() {
-    // Detener la alarma cuando se cierra la pantalla
-    _stopAlarm();
-    super.dispose();
+  Future<void> _snoozeAlarm() async {
+    if (alarmId != 0) {
+      await platform.invokeMethod('snoozeAlarm', {'alarmId': alarmId});
+    }
+    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.red.shade100,
+      appBar: AppBar(title: Text(title)),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.alarm,
-              size: 100,
-              color: Colors.red,
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              '¡Es hora de despertar!',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
+            Text(message, style: const TextStyle(fontSize: 24)),
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: () {
-                _stopAlarm();
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-              ),
-              child: const Text(
-                'Detener',
-                style: TextStyle(fontSize: 18),
-              ),
+              onPressed: _stopAlarm,
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+              child: const Text('Apagar', style: TextStyle(fontSize: 18)),
             ),
             const SizedBox(height: 20),
-            TextButton(
-              onPressed: () {
-                _stopAlarm();
-                // Posponer la alarma por 5 minutos
-                final now = DateTime.now();
-                final snoozeTime = now.add(const Duration(minutes: 5));
-                platform.invokeMethod('setAlarm', {
-                  'timeInMillis': snoozeTime.millisecondsSinceEpoch,
-                  'alarmId': widget.alarmId,
-                  'title': 'Alarma (pospuesta)',
-                  'message': '¡Es hora de despertar!',
-                  'screenRoute': '/alarm',
-                });
-                Navigator.pop(context);
-              },
-              child: const Text(
-                'Posponer 5 minutos',
-                style: TextStyle(fontSize: 16),
-              ),
+            ElevatedButton(
+              onPressed: _snoozeAlarm,
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+              child: const Text('Retrasar 1 minuto', style: TextStyle(fontSize: 18)),
             ),
           ],
         ),

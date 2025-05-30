@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.example.the_good_alarm"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "27.0.12077973"  // Actualizado a la versión requerida
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
