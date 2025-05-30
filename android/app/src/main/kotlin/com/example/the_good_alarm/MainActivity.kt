@@ -179,6 +179,16 @@ class MainActivity : FlutterActivity() {
             }
         }
         
+        // Solicitar permiso para programar alarmas exactas en Android 12 (S) y superiores
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (!alarmManager.canScheduleExactAlarms()) {
+                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                startActivity(intent)
+                Log.d("MainActivity", "Redirecting to exact alarm permission settings")
+            }
+        }
+        
         handleAlarmIntent(intent)
     }
 

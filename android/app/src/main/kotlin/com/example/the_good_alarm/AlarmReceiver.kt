@@ -85,12 +85,17 @@ class AlarmReceiver : BroadcastReceiver() {
             // Play sound and vibrate
             try {
                 Log.d("AlarmReceiver", "Setting up ringtone")
-                currentRingtone = RingtoneManager.getRingtone(
-                    context, 
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                )
-                currentRingtone?.play()
-                Log.d("AlarmReceiver", "Ringtone started playing")
+                // Verificar si ya hay un sonido reproduciéndose
+                if (currentRingtone == null || !currentRingtone!!.isPlaying) {
+                    currentRingtone = RingtoneManager.getRingtone(
+                        context, 
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    )
+                    currentRingtone?.play()
+                    Log.d("AlarmReceiver", "Ringtone started playing")
+                } else {
+                    Log.d("AlarmReceiver", "Ringtone already playing, skipping")
+                }
             } catch (e: Exception) {
                 Log.e("AlarmReceiver", "Error playing ringtone", e)
             }
@@ -170,8 +175,9 @@ class AlarmReceiver : BroadcastReceiver() {
                         this.description = "Channel for alarm notifications"
                         this.setBypassDnd(true)
                         this.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                        this.enableVibration(true)
+                        this.enableVibration(false)  // Desactivar vibración del canal
                         this.enableLights(true)
+                        this.setSound(null, null)  // Desactivar sonido del canal
                     }
                     notificationManager.createNotificationChannel(channel)
                     Log.d("AlarmReceiver", "Notification channel created successfully")
@@ -194,6 +200,8 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setAutoCancel(false)
                 .setOngoing(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // Asegura que sea visible en la pantalla de bloqueo
+                .setSound(null) // Asegurarse de que la notificación no reproduzca sonido
+                .setVibrate(null) // Asegurarse de que la notificación no vibre
 
             try {
                 Log.d("AlarmReceiver", "Showing notification with ID: $alarmId")
