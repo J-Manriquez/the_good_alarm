@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'home_page.dart'; // Importar la nueva pantalla HomePage
 import 'alarm_screen.dart'; // Importar la nueva pantalla AlarmScreen
+import 'settings_screen.dart'; // Importar la nueva pantalla SettingsScreen
 
 // Mover la constante platform a los archivos donde se usa (HomePage y AlarmScreen)
 // const platform = MethodChannel('com.example.the_good_alarm/alarm');
@@ -31,6 +32,7 @@ class MainApp extends StatelessWidget {
         '/alarm': (context) => AlarmScreen(
           arguments: ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?,
         ),
+        '/settings': (context) => const SettingsScreen(), // Nueva ruta
       },
     );
   }
