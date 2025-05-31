@@ -18,7 +18,7 @@ class Alarm {
     required this.time,
     required this.title,
     required this.message,
-    this.isActive = true,
+    this.isActive = true, // Por defecto, la alarma está activa al crearse
   });
 
   Map<String, dynamic> toJson() => {
@@ -34,7 +34,7 @@ class Alarm {
         time: DateTime.parse(json['time'] as String),
         title: json['title'] as String,
         message: json['message'] as String,
-        isActive: json['isActive'] as bool? ?? true, // Valor por defecto si no existe
+        isActive: json['isActive'] as bool? ?? true, 
       );
 }
 
@@ -48,7 +48,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final List<Alarm> _alarms = [];
   static const String _alarmsKey = 'alarms_list';
-  static const platform = MethodChannel('com.example.the_good_alarm/alarm'); // Mover el MethodChannel aquí si solo se usa en HomePage
+  static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
   @override
   void initState() {
@@ -71,9 +71,9 @@ class _HomePageState extends State<HomePage> {
           );
         }
         break;
-      case 'alarmManuallyStopped':
+      case 'alarmManuallyStopped': // Cuando la alarma suena y se detiene desde la pantalla de alarma o notificación
         if (alarmId != null) {
-          _markAlarmAsInactive(alarmId);
+          _toggleAlarmState(alarmId, false); // Marcar como inactiva
         }
         break;
       case 'alarmManuallySnoozed':
@@ -120,11 +120,20 @@ class _HomePageState extends State<HomePage> {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      final alarmId = DateTime.now().millisecondsSinceEpoch % 100000; // ID único
+      final alarmId = DateTime.now().millisecondsSinceEpoch % 100000;
       const title = 'Alarma';
       const message = '¡Es hora de despertar!';
 
+      // La alarma se crea activa por defecto (isActive = true en el constructor de Alarm)
+      final newAlarm = Alarm(
+        id: alarmId,
+        time: alarmTime,
+        title: title,
+        message: message,
+      );
+
       try {
+        // Solo se programa en Android si está activa
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': alarmTime.millisecondsSinceEpoch,
           'alarmId': alarmId,
@@ -133,19 +142,13 @@ class _HomePageState extends State<HomePage> {
           'screenRoute': '/alarm',
         });
 
-        final newAlarm = Alarm(
-          id: alarmId,
-          time: alarmTime,
-          title: title,
-          message: message,
-        );
         setState(() {
           _alarms.add(newAlarm);
         });
         await _saveAlarms();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Alarma configurada')), 
+          const SnackBar(content: Text('Alarma configurada y activa')),
         );
       } on PlatformException catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -155,47 +158,114 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _cancelAlarm(int alarmId) async {
-    try {
-      await platform.invokeMethod('cancelAlarm', {'alarmId': alarmId});
+  // Modificado para manejar la activación/desactivación de la alarma
+  Future<void> _toggleAlarmState(int alarmId, bool isActive) async {
+    final index = _alarms.indexWhere((a) => a.id == alarmId);
+    if (index != -1) {
+      final alarm = _alarms[index];
       setState(() {
-        _alarms.removeWhere((alarm) => alarm.id == alarmId);
+        alarm.isActive = isActive;
       });
-      await _saveAlarms();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Alarma cancelada')), 
-      );
-    } on PlatformException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cancelar alarma: ${e.message}')),
-      );
+
+      try {
+        if (isActive) {
+          // Si se activa, programar la alarma
+          await platform.invokeMethod('setAlarm', {
+            'timeInMillis': alarm.time.millisecondsSinceEpoch,
+            'alarmId': alarm.id,
+            'title': alarm.title,
+            'message': alarm.message,
+            'screenRoute': '/alarm',
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Alarma activada')),
+          );
+        } else {
+          // Si se desactiva, cancelar la alarma programada
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Alarma desactivada')),
+          );
+        }
+        await _saveAlarms();
+      } on PlatformException catch (e) {
+        // Revertir el estado si hay un error con la plataforma nativa
+        setState(() {
+          alarm.isActive = !isActive;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al ${isActive ? "activar" : "desactivar"} alarma: ${e.message}')),
+        );
+      }
     }
   }
 
-  Future<void> _markAlarmAsInactive(int alarmId) async {
-    setState(() {
-      final index = _alarms.indexWhere((a) => a.id == alarmId);
-      if (index != -1) {
-        _alarms[index].isActive = false;
-      }
-    });
-    await _saveAlarms();
-  }
-
-  Future<void> _updateAlarmTime(int alarmId, DateTime newTime) async {
-    setState(() {
-      final index = _alarms.indexWhere((a) => a.id == alarmId);
-      if (index != -1) {
-        _alarms[index] = Alarm(
-          id: _alarms[index].id,
-          time: newTime,
-          title: _alarms[index].title,
-          message: _alarms[index].message,
-          isActive: true,
+  Future<void> _deleteAlarm(int alarmId) async {
+    final index = _alarms.indexWhere((a) => a.id == alarmId);
+    if (index != -1) {
+      final alarm = _alarms[index];
+      try {
+        // Si la alarma estaba activa, también cancelarla en la plataforma nativa
+        if (alarm.isActive) {
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+        }
+        setState(() {
+          _alarms.removeAt(index);
+        });
+        await _saveAlarms();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Alarma eliminada')),
+        );
+      } on PlatformException catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al eliminar alarma: ${e.message}')),
         );
       }
-    });
-    await _saveAlarms();
+    }
+  }
+
+  // Ya no se usa _markAlarmAsInactive, se usa _toggleAlarmState
+  // Future<void> _markAlarmAsInactive(int alarmId) async { ... }
+
+  Future<void> _updateAlarmTime(int alarmId, DateTime newTime) async {
+    final index = _alarms.indexWhere((a) => a.id == alarmId);
+    if (index != -1) {
+      final oldAlarm = _alarms[index];
+      final newAlarmData = Alarm(
+        id: oldAlarm.id,
+        time: newTime,
+        title: oldAlarm.title, 
+        message: oldAlarm.message,
+        isActive: true, // Al posponer, la alarma se reactiva
+      );
+
+      try {
+        // Cancelar la anterior si estaba activa
+        if (oldAlarm.isActive) {
+          await platform.invokeMethod('cancelAlarm', {'alarmId': oldAlarm.id});
+        }
+        // Programar la nueva
+        await platform.invokeMethod('setAlarm', {
+          'timeInMillis': newAlarmData.time.millisecondsSinceEpoch,
+          'alarmId': newAlarmData.id,
+          'title': newAlarmData.title,
+          'message': newAlarmData.message,
+          'screenRoute': '/alarm',
+        });
+
+        setState(() {
+          _alarms[index] = newAlarmData;
+        });
+        await _saveAlarms();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Alarma pospuesta y reactivada')),
+        );
+      } on PlatformException catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al posponer alarma: ${e.message}')),
+        );
+      }
+    }
   }
 
   @override
@@ -211,19 +281,32 @@ class _HomePageState extends State<HomePage> {
               itemBuilder: (context, index) {
                 final alarm = _alarms[index];
                 return ListTile(
+                  leading: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    onSelected: (String result) {
+                      if (result == 'delete') {
+                        _deleteAlarm(alarm.id);
+                      }
+                    },
+                    itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text('Eliminar'),
+                      ),
+                    ],
+                  ),
                   title: Text(alarm.title),
                   subtitle: Text(
-                    '${alarm.time.hour.toString().padLeft(2, '0')}:${alarm.time.minute.toString().padLeft(2, '0')} - ${alarm.isActive ? "Activa" : "Sonó"}',
+                    '${alarm.time.hour.toString().padLeft(2, '0')}:${alarm.time.minute.toString().padLeft(2, '0')}',
                   ),
-                  trailing: alarm.isActive 
-                    ? IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () => _cancelAlarm(alarm.id),
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.refresh),
-                        onPressed: () { /* Lógica para reactivar o borrar */ },
-                      ),
+                  trailing: Switch(
+                    value: alarm.isActive,
+                    onChanged: (bool value) {
+                      _toggleAlarmState(alarm.id, value);
+                    },
+                    activeColor: Colors.green, // Color cuando está activo
+                    inactiveThumbColor: Colors.black, // Color del "pulgar" cuando está inactivo
+                  ),
                 );
               },
             ),
