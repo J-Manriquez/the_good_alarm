@@ -57,6 +57,67 @@ class _HomePageState extends State<HomePage> {
     _loadAlarms();
   }
 
+  Future<Map<String, String>?> _showAlarmDetailsDialog({
+    String? initialTitle,
+    String? initialMessage,
+  }) async {
+    final titleController = TextEditingController(text: initialTitle);
+    final messageController = TextEditingController(text: initialMessage);
+    final formKey = GlobalKey<FormState>();
+
+    return showDialog<Map<String, String>>(
+      context: context,
+      barrierDismissible: false, // User must tap button!
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(initialTitle == null ? 'Nueva Alarma' : 'Editar Alarma'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: ListBody(
+                children: <Widget>[
+                  TextFormField(
+                    controller: titleController,
+                    decoration: const InputDecoration(hintText: 'Título'),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Por favor, ingrese un título';
+                      }
+                      return null;
+                    },
+                  ),
+                  TextFormField(
+                    controller: messageController,
+                    decoration: const InputDecoration(hintText: 'Mensaje (opcional)'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancelar'),
+              onPressed: () {
+                Navigator.of(context).pop(null);
+              },
+            ),
+            TextButton(
+              child: const Text('Guardar'),
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.of(context).pop({
+                    'title': titleController.text,
+                    'message': messageController.text,
+                  });
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _handleNativeCalls(MethodCall call) async {
     final args = call.arguments != null ? Map<String, dynamic>.from(call.arguments) : {};
     final alarmId = args['alarmId'] as int?;
@@ -114,6 +175,11 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (time != null && mounted) {
+      // Get title and message from user
+      final alarmDetails = await _showAlarmDetailsDialog();
+
+      if (alarmDetails == null) return; // User cancelled dialog
+
       final now = DateTime.now();
       var alarmTime = DateTime(now.year, now.month, now.day, time.hour, time.minute);
       if (alarmTime.isBefore(now)) {
@@ -121,10 +187,9 @@ class _HomePageState extends State<HomePage> {
       }
 
       final alarmId = DateTime.now().millisecondsSinceEpoch % 100000;
-      const title = 'Alarma';
-      const message = '¡Es hora de despertar!';
+      final title = alarmDetails['title']!.isNotEmpty ? alarmDetails['title']! : 'Alarma';
+      final message = alarmDetails['message']!.isNotEmpty ? alarmDetails['message']! : '¡Es hora de despertar!';
 
-      // La alarma se crea activa por defecto (isActive = true en el constructor de Alarm)
       final newAlarm = Alarm(
         id: alarmId,
         time: alarmTime,
@@ -133,7 +198,6 @@ class _HomePageState extends State<HomePage> {
       );
 
       try {
-        // Solo se programa en Android si está activa
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': alarmTime.millisecondsSinceEpoch,
           'alarmId': alarmId,
@@ -164,7 +228,21 @@ class _HomePageState extends State<HomePage> {
       initialTime: TimeOfDay.fromDateTime(alarmToEdit.time),
     );
 
-    if (newTimeOfDay != null && mounted) {
+    if (newTimeOfDay == null) return; // User cancelled time picker
+
+    // Get updated title and message from user
+    final alarmDetails = await _showAlarmDetailsDialog(
+      initialTitle: alarmToEdit.title,
+      initialMessage: alarmToEdit.message,
+    );
+
+    // If user cancels the details dialog, we still proceed with time change if new time was picked
+    // but keep original title/message.
+    // If they confirm, we use new title/message.
+    final String title = alarmDetails?['title'] ?? alarmToEdit.title;
+    final String message = alarmDetails?['message'] ?? alarmToEdit.message;
+
+    if (mounted) {
       final now = DateTime.now();
       var newAlarmTime = DateTime(now.year, now.month, now.day, newTimeOfDay.hour, newTimeOfDay.minute);
       if (newAlarmTime.isBefore(now)) {
@@ -172,17 +250,15 @@ class _HomePageState extends State<HomePage> {
       }
 
       try {
-        // If the alarm was active, cancel the old one first
         if (alarmToEdit.isActive) {
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarmToEdit.id});
         }
 
-        // Set the new alarm (or re-set it with new time)
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': newAlarmTime.millisecondsSinceEpoch,
-          'alarmId': alarmToEdit.id, // Use the same ID
-          'title': alarmToEdit.title,
-          'message': alarmToEdit.message,
+          'alarmId': alarmToEdit.id,
+          'title': title, // Use potentially updated title
+          'message': message, // Use potentially updated message
           'screenRoute': '/alarm',
         });
 
@@ -192,9 +268,9 @@ class _HomePageState extends State<HomePage> {
             _alarms[index] = Alarm(
               id: alarmToEdit.id,
               time: newAlarmTime,
-              title: alarmToEdit.title,
-              message: alarmToEdit.message,
-              isActive: true, // Editing an alarm makes it active
+              title: title, // Use potentially updated title
+              message: message, // Use potentially updated message
+              isActive: true,
             );
           }
         });
