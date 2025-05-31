@@ -170,7 +170,7 @@ class AlarmReceiver : BroadcastReceiver() {
                     val channel = NotificationChannel(
                         NOTIFICATION_CHANNEL_ID, 
                         "Alarm Notifications", 
-                        NotificationManager.IMPORTANCE_HIGH
+                        NotificationManager.IMPORTANCE_LOW  // Cambiar de IMPORTANCE_HIGH a IMPORTANCE_LOW
                     ).apply {
                         this.description = "Channel for alarm notifications"
                         this.setBypassDnd(true)
