@@ -227,14 +227,21 @@ class _HomePageState extends State<HomePage> {
       if (alarmDetails == null) return;
 
       final now = DateTime.now();
+      // Normalize alarmTime to have 0 seconds and 0 milliseconds
       var alarmTime = DateTime(
         now.year,
         now.month,
         now.day,
         time.hour,
         time.minute,
+        0, // seconds
+        0, // milliseconds
       );
-      if (alarmTime.isBefore(now)) {
+
+      // If the normalized alarm time is before or exactly now, set it for the next day.
+      // Using isBefore or equals now, considering only H:M precision.
+      final nowNormalized = DateTime(now.year, now.month, now.day, now.hour, now.minute, 0, 0);
+      if (alarmTime.isBefore(nowNormalized) || alarmTime.isAtSameMomentAs(nowNormalized)) {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
@@ -262,7 +269,7 @@ class _HomePageState extends State<HomePage> {
           'screenRoute': '/alarm',
         });
         _alarms.add(newAlarm);
-        await _saveAlarms(); // Esto llamará a setState y re-inicializará grupos
+        await _saveAlarms(); 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Alarma configurada y activa')),
         );
@@ -280,38 +287,46 @@ class _HomePageState extends State<HomePage> {
       initialTime: TimeOfDay.fromDateTime(alarmToEdit.time),
     );
     if (newTimeOfDay == null) return;
+
     final alarmDetails = await _showAlarmDetailsDialog(
       initialTitle: alarmToEdit.title,
       initialMessage: alarmToEdit.message,
     );
+    // Use existing details if new ones are not provided or dialog is cancelled
     final String title = alarmDetails?['title'] ?? alarmToEdit.title;
     final String message = alarmDetails?['message'] ?? alarmToEdit.message;
 
     if (mounted) {
       final now = DateTime.now();
+      // Normalize newAlarmTime to have 0 seconds and 0 milliseconds
       var newAlarmTime = DateTime(
         now.year,
         now.month,
         now.day,
         newTimeOfDay.hour,
         newTimeOfDay.minute,
+        0, // seconds
+        0, // milliseconds
       );
-      if (newAlarmTime.isBefore(now)) {
+
+      // If the normalized alarm time is before or exactly now, set it for the next day.
+      final nowNormalized = DateTime(now.year, now.month, now.day, now.hour, now.minute, 0, 0);
+      if (newAlarmTime.isBefore(nowNormalized) || newAlarmTime.isAtSameMomentAs(nowNormalized)) {
         newAlarmTime = newAlarmTime.add(const Duration(days: 1));
       }
+
       try {
         if (alarmToEdit.isActive) {
-          await platform.invokeMethod('cancelAlarm', {
-            'alarmId': alarmToEdit.id,
-          });
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarmToEdit.id});
         }
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': newAlarmTime.millisecondsSinceEpoch,
-          'alarmId': alarmToEdit.id,
+          'alarmId': alarmToEdit.id, // Use existing ID for editing
           'title': title,
           'message': message,
           'screenRoute': '/alarm',
         });
+
         final index = _alarms.indexWhere((a) => a.id == alarmToEdit.id);
         if (index != -1) {
           _alarms[index] = Alarm(
@@ -319,10 +334,10 @@ class _HomePageState extends State<HomePage> {
             time: newAlarmTime,
             title: title,
             message: message,
-            isActive: true,
+            isActive: true, // Edited alarm should be active
           );
         }
-        await _saveAlarms(); // Esto llamará a setState y re-inicializará grupos
+        await _saveAlarms();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Alarma actualizada y activa')),
         );
