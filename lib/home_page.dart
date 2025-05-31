@@ -158,6 +158,59 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _editAlarm(Alarm alarmToEdit) async {
+    final TimeOfDay? newTimeOfDay = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(alarmToEdit.time),
+    );
+
+    if (newTimeOfDay != null && mounted) {
+      final now = DateTime.now();
+      var newAlarmTime = DateTime(now.year, now.month, now.day, newTimeOfDay.hour, newTimeOfDay.minute);
+      if (newAlarmTime.isBefore(now)) {
+        newAlarmTime = newAlarmTime.add(const Duration(days: 1));
+      }
+
+      try {
+        // If the alarm was active, cancel the old one first
+        if (alarmToEdit.isActive) {
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarmToEdit.id});
+        }
+
+        // Set the new alarm (or re-set it with new time)
+        await platform.invokeMethod('setAlarm', {
+          'timeInMillis': newAlarmTime.millisecondsSinceEpoch,
+          'alarmId': alarmToEdit.id, // Use the same ID
+          'title': alarmToEdit.title,
+          'message': alarmToEdit.message,
+          'screenRoute': '/alarm',
+        });
+
+        setState(() {
+          final index = _alarms.indexWhere((a) => a.id == alarmToEdit.id);
+          if (index != -1) {
+            _alarms[index] = Alarm(
+              id: alarmToEdit.id,
+              time: newAlarmTime,
+              title: alarmToEdit.title,
+              message: alarmToEdit.message,
+              isActive: true, // Editing an alarm makes it active
+            );
+          }
+        });
+        await _saveAlarms();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Alarma actualizada y activa')),
+        );
+      } on PlatformException catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al actualizar alarma: ${e.message}')),
+        );
+      }
+    }
+  }
+
   // Modificado para manejar la activación/desactivación de la alarma
   Future<void> _toggleAlarmState(int alarmId, bool isActive) async {
     final index = _alarms.indexWhere((a) => a.id == alarmId);
@@ -234,17 +287,13 @@ class _HomePageState extends State<HomePage> {
       final newAlarmData = Alarm(
         id: oldAlarm.id,
         time: newTime,
-        title: oldAlarm.title, 
+        title: oldAlarm.title,
         message: oldAlarm.message,
-        isActive: true, // Al posponer, la alarma se reactiva
+        isActive: true, // Snoozing re-activates the alarm
       );
 
       try {
-        // Cancelar la anterior si estaba activa
-        if (oldAlarm.isActive) {
-          await platform.invokeMethod('cancelAlarm', {'alarmId': oldAlarm.id});
-        }
-        // Programar la nueva
+        // Re-program the alarm with the new snoozed time
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': newAlarmData.time.millisecondsSinceEpoch,
           'alarmId': newAlarmData.id,
@@ -257,13 +306,10 @@ class _HomePageState extends State<HomePage> {
           _alarms[index] = newAlarmData;
         });
         await _saveAlarms();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Alarma pospuesta y reactivada')),
-        );
+        // No SnackBar here as it's usually a background operation from notification
       } on PlatformException catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al posponer alarma: ${e.message}')),
-        );
+        // Log or handle error appropriately, maybe a silent error for snoozing
+        print('Error al actualizar la hora de la alarma (snooze): ${e.message}');
       }
     }
   }
@@ -282,13 +328,18 @@ class _HomePageState extends State<HomePage> {
                 final alarm = _alarms[index];
                 return ListTile(
                   leading: PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert),
                     onSelected: (String result) {
                       if (result == 'delete') {
                         _deleteAlarm(alarm.id);
+                      } else if (result == 'edit') {
+                        _editAlarm(alarm);
                       }
                     },
                     itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'edit',
+                        child: Text('Editar'),
+                      ),
                       const PopupMenuItem<String>(
                         value: 'delete',
                         child: Text('Eliminar'),
