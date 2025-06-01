@@ -218,7 +218,7 @@ class _HomePageState extends State<HomePage> {
       initialTime: TimeOfDay.now(),
       cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
       confirmText: 'Aceptar', // Cambia el texto del botón OK
-      helpText: 'SELECCIONAR HORA',
+      helpText: 'Seleccionar Hora',
       initialEntryMode: TimePickerEntryMode.input,
       builder: (BuildContext context, Widget? child) {
         return Theme(
@@ -248,7 +248,11 @@ class _HomePageState extends State<HomePage> {
               dialHandColor: Colors.green,
               dialBackgroundColor: Colors.grey.shade800,
               entryModeIconColor: Colors.green,
-              helpTextStyle: const TextStyle(color: Colors.white),
+              helpTextStyle: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+              ),
               confirmButtonStyle: ButtonStyle(
                 foregroundColor: MaterialStateProperty.all(
                   const Color.fromARGB(255, 255, 255, 255),
