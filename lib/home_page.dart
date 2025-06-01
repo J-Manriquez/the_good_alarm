@@ -82,6 +82,7 @@ class _HomePageState extends State<HomePage> {
       _initializeGroupStates();
     }
     if (mounted) setState(() {});
+    _startOrUpdateCountdown();
   }
 
   void _initializeGroupStates() {
@@ -116,12 +117,7 @@ class _HomePageState extends State<HomePage> {
                   TextFormField(
                     controller: titleController,
                     decoration: const InputDecoration(hintText: 'Título'),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Por favor, ingrese un título';
-                      }
-                      return null;
-                    },
+                    // Eliminamos el validador para permitir títulos vacíos
                   ),
                   TextFormField(
                     controller: messageController,
@@ -143,12 +139,12 @@ class _HomePageState extends State<HomePage> {
             TextButton(
               child: const Text('Guardar'),
               onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.of(context).pop({
-                    'title': titleController.text,
-                    'message': messageController.text,
-                  });
-                }
+                formKey.currentState!
+                    .validate(); // Validamos pero no bloqueamos
+                Navigator.of(context).pop({
+                  'title': titleController.text,
+                  'message': messageController.text,
+                });
               },
             ),
           ],
@@ -240,8 +236,17 @@ class _HomePageState extends State<HomePage> {
 
       // If the normalized alarm time is before or exactly now, set it for the next day.
       // Using isBefore or equals now, considering only H:M precision.
-      final nowNormalized = DateTime(now.year, now.month, now.day, now.hour, now.minute, 0, 0);
-      if (alarmTime.isBefore(nowNormalized) || alarmTime.isAtSameMomentAs(nowNormalized)) {
+      final nowNormalized = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+        0,
+        0,
+      );
+      if (alarmTime.isBefore(nowNormalized) ||
+          alarmTime.isAtSameMomentAs(nowNormalized)) {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
@@ -269,7 +274,8 @@ class _HomePageState extends State<HomePage> {
           'screenRoute': '/alarm',
         });
         _alarms.add(newAlarm);
-        await _saveAlarms(); 
+        await _saveAlarms();
+        _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Alarma configurada y activa')),
         );
@@ -293,7 +299,10 @@ class _HomePageState extends State<HomePage> {
       initialMessage: alarmToEdit.message,
     );
     // Use existing details if new ones are not provided or dialog is cancelled
-    final String title = alarmDetails?['title'] ?? alarmToEdit.title;
+    final String title =
+        (alarmDetails?['title'] ?? alarmToEdit.title).isNotEmpty
+        ? (alarmDetails?['title'] ?? alarmToEdit.title)
+        : 'Alarma';
     final String message = alarmDetails?['message'] ?? alarmToEdit.message;
 
     if (mounted) {
@@ -310,14 +319,25 @@ class _HomePageState extends State<HomePage> {
       );
 
       // If the normalized alarm time is before or exactly now, set it for the next day.
-      final nowNormalized = DateTime(now.year, now.month, now.day, now.hour, now.minute, 0, 0);
-      if (newAlarmTime.isBefore(nowNormalized) || newAlarmTime.isAtSameMomentAs(nowNormalized)) {
+      final nowNormalized = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+        0,
+        0,
+      );
+      if (newAlarmTime.isBefore(nowNormalized) ||
+          newAlarmTime.isAtSameMomentAs(nowNormalized)) {
         newAlarmTime = newAlarmTime.add(const Duration(days: 1));
       }
 
       try {
         if (alarmToEdit.isActive) {
-          await platform.invokeMethod('cancelAlarm', {'alarmId': alarmToEdit.id});
+          await platform.invokeMethod('cancelAlarm', {
+            'alarmId': alarmToEdit.id,
+          });
         }
         await platform.invokeMethod('setAlarm', {
           'timeInMillis': newAlarmTime.millisecondsSinceEpoch,
@@ -353,9 +373,11 @@ class _HomePageState extends State<HomePage> {
     final index = _alarms.indexWhere((a) => a.id == alarmId);
     if (index != -1) {
       final alarm = _alarms[index];
-      alarm.isActive = isActive;
+      if (alarm.isActive == isActive) return; // No change needed
+
       try {
         if (isActive) {
+          // Reactivar alarma: setearla de nuevo
           await platform.invokeMethod('setAlarm', {
             'timeInMillis': alarm.time.millisecondsSinceEpoch,
             'alarmId': alarm.id,
@@ -367,13 +389,20 @@ class _HomePageState extends State<HomePage> {
             context,
           ).showSnackBar(const SnackBar(content: Text('Alarma activada')));
         } else {
+          // Desactivar alarma: cancelarla
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Alarma desactivada')));
         }
         _alarms[index].isActive = isActive;
-        await _saveAlarms(); // Esto llamará a setState y re-inicializará grupos
+        await _saveAlarms(); // Guardar y refrescar UI
+        _startOrUpdateCountdown(); // <--- ADD THIS LINE
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Alarma ${isActive ? "activada" : "desactivada"}'),
+          ),
+        );
       } on PlatformException catch (e) {
         setState(() {
           alarm.isActive = !isActive; // Revertir
@@ -385,6 +414,9 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         );
+        // Revertir el cambio en la UI si la operación nativa falla
+        // _alarms[index].isActive = !isActive; // Opcional, dependiendo de la UX deseada
+        // if(mounted) setState(() {});
       }
     }
   }
@@ -505,6 +537,80 @@ class _HomePageState extends State<HomePage> {
     return grouped;
   }
 
+  // At the top of _HomePageState class
+  Timer? _countdownTimer;
+  Duration _timeUntilNextAlarm = Duration.zero;
+  Alarm? _currentNextAlarmForCountdown;
+
+  // In initState or a method called when alarms/settings change:
+  void _startOrUpdateCountdown() {
+    _countdownTimer?.cancel(); // Cancel existing timer
+    final nextAlarm = _getNextActiveAlarm();
+    _currentNextAlarmForCountdown = nextAlarm;
+
+    if (nextAlarm != null) {
+      _updateCountdown(); // Initial update
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _updateCountdown();
+      });
+    } else {
+      if (mounted) {
+        setState(() {
+          _timeUntilNextAlarm = Duration.zero;
+        });
+      }
+    }
+  }
+
+  void _updateCountdown() {
+    if (_currentNextAlarmForCountdown == null ||
+        !_currentNextAlarmForCountdown!.isActive) {
+      // If alarm became inactive or null, try to find the next one
+      _startOrUpdateCountdown();
+      return;
+    }
+    final now = DateTime.now();
+    final difference = _currentNextAlarmForCountdown!.time.isAfter(now)
+        ? _currentNextAlarmForCountdown!.time.difference(now)
+        : Duration.zero;
+    if (mounted) {
+      setState(() {
+        _timeUntilNextAlarm = difference;
+      });
+    }
+    if (difference == Duration.zero &&
+        _currentNextAlarmForCountdown!.time.isBefore(now)) {
+      // Time has passed, refresh to find next alarm or clear countdown
+      _startOrUpdateCountdown();
+    }
+  }
+
+  // In dispose method:
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  // Helper function to format duration (can be static or a member of _HomePageState)
+  String _formatDuration(Duration duration) {
+    if (duration <= Duration.zero) {
+      return "--:--:--"; // Simplified for no time remaining or past
+    }
+
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    String hours = twoDigits(duration.inHours.remainder(24));
+    String minutes = twoDigits(duration.inMinutes.remainder(60));
+    String seconds = twoDigits(duration.inSeconds.remainder(60));
+
+    if (duration.inDays > 0) {
+      String days = duration.inDays.toString();
+      return "$days Días: $hours:$minutes:$seconds";
+    } else {
+      return "$hours:$minutes:$seconds";
+    }
+  }
+
   Alarm? _getNextActiveAlarm() {
     final activeAlarms = _alarms.where((a) => a.isActive).toList();
     if (activeAlarms.isEmpty) return null;
@@ -514,8 +620,9 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildNextAlarmSection() {
     final nextAlarm = _getNextActiveAlarm();
-    if (nextAlarm == null || !_showNextAlarmSection)
+    if (nextAlarm == null || !_showNextAlarmSection) {
       return const SizedBox.shrink();
+    }
 
     final otherActiveAlarmsCount = _alarms
         .where((a) => a.isActive && a.id != nextAlarm.id)
@@ -554,6 +661,8 @@ class _HomePageState extends State<HomePage> {
                   onChanged: (bool value) {
                     _toggleAlarmState(nextAlarm.id, value);
                   },
+                  activeColor: Colors.green,
+                  inactiveThumbColor: Colors.black,
                 ),
               ],
             ),
@@ -579,8 +688,31 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       title: Text(alarm.title),
-      subtitle: Text(
-        '${alarm.time.hour.toString().padLeft(2, '0')}:${alarm.time.minute.toString().padLeft(2, '0')} - ${alarm.message}',
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(alarm.message.isNotEmpty ? alarm.message : 'Sin mensaje'),
+          if (alarm.isActive)
+            Text(
+              'Próxima vez: ${TimeOfDay.fromDateTime(alarm.time).format(context)}',
+            ),
+          if (alarm.isActive)
+            Builder(
+              // Use Builder to get a fresh context if needed for TextTheme
+              builder: (context) {
+                final now = DateTime.now();
+                final durationUntilAlarm = alarm.time.isAfter(now)
+                    ? alarm.time.difference(now)
+                    : Duration.zero;
+                return Text(
+                  'Faltan: ${_formatDuration(durationUntilAlarm)}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.green),
+                );
+              },
+            ),
+        ],
       ),
       trailing: Switch(
         value: alarm.isActive,
@@ -602,10 +734,15 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('The Good Alarm'),
+        automaticallyImplyLeading: false,
+        backgroundColor: const Color.fromARGB(255, 0, 0, 0),
+        title: Padding(
+          padding: const EdgeInsets.only(left: 85),
+          child: Text('The Good Alarm', style: TextStyle(fontSize: 25, color: Colors.white, fontWeight: FontWeight.bold),),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings, color: Colors.white, size: 30,),
             onPressed: () async {
               await Navigator.pushNamed(context, '/settings');
               _loadSettingsAndAlarms(); // Recargar configuración y alarmas al volver
@@ -614,8 +751,21 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         // Envolver en Column para añadir la nueva sección
         children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            color: Colors.green,
+            child: Text(
+              'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: const Color.fromARGB(255, 255, 255, 255),
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
           _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
           Expanded(
             // El ListView/ExpansionPanelList debe estar en un Expanded
@@ -652,25 +802,27 @@ class _HomePageState extends State<HomePage> {
                           horizontal: 8,
                           vertical: 4,
                         ),
+                        elevation: 1.0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4.0),
+                          side: BorderSide.none,
+                        ),
                         child: ExpansionTile(
+                          collapsedIconColor: Colors.transparent,
                           key: PageStorageKey(
                             groupKey,
                           ), // Para mantener estado de expansión
                           title: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            mainAxisAlignment: MainAxisAlignment.start,
                             children: [
-                              Text(
-                                groupKey,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
                               IconButton(
                                 icon: Icon(
                                   showActiveOnly
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
+                                      ? Icons.alarm_on
+                                      : Icons.alarm_off,
                                 ),
+                                color: Colors.black,
+                                iconSize: 35,
                                 tooltip: showActiveOnly
                                     ? 'Mostrar todas'
                                     : 'Mostrar solo activas',
@@ -681,6 +833,17 @@ class _HomePageState extends State<HomePage> {
                                   });
                                 },
                               ),
+                              const SizedBox(width: 80),
+                              Padding(
+                                padding: EdgeInsets.only(top: 5),
+                                child: Text(
+                                  groupKey,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                             ],
                           ),
                           initiallyExpanded:
@@ -690,6 +853,9 @@ class _HomePageState extends State<HomePage> {
                               _groupExpansionState[groupKey] = isExpanded;
                             });
                           },
+                          shape: Border.all(
+                            color: Colors.transparent,
+                          ), // Elimina el borde cuando está colapsado
                           children: displayAlarms.isEmpty
                               ? [
                                   const ListTile(
@@ -713,6 +879,9 @@ class _HomePageState extends State<HomePage> {
       floatingActionButton: FloatingActionButton(
         onPressed: _setAlarm,
         tooltip: 'Añadir alarma',
+        focusColor: Colors.white,
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.black,
         child: const Icon(Icons.add),
       ),
     );
