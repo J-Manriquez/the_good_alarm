@@ -216,6 +216,87 @@ class _HomePageState extends State<HomePage> {
     final TimeOfDay? time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
+      cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
+      confirmText: 'Aceptar', // Cambia el texto del botón OK
+      helpText: 'SELECCIONAR HORA',
+      initialEntryMode: TimePickerEntryMode.input,
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            timePickerTheme: TimePickerThemeData(
+              backgroundColor: Colors.black,
+              hourMinuteTextColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 0, 0, 0)
+                    : const Color.fromARGB(255, 0, 0, 0),
+              ),
+              hourMinuteColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 208, 252, 210)
+                    : const Color.fromARGB(255, 255, 255, 255),
+              ),
+              dayPeriodTextColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 0, 0, 0)
+                    : const Color.fromARGB(255, 0, 0, 0),
+              ),
+              dayPeriodColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 208, 252, 210)
+                    : const Color.fromARGB(255, 255, 255, 255),
+              ),
+              dialHandColor: Colors.green,
+              dialBackgroundColor: Colors.grey.shade800,
+              entryModeIconColor: Colors.green,
+              helpTextStyle: const TextStyle(color: Colors.white),
+              confirmButtonStyle: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+                backgroundColor: MaterialStateProperty.all(Colors.green),
+                textStyle: MaterialStateProperty.all(
+                  const TextStyle(fontSize: 20),
+                ),
+                // Aquí configuras el radio de borde
+                shape: MaterialStateProperty.all(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      10,
+                    ), // Radio de borde de 10
+                  ),
+                ),
+              ),
+              cancelButtonStyle: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 0, 0, 0),
+                ),
+                backgroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+                textStyle: MaterialStateProperty.all(
+                  const TextStyle(fontSize: 20),
+                ),
+                // Aquí configuras el radio de borde
+                shape: MaterialStateProperty.all(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      10,
+                    ), // Radio de borde de 10
+                  ),
+                ),
+              ), // Color del texto "SELECCIONAR HORA"
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (time != null && mounted) {
@@ -291,6 +372,91 @@ class _HomePageState extends State<HomePage> {
     final TimeOfDay? newTimeOfDay = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(alarmToEdit.time),
+      cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
+      confirmText: 'Aceptar', // Cambia el texto del botón OK
+      helpText: 'Seleccionar Hora',
+      initialEntryMode: TimePickerEntryMode.input,
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            timePickerTheme: TimePickerThemeData(
+              backgroundColor: Colors.black,
+              hourMinuteTextColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 0, 0, 0)
+                    : const Color.fromARGB(255, 0, 0, 0),
+              ),
+              hourMinuteColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 208, 252, 210)
+                    : const Color.fromARGB(255, 255, 255, 255),
+              ),
+              dayPeriodTextColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 0, 0, 0)
+                    : const Color.fromARGB(255, 0, 0, 0),
+              ),
+              dayPeriodColor: MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.selected)
+                    ? const Color.fromARGB(255, 208, 252, 210)
+                    : const Color.fromARGB(255, 255, 255, 255),
+              ),
+              dialHandColor: Colors.green,
+              dialBackgroundColor: Colors.grey.shade800,
+              entryModeIconColor: Colors.green,
+              helpTextStyle: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+              ),
+              confirmButtonStyle: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+                backgroundColor: MaterialStateProperty.all(Colors.green),
+                textStyle: MaterialStateProperty.all(
+                  const TextStyle(fontSize: 20),
+                ),
+                // Aquí configuras el radio de borde
+                shape: MaterialStateProperty.all(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      10,
+                    ), // Radio de borde de 10
+                  ),
+                ),
+              ),
+              cancelButtonStyle: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 0, 0, 0),
+                ),
+                backgroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+                textStyle: MaterialStateProperty.all(
+                  const TextStyle(fontSize: 20),
+                ),
+                // Aquí configuras el radio de borde
+                shape: MaterialStateProperty.all(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      10,
+                    ), // Radio de borde de 10
+                  ),
+                ),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: ButtonStyle(
+                foregroundColor: MaterialStateProperty.all(
+                  const Color.fromARGB(255, 255, 255, 255),
+                ),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (newTimeOfDay == null) return;
 
@@ -738,11 +904,18 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: const Color.fromARGB(255, 0, 0, 0),
         title: Padding(
           padding: const EdgeInsets.only(left: 85),
-          child: Text('The Good Alarm', style: TextStyle(fontSize: 25, color: Colors.white, fontWeight: FontWeight.bold),),
+          child: Text(
+            'The Good Alarm',
+            style: TextStyle(
+              fontSize: 25,
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white, size: 30,),
+            icon: const Icon(Icons.settings, color: Colors.white, size: 30),
             onPressed: () async {
               await Navigator.pushNamed(context, '/settings');
               _loadSettingsAndAlarms(); // Recargar configuración y alarmas al volver
