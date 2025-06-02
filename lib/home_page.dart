@@ -330,7 +330,18 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // NUEVO: Obtener alarmas pospuestas
+  List<Alarm> _getSnoozedAlarms() {
+    return _alarms
+        .where((alarm) => alarm.snoozeCount > 0 && alarm.isActive)
+        .toList();
+  }
+
   Future<void> _handleNativeCalls(MethodCall call) async {
+    print('=== HANDLE NATIVE CALLS START ===');
+    print('Method: ${call.method}');
+    print('Arguments: ${call.arguments}');
+
     final args = call.arguments != null
         ? Map<String, dynamic>.from(call.arguments)
         : {};
@@ -338,32 +349,136 @@ class _HomePageState extends State<HomePage> {
 
     switch (call.method) {
       case 'showAlarmScreen':
+        print('Showing alarm screen for alarm ID: $alarmId');
         if (mounted) {
-          Navigator.of(context).pushNamed(
-          '/alarm',
-          arguments: args,
-        );
-      }
+          Navigator.of(context).pushNamed('/alarm', arguments: args);
+        }
         break;
+
       case 'alarmManuallyStopped':
+        print('Alarm manually stopped: $alarmId');
         if (alarmId != null) {
-          _toggleAlarmState(alarmId, false);
+          await _handleAlarmStopped(alarmId);
         }
         break;
+
       case 'alarmManuallySnoozed':
+        print('Alarm manually snoozed: $alarmId');
         if (alarmId != null) {
-        final newTimeInMillis = args['newTimeInMillis'] as int?;
-        if (newTimeInMillis != null) {
-          _updateAlarmTime(
-            alarmId,
-            DateTime.fromMillisecondsSinceEpoch(newTimeInMillis),
-          );
+          final newTimeInMillis = args['newTimeInMillis'] as int?;
+          if (newTimeInMillis != null) {
+            await _handleAlarmSnoozed(alarmId, newTimeInMillis);
+          }
         }
-      }
-      break;
+        break;
+
       case 'closeAlarmScreenIfOpen':
+        print('Closing alarm screen if open for alarm: $alarmId');
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
         break;
     }
+    print('=== HANDLE NATIVE CALLS END ===');
+  }
+
+  // NUEVO: Manejar cuando una alarma es detenida
+  Future<void> _handleAlarmStopped(int alarmId) async {
+    print('=== HANDLE ALARM STOPPED START ===');
+    print('Processing stopped alarm ID: $alarmId');
+
+    final index = _alarms.indexWhere((a) => a.id == alarmId);
+    if (index != -1) {
+      final alarm = _alarms[index];
+      print('Found alarm: ${alarm.title}, isRepeating: ${alarm.isRepeating()}');
+
+      // Si la alarma NO es repetitiva, desactivarla
+      if (!alarm.isRepeating()) {
+        print('Non-repeating alarm, deactivating...');
+        setState(() {
+          _alarms[index].isActive = false;
+        });
+        await _saveAlarms();
+        print('Non-repeating alarm deactivated and saved');
+      } else {
+        print('Repeating alarm, keeping active for next occurrence');
+        // Para alarmas repetitivas, reprogramar para la siguiente ocurrencia
+        await _rescheduleRepeatingAlarm(alarm);
+      }
+
+      _startOrUpdateCountdown();
+    } else {
+      print('Alarm with ID $alarmId not found in list');
+    }
+    print('=== HANDLE ALARM STOPPED END ===');
+  }
+
+  // NUEVO: Reprogramar alarma repetitiva
+  Future<void> _rescheduleRepeatingAlarm(Alarm alarm) async {
+    print('=== RESCHEDULE REPEATING ALARM START ===');
+    print('Rescheduling alarm: ${alarm.title}');
+
+    try {
+      await platform.invokeMethod('setAlarm', {
+        'timeInMillis': alarm.time.millisecondsSinceEpoch,
+        'alarmId': alarm.id,
+        'title': alarm.title,
+        'message': alarm.message,
+        'screenRoute': '/alarm',
+        'repeatDays': alarm.repeatDays,
+        'isDaily': alarm.isDaily,
+        'isWeekly': alarm.isWeekly,
+        'isWeekend': alarm.isWeekend,
+      });
+      print('Repeating alarm rescheduled successfully');
+    } catch (e) {
+      print('Error rescheduling repeating alarm: $e');
+    }
+    print('=== RESCHEDULE REPEATING ALARM END ===');
+  }
+
+  // NUEVO: Manejar cuando una alarma es pospuesta
+  Future<void> _handleAlarmSnoozed(int alarmId, int newTimeInMillis) async {
+    print('=== HANDLE ALARM SNOOZED START ===');
+    print(
+      'Processing snoozed alarm ID: $alarmId, new time: ${DateTime.fromMillisecondsSinceEpoch(newTimeInMillis)}',
+    );
+
+    final index = _alarms.indexWhere((a) => a.id == alarmId);
+    if (index != -1) {
+      final alarm = _alarms[index];
+      print(
+        'Found alarm: ${alarm.title}, current snooze count: ${alarm.snoozeCount}',
+      );
+
+      // Incrementar contador de snooze
+      setState(() {
+        _alarms[index].snoozeCount++;
+        // Actualizar tiempo de la alarma al tiempo de snooze
+        _alarms[index] = Alarm(
+          id: alarm.id,
+          time: DateTime.fromMillisecondsSinceEpoch(newTimeInMillis),
+          title: alarm.title,
+          message: alarm.message,
+          isActive: alarm.isActive,
+          repeatDays: alarm.repeatDays,
+          isDaily: alarm.isDaily,
+          isWeekly: alarm.isWeekly,
+          isWeekend: alarm.isWeekend,
+          snoozeCount: alarm.snoozeCount + 1,
+          maxSnoozes: alarm.maxSnoozes,
+        );
+      });
+
+      await _saveAlarms();
+      _startOrUpdateCountdown();
+      print(
+        'Alarm snoozed and saved, new snooze count: ${_alarms[index].snoozeCount}',
+      );
+    } else {
+      print('Alarm with ID $alarmId not found in list');
+    }
+    print('=== HANDLE ALARM SNOOZED END ===');
   }
 
   Future<void> _loadAlarms() async {
@@ -679,8 +794,7 @@ class _HomePageState extends State<HomePage> {
       initialMessage: alarm.message,
     );
     // Use existing details if new ones are not provided or dialog is cancelled
-    final String title =
-        (alarmDetails?['title'] ?? alarm.title).isNotEmpty
+    final String title = (alarmDetails?['title'] ?? alarm.title).isNotEmpty
         ? (alarmDetails?['title'] ?? alarm.title)
         : 'Alarma';
     final String message = alarmDetails?['message'] ?? alarm.message;
@@ -753,7 +867,7 @@ class _HomePageState extends State<HomePage> {
               time: alarmTime,
               title: title,
               message: message,
-              
+
               isActive: alarm.isActive,
               repeatDays: finalRepeatDays,
               isDaily: isDaily,
@@ -1232,6 +1346,102 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
+
+          if (_getSnoozedAlarms().isNotEmpty)
+            Card(
+              margin: const EdgeInsets.all(16.0),
+              color: Colors.orange.shade100,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.snooze, color: Colors.orange.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Alarmas Pospuestas (${_getSnoozedAlarms().length})',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ..._getSnoozedAlarms()
+                        .map(
+                          (alarm) => Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        alarm.title,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Sonará: ${DateFormat('HH:mm').format(alarm.time)}',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
+                                        style: TextStyle(
+                                          color: Colors.orange.shade700,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () async {
+                                    // Desactivar alarma pospuesta
+                                    await _toggleAlarmState(alarm.id, false);
+                                    // Resetear contador de snooze
+                                    setState(() {
+                                      final index = _alarms.indexWhere(
+                                        (a) => a.id == alarm.id,
+                                      );
+                                      if (index != -1) {
+                                        _alarms[index].snoozeCount = 0;
+                                      }
+                                    });
+                                    await _saveAlarms();
+                                  },
+                                  icon: Icon(
+                                    Icons.cancel,
+                                    color: Colors.red.shade600,
+                                  ),
+                                  tooltip: 'Desactivar alarma pospuesta',
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             // El ListView/ExpansionPanelList debe estar en un Expanded
             child: _alarms.isEmpty

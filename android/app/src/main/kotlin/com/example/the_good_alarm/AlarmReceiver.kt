@@ -67,7 +67,34 @@ class AlarmReceiver : BroadcastReceiver() {
     }
     
     private fun handleAlarmTrigger(context: Context, intent: Intent) {
+        Log.d("AlarmReceiver", "=== ALARM TRIGGER START ===")
+        val alarmId = intent.getIntExtra("alarmId", -1)
+        val title = intent.getStringExtra("title") ?: "Alarma"
+        val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
+        
+        Log.d("AlarmReceiver", "Alarm triggered - ID: $alarmId, Title: $title")
+        
         try {
+            // Crear canal de notificación con IMPORTANCE_HIGH para mantener visible
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.d("AlarmReceiver", "Creating HIGH importance notification channel")
+                val channel = NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID, 
+                    "Alarm Notifications", 
+                    NotificationManager.IMPORTANCE_HIGH  // CAMBIO: HIGH en lugar de LOW
+                ).apply {
+                    this.description = "Channel for alarm notifications"
+                    this.setBypassDnd(true)
+                    this.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                    this.enableVibration(false)  // Sin vibración en canal
+                    this.enableLights(true)
+                    this.setSound(null, null)  // Sin sonido en canal
+                }
+                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.createNotificationChannel(channel)
+                Log.d("AlarmReceiver", "Notification channel created with HIGH importance")
+            }
+            
             Log.d("AlarmReceiver", "handleAlarmTrigger: Starting alarm handling process")
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val wakeLock = powerManager.newWakeLock(

@@ -129,21 +129,41 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "snoozeAlarm" -> {
-                    val alarmId = call.argument<Int>("alarmId") ?: 0
-                    Log.d("MainActivity", "Snoozing alarm: $alarmId")
-                    AlarmReceiver.stopAlarmSound()
-                    cancelAlarm(alarmId)
+                    Log.d("MainActivity", "=== SNOOZE ALARM METHOD START ===")
+                    val alarmId = call.argument<Int>("alarmId")
+                    val snoozeMinutes = call.argument<Int>("snoozeMinutes") ?: 5 // Usar valor pasado desde Flutter
                     
-                    val calendar = Calendar.getInstance()
-                    calendar.add(Calendar.MINUTE, 1)
-                    setAlarm(
-                        timeInMillis = calendar.timeInMillis,
-                        alarmId = alarmId,
-                        title = "Alarma pospuesta",
-                        message = "¡Es hora de despertar!",
-                        screenRoute = "/alarm"
-                    )
-                    result.success(true)
+                    Log.d("MainActivity", "Snoozing alarm ID: $alarmId for $snoozeMinutes minutes")
+                    
+                    if (alarmId != null) {
+                        AlarmReceiver.stopAlarmSound()
+                        cancelAlarm(alarmId)
+                        
+                        val calendar = Calendar.getInstance()
+                        calendar.add(Calendar.MINUTE, snoozeMinutes) // Usar duración configurada
+                        
+                        Log.d("MainActivity", "New snooze time: ${calendar.time}")
+                        
+                        setAlarm(
+                            timeInMillis = calendar.timeInMillis,
+                            alarmId = alarmId,
+                            title = "Alarma Pospuesta",
+                            message = "¡Es hora de despertar!",
+                            screenRoute = "/alarm"
+                        )
+                        
+                        methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf(
+                            "alarmId" to alarmId, 
+                            "newTimeInMillis" to calendar.timeInMillis
+                        ))
+                        
+                        result.success("Alarm snoozed for $snoozeMinutes minutes")
+                        Log.d("MainActivity", "Alarm snoozed successfully")
+                    } else {
+                        Log.e("MainActivity", "Invalid alarm ID for snooze")
+                        result.error("INVALID_ALARM_ID", "Alarm ID is required", null)
+                    }
+                    Log.d("MainActivity", "=== SNOOZE ALARM METHOD END ===")
                 }
                 "getSystemSounds" -> {
                     val sounds = getSystemAlarmSounds()
@@ -286,13 +306,31 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    private fun setAlarm(timeInMillis: Long, alarmId: Int, title: String, message: String, screenRoute: String) {
+    private fun setAlarm(
+        timeInMillis: Long, 
+        alarmId: Int, 
+        title: String, 
+        message: String, 
+        screenRoute: String,
+        repeatDays: List<Int> = emptyList(),
+        isDaily: Boolean = false,
+        isWeekly: Boolean = false,
+        isWeekend: Boolean = false
+    ) {
+        Log.d("MainActivity", "=== SET ALARM START ===")
+        Log.d("MainActivity", "Setting alarm - ID: $alarmId, Time: ${Date(timeInMillis)}")
+        Log.d("MainActivity", "Repeat config - Daily: $isDaily, Weekly: $isWeekly, Weekend: $isWeekend, Days: $repeatDays")
+        
         val intent = Intent(this, AlarmReceiver::class.java).apply {
             action = ALARM_ACTION
             putExtra("alarmId", alarmId)
             putExtra("title", title)
             putExtra("message", message)
             putExtra("screenRoute", screenRoute)
+            putExtra("repeatDays", repeatDays.toIntArray())
+            putExtra("isDaily", isDaily)
+            putExtra("isWeekly", isWeekly)
+            putExtra("isWeekend", isWeekend)
         }
         
         val pendingIntent = PendingIntent.getBroadcast(
@@ -302,10 +340,19 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
-        } else {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+        // Calcular el tiempo correcto para la alarma
+        val finalTimeInMillis = calculateAlarmTime(timeInMillis, isDaily, isWeekly, isWeekend, repeatDays)
+        Log.d("MainActivity", "Final alarm time calculated: ${Date(finalTimeInMillis)}")
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, finalTimeInMillis, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, finalTimeInMillis, pendingIntent)
+            }
+            Log.d("MainActivity", "Alarm set successfully in AlarmManager")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting alarm in AlarmManager", e)
         }
         
         val serviceIntent = Intent(this, AlarmService::class.java)
@@ -314,21 +361,145 @@ class MainActivity : FlutterActivity() {
         } else {
             startService(serviceIntent)
         }
+        Log.d("MainActivity", "=== SET ALARM END ===")
     }
     
-    private fun cancelAlarm(alarmId: Int) {
-        val intent = Intent(this, AlarmReceiver::class.java).apply {
-            action = ALARM_ACTION
+    private fun calculateAlarmTime(
+        originalTimeInMillis: Long,
+        isDaily: Boolean,
+        isWeekly: Boolean, 
+        isWeekend: Boolean,
+        repeatDays: List<Int>
+    ): Long {
+        Log.d("MainActivity", "=== CALCULATE ALARM TIME START ===")
+        val now = Calendar.getInstance()
+        val alarmTime = Calendar.getInstance().apply {
+            timeInMillis = originalTimeInMillis
         }
         
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            alarmId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        Log.d("MainActivity", "Current time: ${now.time}")
+        Log.d("MainActivity", "Original alarm time: ${alarmTime.time}")
         
-        alarmManager.cancel(pendingIntent)
+        // Si no es repetitiva, usar lógica simple
+        if (!isDaily && !isWeekly && !isWeekend && repeatDays.isEmpty()) {
+            Log.d("MainActivity", "Non-repeating alarm")
+            if (alarmTime.before(now)) {
+                alarmTime.add(Calendar.DAY_OF_MONTH, 1)
+                Log.d("MainActivity", "Time passed today, scheduling for tomorrow: ${alarmTime.time}")
+            } else {
+                Log.d("MainActivity", "Time hasn't passed today, scheduling for today: ${alarmTime.time}")
+            }
+            return alarmTime.timeInMillis
+        }
+        
+        // Para alarmas repetitivas
+        if (isDaily) {
+            Log.d("MainActivity", "Daily alarm")
+            if (alarmTime.before(now)) {
+                alarmTime.add(Calendar.DAY_OF_MONTH, 1)
+                Log.d("MainActivity", "Daily alarm scheduled for tomorrow: ${alarmTime.time}")
+            } else {
+                Log.d("MainActivity", "Daily alarm scheduled for today: ${alarmTime.time}")
+            }
+        } else if (isWeekend) {
+            Log.d("MainActivity", "Weekend alarm")
+            val nextWeekendDay = findNextWeekendDay(now, alarmTime)
+            Log.d("MainActivity", "Next weekend day: ${Date(nextWeekendDay)}")
+            return nextWeekendDay
+        } else if (isWeekly) {
+            Log.d("MainActivity", "Weekly alarm")
+            val nextWeeklyDay = findNextWeeklyDay(now, alarmTime)
+            Log.d("MainActivity", "Next weekly day: ${Date(nextWeeklyDay)}")
+            return nextWeeklyDay
+        } else if (repeatDays.isNotEmpty()) {
+            Log.d("MainActivity", "Custom days alarm: $repeatDays")
+            val nextCustomDay = findNextCustomDay(now, alarmTime, repeatDays)
+            Log.d("MainActivity", "Next custom day: ${Date(nextCustomDay)}")
+            return nextCustomDay
+        }
+        
+        Log.d("MainActivity", "Final calculated time: ${alarmTime.time}")
+        Log.d("MainActivity", "=== CALCULATE ALARM TIME END ===")
+        return alarmTime.timeInMillis
+    }
+
+    private fun findNextWeekendDay(now: Calendar, alarmTime: Calendar): Long {
+        val result = Calendar.getInstance().apply {
+            timeInMillis = alarmTime.timeInMillis
+        }
+        
+        // Encontrar el próximo sábado o domingo
+        while (result.get(Calendar.DAY_OF_WEEK) != Calendar.SATURDAY && 
+               result.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
+            result.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        
+        // Si es hoy pero ya pasó la hora, ir al siguiente día de fin de semana
+        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
+            result.before(now)) {
+            result.add(Calendar.DAY_OF_MONTH, 1)
+            while (result.get(Calendar.DAY_OF_WEEK) != Calendar.SATURDAY && 
+                   result.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
+                result.add(Calendar.DAY_OF_MONTH, 1)
+            }
+        }
+        
+        return result.timeInMillis
+    }
+
+    private fun findNextWeeklyDay(now: Calendar, alarmTime: Calendar): Long {
+        val result = Calendar.getInstance().apply {
+            timeInMillis = alarmTime.timeInMillis
+        }
+        
+        val targetDayOfWeek = result.get(Calendar.DAY_OF_WEEK)
+        
+        // Si es hoy pero ya pasó la hora, programar para la próxima semana
+        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
+            result.before(now)) {
+            result.add(Calendar.WEEK_OF_YEAR, 1)
+        }
+        // Si no es hoy, encontrar el próximo día de la semana
+        else if (result.before(now)) {
+            while (result.get(Calendar.DAY_OF_WEEK) != targetDayOfWeek || result.before(now)) {
+                result.add(Calendar.DAY_OF_MONTH, 1)
+            }
+        }
+        
+        return result.timeInMillis
+    }
+
+    private fun findNextCustomDay(now: Calendar, alarmTime: Calendar, repeatDays: List<Int>): Long {
+        val result = Calendar.getInstance().apply {
+            timeInMillis = alarmTime.timeInMillis
+        }
+        
+        // Convertir días de lunes=1 a domingo=7 al formato de Calendar
+        val calendarDays = repeatDays.map { day ->
+            when (day) {
+                1 -> Calendar.MONDAY
+                2 -> Calendar.TUESDAY
+                3 -> Calendar.WEDNESDAY
+                4 -> Calendar.THURSDAY
+                5 -> Calendar.FRIDAY
+                6 -> Calendar.SATURDAY
+                7 -> Calendar.SUNDAY
+                else -> Calendar.MONDAY
+            }
+        }
+        
+        // Si es hoy pero ya pasó la hora, buscar el siguiente día válido
+        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
+            result.before(now)) {
+            result.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        
+        // Buscar el próximo día válido
+        while (!calendarDays.contains(result.get(Calendar.DAY_OF_WEEK))) {
+            result.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        
+        return result.timeInMillis
     }
     
     private fun getSystemAlarmSounds(): List<Map<String, String>> {
@@ -460,6 +631,27 @@ class MainActivity : FlutterActivity() {
                 Log.d("MainActivity", "POST_NOTIFICATIONS permission denied")
                 // Aquí puedes manejar el caso en que el permiso fue denegado
             }
+        }
+    }
+    private fun cancelAlarm(alarmId: Int) {
+        Log.d("MainActivity", "Canceling alarm with ID: $alarmId")
+        val intent = Intent(this, AlarmReceiver::class.java).apply {
+            action = ALARM_ACTION
+        }
+        
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            alarmId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        try {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+            Log.d("MainActivity", "Alarm canceled successfully")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error canceling alarm", e)
         }
     }
 }

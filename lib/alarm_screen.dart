@@ -18,23 +18,45 @@ class _AlarmScreenState extends State<AlarmScreen> {
   int snoozeCount = 0;
   int maxSnoozes = 3;
   int snoozeDuration = 5;
+  int _snoozeDurationMinutes = 5; // Valor por defecto
   static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
   @override
   void initState() {
     super.initState();
+    _loadSnoozeSettings();
+
     if (widget.arguments != null) {
       alarmId = widget.arguments!['alarmId'] ?? 0;
       title = widget.arguments!['title'] ?? 'Alarma';
       message = widget.arguments!['message'] ?? '¡Es hora de despertar!';
       snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
       maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
-      
+
       // Cargar la duración del snooze desde SharedPreferences
       _loadSnoozeDuration();
     }
   }
-    Future<void> _loadSnoozeDuration() async {
+
+  // NUEVO: Cargar configuración de snooze
+  Future<void> _loadSnoozeSettings() async {
+    print('=== LOAD SNOOZE SETTINGS START ===');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final snoozeDuration = prefs.getInt('snooze_duration_minutes') ?? 5;
+
+      setState(() {
+        _snoozeDurationMinutes = snoozeDuration;
+      });
+
+      print('Loaded snooze duration: $_snoozeDurationMinutes minutes');
+    } catch (e) {
+      print('Error loading snooze settings: $e');
+    }
+    print('=== LOAD SNOOZE SETTINGS END ===');
+  }
+
+  Future<void> _loadSnoozeDuration() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
@@ -56,42 +78,60 @@ class _AlarmScreenState extends State<AlarmScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  
   Future<void> _snoozeAlarm() async {
-    if (alarmId != 0) {
-      // Incrementar el contador de snooze
-      snoozeCount++;
-      
-      try {
-        await platform.invokeMethod('snoozeAlarm', {
-          'alarmId': alarmId,
-          'snoozeDuration': snoozeDuration,
-          'snoozeCount': snoozeCount
-        });
-      } on PlatformException catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al posponer alarma: ${e.message}')),
-        );
-      }
+    print('=== SNOOZE ALARM START ===');
+    print('Snoozing alarm ID: $alarmId for $_snoozeDurationMinutes minutes');
+    print('Current snooze count: $snoozeCount, max: $maxSnoozes');
+    
+    if (snoozeCount >= maxSnoozes) {
+      print('Maximum snoozes reached, cannot snooze anymore');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Máximo de posposiciones alcanzado')),
+      );
+      return;
     }
-    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    
+    try {
+      await platform.invokeMethod('snoozeAlarm', {
+        'alarmId': alarmId,
+        'snoozeMinutes': _snoozeDurationMinutes, // Usar configuración cargada
+      });
+      print('Snooze command sent to native code');
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      print('Error snoozing alarm: $e');
+    }
+    print('=== SNOOZE ALARM END ===');
   }
 
   @override
   Widget build(BuildContext context) {
-    // Determinar si el botón de snooze debe estar habilitado
-    final bool canSnooze = snoozeCount < maxSnoozes;
-    
+    // Determinar si se puede posponer
+    final canSnooze = snoozeCount < maxSnoozes;
+    print('Can snooze: $canSnooze (count: $snoozeCount, max: $maxSnoozes)');
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color.fromARGB(255, 0, 0, 0),
         automaticallyImplyLeading: false,
         title: Padding(
           padding: const EdgeInsets.only(left: 85.0),
-          child: Text('Alarma Activa', style: TextStyle(fontSize: 25, color: Colors.white, fontWeight: FontWeight.bold),),
+          child: Text(
+            'Alarma Activa',
+            style: TextStyle(
+              fontSize: 25,
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.home, color: Colors.white, size: 30,),
+            icon: const Icon(Icons.home, color: Colors.white, size: 30),
             onPressed: () {
               Navigator.of(context).pushNamed('/');
             },
@@ -133,9 +173,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
                   const SizedBox(height: 10),
                   Text(
                     message,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleLarge?.copyWith(color: const Color.fromARGB(255, 255, 255, 255)),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: const Color.fromARGB(255, 255, 255, 255),
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 40),
@@ -157,33 +197,41 @@ class _AlarmScreenState extends State<AlarmScreen> {
                       ),
                       child: const Text(
                         'Apagar',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
                   if (canSnooze)
-                  // En el método build
-                  ElevatedButton(
-                    onPressed: _snoozeAlarm,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color.fromARGB(255, 255, 255, 255),
-                      foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 40,
-                        vertical: 15,
+                    // En el método build
+                    ElevatedButton(
+                      onPressed: _snoozeAlarm,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color.fromARGB(
+                          255,
+                          255,
+                          255,
+                          255,
+                        ),
+                        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 40,
+                          vertical: 15,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                      child: Text(
+                        'Posponer $_snoozeDurationMinutes min',
+                        style: TextStyle(fontSize: 18),
                       ),
                     ),
-                    child: Text(
-                      'Retrasar $snoozeDuration minutos',
-                      style: TextStyle(fontSize: 18),
-                    ),
-                  ),
                   const SizedBox(height: 20),
-                   // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
+                  // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
                   if (!canSnooze)
                     Container(
                       padding: const EdgeInsets.all(8.0),
@@ -192,7 +240,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
                         borderRadius: BorderRadius.circular(10.0),
                       ),
                       child: Text(
-                        'Número máximo de retrasos alcanzado',
+                        'Número máximo de alarmas pospuestas alcanzado \n($snoozeCount/$maxSnoozes)',
                         style: TextStyle(
                           color: Colors.white,
                           fontStyle: FontStyle.italic,
