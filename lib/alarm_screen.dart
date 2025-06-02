@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Necesario para MethodChannel y PlatformException
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:the_good_alarm/settings_screen.dart'; // Necesario para MethodChannel y PlatformException
 
 class AlarmScreen extends StatefulWidget {
   final Map<String, dynamic>? arguments;
@@ -13,6 +15,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
   int alarmId = 0;
   String title = 'Alarma';
   String message = '¡Es hora de despertar!';
+  int snoozeCount = 0;
+  int maxSnoozes = 3;
+  int snoozeDuration = 5;
   static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
   @override
@@ -22,6 +27,19 @@ class _AlarmScreenState extends State<AlarmScreen> {
       alarmId = widget.arguments!['alarmId'] ?? 0;
       title = widget.arguments!['title'] ?? 'Alarma';
       message = widget.arguments!['message'] ?? '¡Es hora de despertar!';
+      snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
+      maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
+      
+      // Cargar la duración del snooze desde SharedPreferences
+      _loadSnoozeDuration();
+    }
+  }
+    Future<void> _loadSnoozeDuration() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
+      });
     }
   }
 
@@ -40,8 +58,15 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
   Future<void> _snoozeAlarm() async {
     if (alarmId != 0) {
+      // Incrementar el contador de snooze
+      snoozeCount++;
+      
       try {
-        await platform.invokeMethod('snoozeAlarm', {'alarmId': alarmId});
+        await platform.invokeMethod('snoozeAlarm', {
+          'alarmId': alarmId,
+          'snoozeDuration': snoozeDuration,
+          'snoozeCount': snoozeCount
+        });
       } on PlatformException catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al posponer alarma: ${e.message}')),
@@ -53,6 +78,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Determinar si el botón de snooze debe estar habilitado
+    final bool canSnooze = snoozeCount < maxSnoozes;
+    
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color.fromARGB(255, 0, 0, 0),
@@ -134,6 +162,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  if (canSnooze)
+                  // En el método build
                   ElevatedButton(
                     onPressed: _snoozeAlarm,
                     style: ElevatedButton.styleFrom(
@@ -147,11 +177,28 @@ class _AlarmScreenState extends State<AlarmScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
-                      'Retrasar 1 minuto',
+                    child: Text(
+                      'Retrasar $snoozeDuration minutos',
                       style: TextStyle(fontSize: 18),
                     ),
                   ),
+                  const SizedBox(height: 20),
+                   // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
+                  if (!canSnooze)
+                    Container(
+                      padding: const EdgeInsets.all(8.0),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10.0),
+                      ),
+                      child: Text(
+                        'Número máximo de retrasos alcanzado',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

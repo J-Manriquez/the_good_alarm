@@ -5,14 +5,21 @@ import 'dart:convert'; // Para jsonEncode y jsonDecode
 import 'package:shared_preferences/shared_preferences.dart';
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
 import 'settings_screen.dart'; // Importar SettingsScreen
+import 'package:intl/intl.dart';
 
-// Modelo simple para la alarma
+// Modelo para la alarma con soporte para repetición
 class Alarm {
   final int id;
   final DateTime time;
   final String title;
   final String message;
   bool isActive; // Para saber si la alarma está activa o ya sonó
+  List<int> repeatDays; // Días de repetición (1-7 para lunes-domingo)
+  bool isDaily;
+  bool isWeekly;
+  bool isWeekend;
+  int snoozeCount;
+  int maxSnoozes;
 
   Alarm({
     required this.id,
@@ -20,7 +27,18 @@ class Alarm {
     required this.title,
     required this.message,
     this.isActive = true, // Por defecto, la alarma está activa al crearse
+    this.repeatDays = const [],
+    this.isDaily = false,
+    this.isWeekly = false,
+    this.isWeekend = false,
+    this.snoozeCount = 0,
+    this.maxSnoozes = 3,
   });
+
+  // Getter para determinar si la alarma es repetitiva
+  bool isRepeating() {
+    return isDaily || isWeekly || isWeekend || repeatDays.isNotEmpty;
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -28,6 +46,12 @@ class Alarm {
     'title': title,
     'message': message,
     'isActive': isActive,
+    'repeatDays': repeatDays,
+    'isDaily': isDaily,
+    'isWeekly': isWeekly,
+    'isWeekend': isWeekend,
+    'snoozeCount': snoozeCount,
+    'maxSnoozes': maxSnoozes,
   };
 
   factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
@@ -36,6 +60,14 @@ class Alarm {
     title: json['title'] as String,
     message: json['message'] as String,
     isActive: json['isActive'] as bool? ?? true,
+    repeatDays: json['repeatDays'] != null
+        ? List<int>.from(json['repeatDays'])
+        : [],
+    isDaily: json['isDaily'] as bool? ?? false,
+    isWeekly: json['isWeekly'] as bool? ?? false,
+    isWeekend: json['isWeekend'] as bool? ?? false,
+    snoozeCount: json['snoozeCount'] as int? ?? 0,
+    maxSnoozes: json['maxSnoozes'] as int? ?? 3,
   );
 }
 
@@ -95,59 +127,204 @@ class _HomePageState extends State<HomePage> {
     }; // Por defecto mostrar todas
   }
 
-  Future<Map<String, String>?> _showAlarmDetailsDialog({
+  Future<Map<String, dynamic>?> _showAlarmDetailsDialog({
     String? initialTitle,
     String? initialMessage,
+    List<int>? initialRepeatDays,
+    bool? initialIsDaily,
+    bool? initialIsWeekly,
+    bool? initialIsWeekend,
+    int? initialMaxSnoozes,
   }) async {
-    final titleController = TextEditingController(text: initialTitle);
-    final messageController = TextEditingController(text: initialMessage);
-    final formKey = GlobalKey<FormState>();
+    final titleController = TextEditingController(text: initialTitle ?? '');
+    final messageController = TextEditingController(text: initialMessage ?? '');
 
-    return showDialog<Map<String, String>>(
+    // Valores iniciales para repetición
+    String repetitionType = 'none';
+    List<int> selectedDays = initialRepeatDays ?? [];
+
+    if (initialIsDaily == true) {
+      repetitionType = 'daily';
+    } else if (initialIsWeekly == true) {
+      repetitionType = 'weekly';
+    } else if (initialIsWeekend == true) {
+      repetitionType = 'weekend';
+    } else if (initialRepeatDays != null && initialRepeatDays.isNotEmpty) {
+      repetitionType = 'custom';
+      selectedDays = List.from(initialRepeatDays);
+    }
+
+    // Valores para los días de la semana
+    final daysOfWeek = [
+      'Lunes',
+      'Martes',
+      'Miércoles',
+      'Jueves',
+      'Viernes',
+      'Sábado',
+      'Domingo',
+    ];
+
+    // Opciones de repetición
+    final repetitionOptions = [
+      {'value': 'none', 'label': 'Sin repetición'},
+      {'value': 'daily', 'label': 'Diaria'},
+      {'value': 'weekly', 'label': 'Semanal (mismo día)'},
+      {'value': 'weekend', 'label': 'Fines de semana (Sáb-Dom)'},
+      {'value': 'custom', 'label': 'Personalizada'},
+    ];
+
+    // Valor para el número máximo de snoozes
+    int maxSnoozes = initialMaxSnoozes ?? 3;
+
+    return showDialog<Map<String, dynamic>>(
       context: context,
-      barrierDismissible: false, // User must tap button!
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(initialTitle == null ? 'Nueva Alarma' : 'Editar Alarma'),
-          content: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: ListBody(
-                children: <Widget>[
-                  TextFormField(
-                    controller: titleController,
-                    decoration: const InputDecoration(hintText: 'Título'),
-                    // Eliminamos el validador para permitir títulos vacíos
-                  ),
-                  TextFormField(
-                    controller: messageController,
-                    decoration: const InputDecoration(
-                      hintText: 'Mensaje (opcional)',
-                    ),
-                  ),
-                ],
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(
+                initialTitle == null ? 'Nueva Alarma' : 'Editar Alarma',
               ),
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancelar'),
-              onPressed: () {
-                Navigator.of(context).pop(null);
-              },
-            ),
-            TextButton(
-              child: const Text('Guardar'),
-              onPressed: () {
-                formKey.currentState!
-                    .validate(); // Validamos pero no bloqueamos
-                Navigator.of(context).pop({
-                  'title': titleController.text,
-                  'message': messageController.text,
-                });
-              },
-            ),
-          ],
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(hintText: 'Título'),
+                    ),
+                    TextField(
+                      controller: messageController,
+                      decoration: const InputDecoration(labelText: 'Mensaje'),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Repetición:'),
+                    ...repetitionOptions.map(
+                      (option) => RadioListTile<String>(
+                        title: Text(option['label'] as String),
+                        value: option['value'] as String,
+                        groupValue: repetitionType,
+                        onChanged: (value) {
+                          setState(() {
+                            repetitionType = value!;
+
+                            // Si cambiamos a semanal, añadimos el día actual
+                            if (value == 'weekly') {
+                              final now = DateTime.now();
+                              selectedDays = [now.weekday];
+                            }
+                            // Si cambiamos a fin de semana, seleccionamos sábado y domingo
+                            else if (value == 'weekend') {
+                              selectedDays = [
+                                DateTime.saturday,
+                                DateTime.sunday,
+                              ];
+                            }
+                            // Si no es personalizado, limpiamos la selección
+                            else if (value != 'custom') {
+                              selectedDays = [];
+                            }
+                          });
+                        },
+                      ),
+                    ),
+
+                    // Mostrar selección de días si es personalizado
+                    if (repetitionType == 'custom')
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+                          const Text('Selecciona los días:'),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8.0,
+                            children: List.generate(7, (index) {
+                              final dayValue =
+                                  index + 1; // 1-7 para Lunes-Domingo
+                              return FilterChip(
+                                label: Text(daysOfWeek[index]),
+                                selected: selectedDays.contains(dayValue),
+                                onSelected: (selected) {
+                                  setState(() {
+                                    if (selected) {
+                                      selectedDays.add(dayValue);
+                                    } else {
+                                      selectedDays.remove(dayValue);
+                                    }
+                                  });
+                                },
+                              );
+                            }),
+                          ),
+                        ],
+                      ),
+
+                    const SizedBox(height: 16),
+                    const Text('Número máximo de snoozes:'),
+                    Slider(
+                      value: maxSnoozes.toDouble(),
+                      min: 0,
+                      max: 5,
+                      divisions: 5,
+                      label: maxSnoozes.toString(),
+                      onChanged: (value) {
+                        setState(() {
+                          maxSnoozes = value.toInt();
+                        });
+                      },
+                    ),
+                    Text('Valor actual: $maxSnoozes'),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    // Validar que al menos hay un título
+                    if (titleController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Por favor, ingresa un título'),
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Validar que si es personalizado, al menos hay un día seleccionado
+                    if (repetitionType == 'custom' && selectedDays.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Por favor, selecciona al menos un día',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Preparar resultado
+                    final result = {
+                      'title': titleController.text,
+                      'message': messageController.text,
+                      'repetitionType': repetitionType,
+                      'repeatDays': selectedDays,
+                      'maxSnoozes': maxSnoozes,
+                    };
+
+                    Navigator.pop(context, result);
+                  },
+                  child: const Text('Guardar'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -162,12 +339,11 @@ class _HomePageState extends State<HomePage> {
     switch (call.method) {
       case 'showAlarmScreen':
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/alarm',
-            (route) => false,
-            arguments: args,
-          );
-        }
+          Navigator.of(context).pushNamed(
+          '/alarm',
+          arguments: args,
+        );
+      }
         break;
       case 'alarmManuallyStopped':
         if (alarmId != null) {
@@ -176,15 +352,15 @@ class _HomePageState extends State<HomePage> {
         break;
       case 'alarmManuallySnoozed':
         if (alarmId != null) {
-          final newTimeInMillis = args['newTimeInMillis'] as int?;
-          if (newTimeInMillis != null) {
-            _updateAlarmTime(
-              alarmId,
-              DateTime.fromMillisecondsSinceEpoch(newTimeInMillis),
-            );
-          }
+        final newTimeInMillis = args['newTimeInMillis'] as int?;
+        if (newTimeInMillis != null) {
+          _updateAlarmTime(
+            alarmId,
+            DateTime.fromMillisecondsSinceEpoch(newTimeInMillis),
+          );
         }
-        break;
+      }
+      break;
       case 'closeAlarmScreenIfOpen':
         break;
     }
@@ -213,7 +389,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _setAlarm() async {
-    final TimeOfDay? time = await showTimePicker(
+    final TimeOfDay? selectedTime = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
       cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
@@ -303,24 +479,22 @@ class _HomePageState extends State<HomePage> {
       },
     );
 
-    if (time != null && mounted) {
-      final alarmDetails = await _showAlarmDetailsDialog();
-      if (alarmDetails == null) return;
-
+    if (selectedTime != null && mounted) {
+      // Obtener la fecha y hora actual
       final now = DateTime.now();
-      // Normalize alarmTime to have 0 seconds and 0 milliseconds
+
+      // Crear una fecha con la hora seleccionada
       var alarmTime = DateTime(
         now.year,
         now.month,
         now.day,
-        time.hour,
-        time.minute,
+        selectedTime.hour,
+        selectedTime.minute,
         0, // seconds
         0, // milliseconds
       );
 
-      // If the normalized alarm time is before or exactly now, set it for the next day.
-      // Using isBefore or equals now, considering only H:M precision.
+      // Si la hora seleccionada ya pasó hoy, programarla para mañana
       final nowNormalized = DateTime(
         now.year,
         now.month,
@@ -335,19 +509,46 @@ class _HomePageState extends State<HomePage> {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      final alarmId = DateTime.now().millisecondsSinceEpoch % 100000;
+      // Mostrar el diálogo para obtener título, mensaje y configuración de repetición
+      final alarmDetails = await _showAlarmDetailsDialog();
+      if (alarmDetails == null) return;
+
       final title = alarmDetails['title']!.isNotEmpty
           ? alarmDetails['title']!
           : 'Alarma';
       final message = alarmDetails['message']!.isNotEmpty
           ? alarmDetails['message']!
           : '¡Es hora de despertar!';
+      final repetitionType = alarmDetails['repetitionType'] as String;
+      final repeatDays = alarmDetails['repeatDays'] as List<int>;
+      final maxSnoozes = alarmDetails['maxSnoozes'] as int;
 
+      // Configurar los valores de repetición
+      bool isDaily = repetitionType == 'daily';
+      bool isWeekly = repetitionType == 'weekly';
+      bool isWeekend = repetitionType == 'weekend';
+
+      // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
+      List<int> finalRepeatDays = List.from(repeatDays);
+      if (isWeekly && finalRepeatDays.isEmpty) {
+        finalRepeatDays.add(alarmTime.weekday);
+      }
+
+      // Crear un nuevo ID para la alarma
+      final alarmId = DateTime.now().millisecondsSinceEpoch % 100000;
+
+      // Crear la nueva alarma
       final newAlarm = Alarm(
         id: alarmId,
         time: alarmTime,
         title: title,
         message: message,
+        isActive: true,
+        repeatDays: finalRepeatDays,
+        isDaily: isDaily,
+        isWeekly: isWeekly,
+        isWeekend: isWeekend,
+        maxSnoozes: maxSnoozes,
       );
 
       try {
@@ -357,6 +558,10 @@ class _HomePageState extends State<HomePage> {
           'title': title,
           'message': message,
           'screenRoute': '/alarm',
+          'repeatDays': finalRepeatDays,
+          'isDaily': isDaily,
+          'isWeekly': isWeekly,
+          'isWeekend': isWeekend,
         });
         _alarms.add(newAlarm);
         await _saveAlarms();
@@ -372,10 +577,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _editAlarm(Alarm alarmToEdit) async {
-    final TimeOfDay? newTimeOfDay = await showTimePicker(
+  Future<void> _editAlarm(Alarm alarm) async {
+    // Mostrar el selector de tiempo con la hora actual de la alarma
+    final TimeOfDay initialTime = TimeOfDay(
+      hour: alarm.time.hour,
+      minute: alarm.time.minute,
+    );
+    final TimeOfDay? selectedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(alarmToEdit.time),
+      initialTime: initialTime,
       cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
       confirmText: 'Aceptar', // Cambia el texto del botón OK
       helpText: 'Seleccionar Hora',
@@ -462,79 +672,131 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-    if (newTimeOfDay == null) return;
+    if (selectedTime == null) return;
 
     final alarmDetails = await _showAlarmDetailsDialog(
-      initialTitle: alarmToEdit.title,
-      initialMessage: alarmToEdit.message,
+      initialTitle: alarm.title,
+      initialMessage: alarm.message,
     );
     // Use existing details if new ones are not provided or dialog is cancelled
     final String title =
-        (alarmDetails?['title'] ?? alarmToEdit.title).isNotEmpty
-        ? (alarmDetails?['title'] ?? alarmToEdit.title)
+        (alarmDetails?['title'] ?? alarm.title).isNotEmpty
+        ? (alarmDetails?['title'] ?? alarm.title)
         : 'Alarma';
-    final String message = alarmDetails?['message'] ?? alarmToEdit.message;
+    final String message = alarmDetails?['message'] ?? alarm.message;
 
-    if (mounted) {
+    if (selectedTime != null) {
+      // Obtener la fecha y hora actual
       final now = DateTime.now();
-      // Normalize newAlarmTime to have 0 seconds and 0 milliseconds
-      var newAlarmTime = DateTime(
+
+      // Crear una fecha con la hora seleccionada pero manteniendo la fecha original
+      DateTime alarmTime = DateTime(
         now.year,
         now.month,
         now.day,
-        newTimeOfDay.hour,
-        newTimeOfDay.minute,
-        0, // seconds
-        0, // milliseconds
+        selectedTime.hour,
+        selectedTime.minute,
       );
 
-      // If the normalized alarm time is before or exactly now, set it for the next day.
-      final nowNormalized = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        now.hour,
-        now.minute,
-        0,
-        0,
-      );
-      if (newAlarmTime.isBefore(nowNormalized) ||
-          newAlarmTime.isAtSameMomentAs(nowNormalized)) {
-        newAlarmTime = newAlarmTime.add(const Duration(days: 1));
+      // Si la hora seleccionada ya pasó hoy, programarla para mañana
+      // (solo para alarmas no repetitivas o si estamos cambiando la hora)
+      if (alarmTime.isBefore(now) &&
+          !alarm.isDaily &&
+          !alarm.isWeekly &&
+          !alarm.isWeekend &&
+          alarm.repeatDays.isEmpty) {
+        alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      try {
-        if (alarmToEdit.isActive) {
-          await platform.invokeMethod('cancelAlarm', {
-            'alarmId': alarmToEdit.id,
-          });
+      // Mostrar el diálogo para editar título, mensaje y configuración de repetición
+      final result = await _showAlarmDetailsDialog(
+        initialTitle: alarm.title,
+        initialMessage: alarm.message,
+        initialRepeatDays: alarm.repeatDays,
+        initialIsDaily: alarm.isDaily,
+        initialIsWeekly: alarm.isWeekly,
+        initialIsWeekend: alarm.isWeekend,
+        initialMaxSnoozes: alarm.maxSnoozes,
+      );
+
+      if (result != null) {
+        final title = result['title'] as String;
+        final message = result['message'] as String;
+        final repetitionType = result['repetitionType'] as String;
+        final repeatDays = result['repeatDays'] as List<int>;
+        final maxSnoozes = result['maxSnoozes'] as int;
+
+        // Configurar los valores de repetición
+        bool isDaily = repetitionType == 'daily';
+        bool isWeekly = repetitionType == 'weekly';
+        bool isWeekend = repetitionType == 'weekend';
+
+        // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
+        List<int> finalRepeatDays = List.from(repeatDays);
+        if (isWeekly && finalRepeatDays.isEmpty) {
+          finalRepeatDays.add(alarmTime.weekday);
         }
-        await platform.invokeMethod('setAlarm', {
-          'timeInMillis': newAlarmTime.millisecondsSinceEpoch,
-          'alarmId': alarmToEdit.id, // Use existing ID for editing
-          'title': title,
-          'message': message,
-          'screenRoute': '/alarm',
+
+        // Cancelar la alarma anterior
+        try {
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+        } catch (e) {
+          print('Error al cancelar la alarma anterior: $e');
+        }
+
+        // Actualizar la alarma en la lista
+        setState(() {
+          final index = _alarms.indexWhere((a) => a.id == alarm.id);
+          if (index != -1) {
+            _alarms[index] = Alarm(
+              id: alarm.id,
+              time: alarmTime,
+              title: title,
+              message: message,
+              
+              isActive: alarm.isActive,
+              repeatDays: finalRepeatDays,
+              isDaily: isDaily,
+              isWeekly: isWeekly,
+              isWeekend: isWeekend,
+              maxSnoozes: maxSnoozes,
+            );
+            _saveAlarms();
+          }
         });
 
-        final index = _alarms.indexWhere((a) => a.id == alarmToEdit.id);
-        if (index != -1) {
-          _alarms[index] = Alarm(
-            id: alarmToEdit.id,
-            time: newAlarmTime,
-            title: title,
-            message: message,
-            isActive: true, // Edited alarm should be active
-          );
+        // Reprogramar la alarma si está activa
+        if (alarm.isActive) {
+          try {
+            await platform.invokeMethod('setAlarm', {
+              'timeInMillis': alarmTime.millisecondsSinceEpoch,
+              'alarmId': alarm.id,
+              'title': title,
+              'message': message,
+              'screenRoute': '/alarm',
+              'repeatDays': finalRepeatDays,
+              'isDaily': isDaily,
+              'isWeekly': isWeekly,
+              'isWeekend': isWeekend,
+            });
+
+            // Actualizar el temporizador de cuenta regresiva
+            _startOrUpdateCountdown();
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Alarma actualizada para ${DateFormat('HH:mm').format(alarmTime)}',
+                ),
+              ),
+            );
+          } catch (e) {
+            print('Error al reprogramar la alarma: $e');
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Error al reprogramar la alarma')),
+            );
+          }
         }
-        await _saveAlarms();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Alarma actualizada y activa')),
-        );
-      } on PlatformException catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al actualizar alarma: ${e.message}')),
-        );
       }
     }
   }
@@ -740,17 +1002,26 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     final now = DateTime.now();
-    final difference = _currentNextAlarmForCountdown!.time.isAfter(now)
-        ? _currentNextAlarmForCountdown!.time.difference(now)
+    DateTime nextAlarmTime = _currentNextAlarmForCountdown!.time;
+
+    // Adjust for non-repeating alarms that are in the past for today
+    if (!_currentNextAlarmForCountdown!.isRepeating() &&
+        nextAlarmTime.isBefore(now)) {
+      nextAlarmTime = nextAlarmTime.add(const Duration(days: 1));
+    }
+
+    final difference = nextAlarmTime.isAfter(now)
+        ? nextAlarmTime.difference(now)
         : Duration.zero;
+
     if (mounted) {
       setState(() {
         _timeUntilNextAlarm = difference;
       });
     }
-    if (difference == Duration.zero &&
-        _currentNextAlarmForCountdown!.time.isBefore(now)) {
-      // Time has passed, refresh to find next alarm or clear countdown
+    if (difference == Duration.zero ||
+        (!_currentNextAlarmForCountdown!.isRepeating() &&
+            _currentNextAlarmForCountdown!.time.isBefore(now))) {
       _startOrUpdateCountdown();
     }
   }
@@ -782,9 +1053,26 @@ class _HomePageState extends State<HomePage> {
   }
 
   Alarm? _getNextActiveAlarm() {
+    final now = DateTime.now();
     final activeAlarms = _alarms.where((a) => a.isActive).toList();
     if (activeAlarms.isEmpty) return null;
-    activeAlarms.sort((a, b) => a.time.compareTo(b.time));
+
+    // Sort alarms: first by whether their time is after now, then by time.
+    // This prioritizes alarms yet to occur today.
+    // For non-repeating alarms, if their time has passed today, they are effectively for the next day.
+    activeAlarms.sort((a, b) {
+      DateTime aNextTime = a.time;
+      DateTime bNextTime = b.time;
+
+      // If not repeating and time is in the past for today, consider it for the next day for sorting
+      if (!a.isRepeating() && aNextTime.isBefore(now)) {
+        aNextTime = aNextTime.add(const Duration(days: 1));
+      }
+      if (!b.isRepeating() && bNextTime.isBefore(now)) {
+        bNextTime = bNextTime.add(const Duration(days: 1));
+      }
+      return aNextTime.compareTo(bNextTime);
+    });
     return activeAlarms.first;
   }
 

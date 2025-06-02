@@ -17,8 +17,10 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   static const String alarmGroupingKey = 'alarm_grouping_option';
-  static const String showNextAlarmKey =
-      'show_next_alarm'; // Key for showing/hiding next alarm section
+  static const String showNextAlarmKey = 'show_next_alarm';
+  static const String snoozeDurationKey = 'snooze_duration_minutes';
+  static const String maxSnoozesKey = 'max_snoozes';
+
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -27,6 +29,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   AlarmGroupingOption _selectedGrouping = AlarmGroupingOption.none;
   bool _showNextAlarmSection = true;
+  int _snoozeDuration = 5; // Valor predeterminado: 5 minutos
+  int _maxSnoozes = 3; // Valor predeterminado: 3 veces
 
   // Countdown timer variables (similar to HomePage)
   Timer? _countdownTimer;
@@ -54,6 +58,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AlarmGroupingOption.none.index;
     final showNextAlarm =
         prefs.getBool(SettingsScreen.showNextAlarmKey) ?? true;
+    final snoozeDuration =
+        prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
+    final maxSnoozes =
+        prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
 
     // Load alarms to calculate next alarm countdown
     final alarmsString = prefs.getStringList(_alarmsKey);
@@ -66,6 +74,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _selectedGrouping = AlarmGroupingOption.values[groupingIndex];
         _showNextAlarmSection = showNextAlarm;
+        _snoozeDuration = snoozeDuration;
+        _maxSnoozes = maxSnoozes;
+      
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
@@ -81,12 +92,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _saveSnoozeDuration(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.snoozeDurationKey, minutes);
+    if (mounted) {
+      setState(() {
+        _snoozeDuration = minutes;
+      });
+    }
+  }
+
   Future<void> _saveShowNextAlarmOption(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsScreen.showNextAlarmKey, value);
     if (mounted) {
       setState(() {
         _showNextAlarmSection = value;
+      });
+    }
+  }
+
+  Future<void> _saveMaxSnoozes(int count) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.maxSnoozesKey, count);
+    if (mounted) {
+      setState(() {
+        _maxSnoozes = count;
       });
     }
   }
@@ -298,6 +329,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                // Tarjeta para configuración de Snooze
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Configuración de Posponer (Snooze)',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // Duración del Snooze
+                        Text(
+                          'Duración: $_snoozeDuration minutos',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _snoozeDuration.toDouble(),
+                          min: 1,
+                          max: 30,
+                          divisions: 29,
+                          label: '$_snoozeDuration min',
+                          onChanged: (double value) {
+                            _saveSnoozeDuration(value.toInt());
+                          },
+                          activeColor: Colors.green,
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('1 min'),
+                            Text('15 min'),
+                            Text('30 min'),
+                          ],
+                        ),
+                        
+                        const SizedBox(height: 24),
+                        
+                        // Número máximo de Snoozes
+                        Text(
+                          'Número máximo: $_maxSnoozes veces',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _maxSnoozes.toDouble(),
+                          min: 1,
+                          max: 10,
+                          divisions: 9,
+                          label: '$_maxSnoozes veces',
+                          onChanged: (double value) {
+                            _saveMaxSnoozes(value.toInt());
+                          },
+                          activeColor: Colors.green,
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('1 vez'),
+                            Text('5 veces'),
+                            Text('10 veces'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
                 const SizedBox(height: 16),
 
                 // Add more settings here in separate Cards if needed
