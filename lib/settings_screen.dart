@@ -154,12 +154,23 @@ Alarm? _getNextActiveAlarm() {
   Duration? shortestDuration;
   
   for (final alarm in activeAlarms) {
-    DateTime nextAlarmTime = alarm.time;
+    DateTime nextAlarmTime;
     
     if (alarm.isRepeating()) {
       nextAlarmTime = _calculateNextOccurrence(alarm, now);
-    } else if (alarm.time.isBefore(now)) {
-      continue;
+    } else {
+      nextAlarmTime = alarm.time;
+      
+      // Si la hora ya pasó hoy, programar para mañana
+      if (nextAlarmTime.isBefore(now)) {
+        nextAlarmTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        ).add(const Duration(days: 1));
+      }
     }
     
     final duration = nextAlarmTime.difference(now);
@@ -188,7 +199,6 @@ Alarm? _getNextActiveAlarm() {
 }
 
 DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
-  // Implementar la misma lógica que en home_page.dart
   DateTime nextTime = alarm.time;
   
   if (alarm.isDaily) {
@@ -196,8 +206,35 @@ DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
       nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
           .add(const Duration(days: 1));
     }
+  } else if (alarm.isWeekly) {
+    final targetWeekday = alarm.time.weekday;
+    int daysUntilNext = (targetWeekday - now.weekday) % 7;
+    if (daysUntilNext == 0 && nextTime.isBefore(now)) {
+      daysUntilNext = 7;
+    }
+    nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
+        .add(Duration(days: daysUntilNext));
+  } else if (alarm.isWeekend) {
+    DateTime nextSaturday = now.add(Duration(days: (DateTime.saturday - now.weekday) % 7));
+    DateTime nextSunday = now.add(Duration(days: (DateTime.sunday - now.weekday) % 7));
+    
+    if (nextSaturday.isBefore(now)) nextSaturday = nextSaturday.add(const Duration(days: 7));
+    if (nextSunday.isBefore(now)) nextSunday = nextSunday.add(const Duration(days: 7));
+    
+    nextTime = nextSaturday.isBefore(nextSunday) ? 
+        DateTime(nextSaturday.year, nextSaturday.month, nextSaturday.day, alarm.time.hour, alarm.time.minute) :
+        DateTime(nextSunday.year, nextSunday.month, nextSunday.day, alarm.time.hour, alarm.time.minute);
+  } else if (alarm.repeatDays.isNotEmpty) {
+    int daysToAdd = 1;
+    while (daysToAdd <= 7) {
+      final testDate = now.add(Duration(days: daysToAdd));
+      if (alarm.repeatDays.contains(testDate.weekday)) {
+        nextTime = DateTime(testDate.year, testDate.month, testDate.day, alarm.time.hour, alarm.time.minute);
+        break;
+      }
+      daysToAdd++;
+    }
   }
-  // ... resto de la lógica igual que en home_page.dart
   
   return nextTime;
 }

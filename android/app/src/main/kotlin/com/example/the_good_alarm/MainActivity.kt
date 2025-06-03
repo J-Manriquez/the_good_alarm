@@ -129,11 +129,16 @@ class MainActivity : FlutterActivity() {
                     cancelAlarm(alarmId)
                     result.success(true)
                 }
+                // En el método onMethodCall, caso "stopAlarm"
                 "stopAlarm" -> {
                     val alarmId = call.argument<Int>("alarmId") ?: 0
                     Log.d("MainActivity", "Stopping alarm: $alarmId")
                     AlarmReceiver.stopAlarmSound()
                     cancelAlarm(alarmId)
+                    
+                    // AGREGAR: Notificar a Flutter que la alarma fue detenida
+                    methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmId))
+                    
                     result.success(true)
                 }
                 "snoozeAlarm" -> {

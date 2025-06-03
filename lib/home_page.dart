@@ -395,25 +395,24 @@ class _HomePageState extends State<HomePage> {
         print('Non-repeating alarm, deactivating...');
         setState(() {
           _alarms[index].isActive = false;
+          _alarms[index].snoozeCount = 0; // Reset snooze count
         });
         await _saveAlarms();
         print('Non-repeating alarm deactivated and saved');
       } else {
-        // Si la alarma es repetitiva pero ya sonó y no hay posposiciones activas,
-        // desactivarla también
+        // Si la alarma es repetitiva, solo desactivar si no hay snoozes activos
         if (alarm.snoozeCount == 0) {
-          print('Repeating alarm with no active snoozes, deactivating...');
+          print(
+            'Repeating alarm with no active snoozes, keeping active for next occurrence',
+          );
+          // Para alarmas repetitivas sin snoozes, mantener activa para la siguiente ocurrencia
+          // No hacer nada, la alarma se reprogramará automáticamente
+        } else {
+          print('Repeating alarm with active snoozes, resetting snooze count');
           setState(() {
-            _alarms[index].isActive = false;
+            _alarms[index].snoozeCount = 0; // Reset snooze count
           });
           await _saveAlarms();
-          print('Repeating alarm deactivated and saved');
-        } else {
-          print(
-            'Repeating alarm with active snoozes, keeping active for next occurrence',
-          );
-          // Para alarmas repetitivas con posposiciones activas, reprogramar para la siguiente ocurrencia
-          await _rescheduleRepeatingAlarm(alarm);
         }
       }
 
@@ -425,18 +424,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   // NUEVO: Reprogramar alarma repetitiva
-  Future<void> _rescheduleRepeatingAlarm(Alarm alarm) async {
-    print('=== RESCHEDULE REPEATING ALARM START ===');
-    print('Rescheduling alarm: ${alarm.title}');
+  // Future<void> _rescheduleRepeatingAlarm(Alarm alarm) async {
+  //   print('=== RESCHEDULE REPEATING ALARM START ===');
+  //   print('Rescheduling alarm: ${alarm.title}');
 
-    try {
-      await _setNativeAlarm(alarm);
-      print('Repeating alarm rescheduled successfully');
-    } catch (e) {
-      print('Error rescheduling repeating alarm: $e');
-    }
-    print('=== RESCHEDULE REPEATING ALARM END ===');
-  }
+  //   try {
+  //     await _setNativeAlarm(alarm);
+  //     print('Repeating alarm rescheduled successfully');
+  //   } catch (e) {
+  //     print('Error rescheduling repeating alarm: $e');
+  //   }
+  //   print('=== RESCHEDULE REPEATING ALARM END ===');
+  // }
 
   // NUEVO: Manejar cuando una alarma es pospuesta
   Future<void> _handleAlarmSnoozed(int alarmId, int newTimeInMillis) async {
@@ -1061,10 +1060,10 @@ class _HomePageState extends State<HomePage> {
   // In initState or a method called when alarms/settings change:
   void _startOrUpdateCountdown() {
     _countdownTimer?.cancel();
-    
+
     final nextAlarm = _getNextActiveAlarm();
     _currentNextAlarmForCountdown = nextAlarm;
-    
+
     if (nextAlarm != null) {
       _updateCountdown();
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -1081,7 +1080,7 @@ class _HomePageState extends State<HomePage> {
     if (_currentNextAlarmForCountdown != null) {
       final now = DateTime.now();
       final difference = _currentNextAlarmForCountdown!.time.difference(now);
-      
+
       if (difference.isNegative) {
         // Si la alarma ya pasó, recalcular la próxima alarma
         _startOrUpdateCountdown();
@@ -1096,27 +1095,37 @@ class _HomePageState extends State<HomePage> {
   Alarm? _getNextActiveAlarm() {
     final now = DateTime.now();
     final activeAlarms = _alarms.where((alarm) => alarm.isActive).toList();
-    
+
     if (activeAlarms.isEmpty) return null;
-    
+
     // Encontrar la próxima alarma activa
     Alarm? nextAlarm;
     Duration? shortestDuration;
-    
+
     for (final alarm in activeAlarms) {
       DateTime nextAlarmTime = alarm.time;
-      
+
       // Si la alarma es repetitiva, calcular la próxima ocurrencia
       if (alarm.isRepeating()) {
         nextAlarmTime = _calculateNextOccurrence(alarm, now);
-      } else if (alarm.time.isBefore(now)) {
-        // Si es una alarma no repetitiva que ya pasó, saltarla
-        continue;
+      } else {
+        // Para alarmas no repetitivas, verificar si necesita ser programada para el día siguiente
+        nextAlarmTime = alarm.time;
+        // Si la hora ya pasó hoy, programar para mañana
+        if (nextAlarmTime.isBefore(now)) {
+          nextAlarmTime = DateTime(
+            now.year,
+            now.month,
+            now.day,
+            alarm.time.hour,
+            alarm.time.minute,
+          ).add(const Duration(days: 1));
+        }
       }
-      
+
       final duration = nextAlarmTime.difference(now);
       if (duration.isNegative) continue;
-      
+
       if (shortestDuration == null || duration < shortestDuration) {
         shortestDuration = duration;
         nextAlarm = Alarm(
@@ -1135,18 +1144,23 @@ class _HomePageState extends State<HomePage> {
         );
       }
     }
-    
+
     return nextAlarm;
   }
 
   DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
     DateTime nextTime = alarm.time;
-    
+
     if (alarm.isDaily) {
       // Para alarmas diarias
       if (nextTime.isBefore(now) || nextTime.isAtSameMomentAs(now)) {
-        nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
-            .add(const Duration(days: 1));
+        nextTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        ).add(const Duration(days: 1));
       }
     } else if (alarm.isWeekly) {
       // Para alarmas semanales
@@ -1155,32 +1169,61 @@ class _HomePageState extends State<HomePage> {
       if (daysUntilNext == 0 && nextTime.isBefore(now)) {
         daysUntilNext = 7;
       }
-      nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
-          .add(Duration(days: daysUntilNext));
+      nextTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        alarm.time.hour,
+        alarm.time.minute,
+      ).add(Duration(days: daysUntilNext));
     } else if (alarm.isWeekend) {
       // Para alarmas de fin de semana
-      DateTime nextSaturday = now.add(Duration(days: (DateTime.saturday - now.weekday) % 7));
-      DateTime nextSunday = now.add(Duration(days: (DateTime.sunday - now.weekday) % 7));
-      
-      if (nextSaturday.isBefore(now)) nextSaturday = nextSaturday.add(const Duration(days: 7));
-      if (nextSunday.isBefore(now)) nextSunday = nextSunday.add(const Duration(days: 7));
-      
-      nextTime = nextSaturday.isBefore(nextSunday) ? 
-          DateTime(nextSaturday.year, nextSaturday.month, nextSaturday.day, alarm.time.hour, alarm.time.minute) :
-          DateTime(nextSunday.year, nextSunday.month, nextSunday.day, alarm.time.hour, alarm.time.minute);
+      DateTime nextSaturday = now.add(
+        Duration(days: (DateTime.saturday - now.weekday) % 7),
+      );
+      DateTime nextSunday = now.add(
+        Duration(days: (DateTime.sunday - now.weekday) % 7),
+      );
+
+      if (nextSaturday.isBefore(now))
+        nextSaturday = nextSaturday.add(const Duration(days: 7));
+      if (nextSunday.isBefore(now))
+        nextSunday = nextSunday.add(const Duration(days: 7));
+
+      nextTime = nextSaturday.isBefore(nextSunday)
+          ? DateTime(
+              nextSaturday.year,
+              nextSaturday.month,
+              nextSaturday.day,
+              alarm.time.hour,
+              alarm.time.minute,
+            )
+          : DateTime(
+              nextSunday.year,
+              nextSunday.month,
+              nextSunday.day,
+              alarm.time.hour,
+              alarm.time.minute,
+            );
     } else if (alarm.repeatDays.isNotEmpty) {
       // Para alarmas personalizadas
       int daysToAdd = 1;
       while (daysToAdd <= 7) {
         final testDate = now.add(Duration(days: daysToAdd));
         if (alarm.repeatDays.contains(testDate.weekday)) {
-          nextTime = DateTime(testDate.year, testDate.month, testDate.day, alarm.time.hour, alarm.time.minute);
+          nextTime = DateTime(
+            testDate.year,
+            testDate.month,
+            testDate.day,
+            alarm.time.hour,
+            alarm.time.minute,
+          );
           break;
         }
         daysToAdd++;
       }
     }
-    
+
     return nextTime;
   }
 
@@ -1188,11 +1231,11 @@ class _HomePageState extends State<HomePage> {
     if (duration.isNegative || duration == Duration.zero) {
       return '--:--:--';
     }
-    
+
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-    
+
     return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
