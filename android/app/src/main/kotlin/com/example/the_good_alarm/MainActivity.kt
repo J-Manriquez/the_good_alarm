@@ -96,11 +96,18 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: "Alarma"
                     val message = call.argument<String>("message") ?: "¡Es hora de despertar!"
                     val screenRoute = call.argument<String>("screenRoute") ?: "/alarm"
-                    
+                    val repeatDays = call.argument<List<Int>>("repeatDays") ?: emptyList()
+                    val isDaily = call.argument<Boolean>("isDaily") ?: false
+                    val isWeekly = call.argument<Boolean>("isWeekly") ?: false
+                    val isWeekend = call.argument<Boolean>("isWeekend") ?: false
+                    val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
+                    val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
+
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             if (alarmManager.canScheduleExactAlarms()) {
-                                setAlarm(timeInMillis, alarmId, title, message, screenRoute)
+                                setAlarm(timeInMillis, alarmId, title, message, screenRoute, 
+                                       repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes)
                                 result.success(true)
                             } else {
                                 val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
@@ -109,7 +116,8 @@ class MainActivity : FlutterActivity() {
                                 result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
                             }
                         } else {
-                            setAlarm(timeInMillis, alarmId, title, message, screenRoute)
+                            setAlarm(timeInMillis, alarmId, title, message, screenRoute,
+                                   repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes)
                             result.success(true)
                         }
                     } catch (e: Exception) {
@@ -131,16 +139,17 @@ class MainActivity : FlutterActivity() {
                 "snoozeAlarm" -> {
                     Log.d("MainActivity", "=== SNOOZE ALARM METHOD START ===")
                     val alarmId = call.argument<Int>("alarmId")
-                    val snoozeMinutes = call.argument<Int>("snoozeMinutes") ?: 5 // Usar valor pasado desde Flutter
+                    val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3  // OBTENER DEL FLUTTER
+                    val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5  // OBTENER DEL FLUTTER
                     
-                    Log.d("MainActivity", "Snoozing alarm ID: $alarmId for $snoozeMinutes minutes")
+                    Log.d("MainActivity", "Snoozing alarm ID: $alarmId for $snoozeDurationMinutes minutes, max: $maxSnoozes")
                     
                     if (alarmId != null) {
                         AlarmReceiver.stopAlarmSound()
                         cancelAlarm(alarmId)
                         
                         val calendar = Calendar.getInstance()
-                        calendar.add(Calendar.MINUTE, snoozeMinutes) // Usar duración configurada
+                        calendar.add(Calendar.MINUTE, snoozeDurationMinutes)
                         
                         Log.d("MainActivity", "New snooze time: ${calendar.time}")
                         
@@ -149,7 +158,9 @@ class MainActivity : FlutterActivity() {
                             alarmId = alarmId,
                             title = "Alarma Pospuesta",
                             message = "¡Es hora de despertar!",
-                            screenRoute = "/alarm"
+                            screenRoute = "/alarm",
+                            maxSnoozes = maxSnoozes,  // USAR VALOR CORRECTO
+                            snoozeDurationMinutes = snoozeDurationMinutes  // USAR VALOR CORRECTO
                         )
                         
                         methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf(
@@ -157,7 +168,7 @@ class MainActivity : FlutterActivity() {
                             "newTimeInMillis" to calendar.timeInMillis
                         ))
                         
-                        result.success("Alarm snoozed for $snoozeMinutes minutes")
+                        result.success("Alarm snoozed for $snoozeDurationMinutes minutes")
                         Log.d("MainActivity", "Alarm snoozed successfully")
                     } else {
                         Log.e("MainActivity", "Invalid alarm ID for snooze")
@@ -256,7 +267,9 @@ class MainActivity : FlutterActivity() {
                         alarmId = alarmIdFromIntent, // Reutiliza el ID o genera uno nuevo si es necesario
                         title = intent.getStringExtra("title") ?: "Alarma Pospuesta",
                         message = intent.getStringExtra("message") ?: "¡Es hora de despertar!",
-                        screenRoute = "/alarm"
+                        screenRoute = "/alarm",
+                        maxSnoozes = intent.getIntExtra("maxSnoozes", 3),  // Obtener del intent o usar valor por defecto
+                        snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)  // Obtener del intent o usar valor por defecto
                     )
                     // Informa a Flutter para actualizar la UI
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallySnoozed")
@@ -315,12 +328,15 @@ class MainActivity : FlutterActivity() {
         repeatDays: List<Int> = emptyList(),
         isDaily: Boolean = false,
         isWeekly: Boolean = false,
-        isWeekend: Boolean = false
+        isWeekend: Boolean = false,
+        maxSnoozes: Int = 3, // NUEVO PARÁMETRO
+        snoozeDurationMinutes: Int = 5 // NUEVO PARÁMETRO
     ) {
         Log.d("MainActivity", "=== SET ALARM START ===")
         Log.d("MainActivity", "Setting alarm - ID: $alarmId, Time: ${Date(timeInMillis)}")
         Log.d("MainActivity", "Repeat config - Daily: $isDaily, Weekly: $isWeekly, Weekend: $isWeekend, Days: $repeatDays")
-        
+        Log.d("MainActivity", "Snooze config - Duration: $snoozeDurationMinutes min, Max: $maxSnoozes")
+
         val intent = Intent(this, AlarmReceiver::class.java).apply {
             action = ALARM_ACTION
             putExtra("alarmId", alarmId)
@@ -331,6 +347,8 @@ class MainActivity : FlutterActivity() {
             putExtra("isDaily", isDaily)
             putExtra("isWeekly", isWeekly)
             putExtra("isWeekend", isWeekend)
+            putExtra("maxSnoozes", maxSnoozes) // AGREGAR
+            putExtra("snoozeDurationMinutes", snoozeDurationMinutes) // AGREGAR
         }
         
         val pendingIntent = PendingIntent.getBroadcast(

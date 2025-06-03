@@ -17,8 +17,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
   String message = '¡Es hora de despertar!';
   int snoozeCount = 0;
   int maxSnoozes = 3;
-  int snoozeDuration = 5;
-  int _snoozeDurationMinutes = 5; // Valor por defecto
+  int snoozeDurationMinutes = 5; // Valor por defecto
   static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
   @override
@@ -32,6 +31,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
       message = widget.arguments!['message'] ?? '¡Es hora de despertar!';
       snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
       maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
+      snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes']?? 5;
 
       // Cargar la duración del snooze desde SharedPreferences
       _loadSnoozeDuration();
@@ -46,10 +46,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
       final snoozeDuration = prefs.getInt('snooze_duration_minutes') ?? 5;
 
       setState(() {
-        _snoozeDurationMinutes = snoozeDuration;
+        snoozeDurationMinutes = snoozeDuration;
       });
 
-      print('Loaded snooze duration: $_snoozeDurationMinutes minutes');
+      print('Loaded snooze duration: $snoozeDurationMinutes minutes');
     } catch (e) {
       print('Error loading snooze settings: $e');
     }
@@ -60,7 +60,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
+        snoozeDurationMinutes = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
       });
     }
   }
@@ -81,7 +81,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
   
   Future<void> _snoozeAlarm() async {
     print('=== SNOOZE ALARM START ===');
-    print('Snoozing alarm ID: $alarmId for $_snoozeDurationMinutes minutes');
+    print('Snoozing alarm ID: $alarmId for $snoozeDurationMinutes minutes');
     print('Current snooze count: $snoozeCount, max: $maxSnoozes');
     
     if (snoozeCount >= maxSnoozes) {
@@ -95,7 +95,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
     try {
       await platform.invokeMethod('snoozeAlarm', {
         'alarmId': alarmId,
-        'snoozeMinutes': _snoozeDurationMinutes, // Usar configuración cargada
+        'maxSnoozes': maxSnoozes,  // AGREGAR
+        'snoozeDurationMinutes': snoozeDurationMinutes,  // AGREGAR
       });
       print('Snooze command sent to native code');
       
@@ -226,7 +227,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
                         ),
                       ),
                       child: Text(
-                        'Posponer $_snoozeDurationMinutes min',
+                        'Posponer $snoozeDurationMinutes min',
                         style: TextStyle(fontSize: 18),
                       ),
                     ),

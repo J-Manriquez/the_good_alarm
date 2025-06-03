@@ -71,7 +71,9 @@ class AlarmReceiver : BroadcastReceiver() {
         val alarmId = intent.getIntExtra("alarmId", -1)
         val title = intent.getStringExtra("title") ?: "Alarma"
         val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
-        
+        val maxSnoozes = intent.getIntExtra("maxSnoozes", 3) // AGREGAR
+        val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5) // AGREGAR
+
         Log.d("AlarmReceiver", "Alarm triggered - ID: $alarmId, Title: $title")
         
         try {
@@ -159,6 +161,8 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("message", message)
                 putExtra("screenRoute", "/alarm")
                 putExtra("autoShowAlarm", true) // Importante para que MainActivity sepa que debe mostrar la pantalla
+                putExtra("maxSnoozes", maxSnoozes) // AGREGAR
+                putExtra("snoozeDurationMinutes", snoozeDurationMinutes) // AGREGAR
             }
             val pendingLaunchIntent = PendingIntent.getActivity(
                 context, alarmId + 1000, launchIntent, // requestCode debe ser único

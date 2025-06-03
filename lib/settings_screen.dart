@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:the_good_alarm/modelo_alarm.dart';
 import 'dart:async'; // Required for Timer
 import 'home_page.dart'; // To access Alarm model and potentially _formatDuration
 
@@ -29,8 +30,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   AlarmGroupingOption _selectedGrouping = AlarmGroupingOption.none;
   bool _showNextAlarmSection = true;
-  int _snoozeDuration = 5; // Valor predeterminado: 5 minutos
-  int _maxSnoozes = 3; // Valor predeterminado: 3 veces
+
 
   // Countdown timer variables (similar to HomePage)
   Timer? _countdownTimer;
@@ -74,8 +74,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _selectedGrouping = AlarmGroupingOption.values[groupingIndex];
         _showNextAlarmSection = showNextAlarm;
-        _snoozeDuration = snoozeDuration;
-        _maxSnoozes = maxSnoozes;
       
       });
     }
@@ -92,15 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _saveSnoozeDuration(int minutes) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(SettingsScreen.snoozeDurationKey, minutes);
-    if (mounted) {
-      setState(() {
-        _snoozeDuration = minutes;
-      });
-    }
-  }
+
 
   Future<void> _saveShowNextAlarmOption(bool value) async {
     final prefs = await SharedPreferences.getInstance();
@@ -112,83 +102,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _saveMaxSnoozes(int count) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(SettingsScreen.maxSnoozesKey, count);
+
+
+  // --- Countdown Logic (adapted from HomePage) ---
+  // Agregar estos métodos a la clase _SettingsScreenState
+
+  void _startOrUpdateCountdown() {
+  _countdownTimer?.cancel();
+  
+  final nextAlarm = _getNextActiveAlarm();
+  _currentNextAlarmForCountdown = nextAlarm;
+  
+  if (nextAlarm != null) {
+    _updateCountdown();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _updateCountdown();
+    });
+  } else {
     if (mounted) {
       setState(() {
-        _maxSnoozes = count;
+        _timeUntilNextAlarm = Duration.zero;
       });
     }
   }
+}
 
-  // --- Countdown Logic (adapted from HomePage) ---
-  Alarm? _getNextActiveAlarm() {
-    final activeAlarms = _alarms.where((a) => a.isActive).toList();
-    if (activeAlarms.isEmpty) return null;
-    // Already sorted in _loadSettingsAndAlarms, but good to ensure
-    activeAlarms.sort((a, b) => a.time.compareTo(b.time));
-    return activeAlarms.first;
-  }
-
-  void _startOrUpdateCountdown() {
-    _countdownTimer?.cancel();
-    _currentNextAlarmForCountdown = _getNextActiveAlarm();
-
-    if (_currentNextAlarmForCountdown != null) {
-      _updateCountdown();
-      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        _updateCountdown();
-      });
+void _updateCountdown() {
+  if (_currentNextAlarmForCountdown != null) {
+    final now = DateTime.now();
+    final difference = _currentNextAlarmForCountdown!.time.difference(now);
+    
+    if (difference.isNegative) {
+      _startOrUpdateCountdown();
     } else {
       if (mounted) {
         setState(() {
-          _timeUntilNextAlarm = Duration.zero;
+          _timeUntilNextAlarm = difference;
         });
       }
     }
   }
+}
 
-  void _updateCountdown() {
-    if (_currentNextAlarmForCountdown == null ||
-        !_currentNextAlarmForCountdown!.isActive) {
-      _startOrUpdateCountdown(); // Re-evaluate if current alarm is no longer valid
-      return;
+Alarm? _getNextActiveAlarm() {
+  final now = DateTime.now();
+  final activeAlarms = _alarms.where((alarm) => alarm.isActive).toList();
+  
+  if (activeAlarms.isEmpty) return null;
+  
+  Alarm? nextAlarm;
+  Duration? shortestDuration;
+  
+  for (final alarm in activeAlarms) {
+    DateTime nextAlarmTime = alarm.time;
+    
+    if (alarm.isRepeating()) {
+      nextAlarmTime = _calculateNextOccurrence(alarm, now);
+    } else if (alarm.time.isBefore(now)) {
+      continue;
     }
-    final now = DateTime.now();
-    final difference = _currentNextAlarmForCountdown!.time.isAfter(now)
-        ? _currentNextAlarmForCountdown!.time.difference(now)
-        : Duration.zero;
-
-    if (mounted) {
-      setState(() {
-        _timeUntilNextAlarm = difference;
-      });
-    }
-
-    // If time has passed, and it's not just a brief moment (e.g. due to app resume)
-    if (difference == Duration.zero &&
-        _currentNextAlarmForCountdown!.time.isBefore(
-          now.subtract(const Duration(seconds: 1)),
-        )) {
-      _startOrUpdateCountdown(); // Refresh to find next alarm or clear countdown
+    
+    final duration = nextAlarmTime.difference(now);
+    if (duration.isNegative) continue;
+    
+    if (shortestDuration == null || duration < shortestDuration) {
+      shortestDuration = duration;
+      nextAlarm = Alarm(
+        id: alarm.id,
+        time: nextAlarmTime,
+        title: alarm.title,
+        message: alarm.message,
+        isActive: alarm.isActive,
+        repeatDays: alarm.repeatDays,
+        isDaily: alarm.isDaily,
+        isWeekly: alarm.isWeekly,
+        isWeekend: alarm.isWeekend,
+        snoozeCount: alarm.snoozeCount,
+        maxSnoozes: alarm.maxSnoozes,
+        snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+      );
     }
   }
+  
+  return nextAlarm;
+}
 
-  String _formatDuration(Duration duration) {
-    if (duration <= Duration.zero) {
-      return "--:--:--";
+DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
+  // Implementar la misma lógica que en home_page.dart
+  DateTime nextTime = alarm.time;
+  
+  if (alarm.isDaily) {
+    if (nextTime.isBefore(now) || nextTime.isAtSameMomentAs(now)) {
+      nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
+          .add(const Duration(days: 1));
     }
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    String hours = twoDigits(duration.inHours.remainder(24));
-    String minutes = twoDigits(duration.inMinutes.remainder(60));
-    String seconds = twoDigits(duration.inSeconds.remainder(60));
-    if (duration.inDays > 0) {
-      String days = duration.inDays.toString();
-      return "$days Días: $hours:$minutes:$seconds";
-    }
-    return "$hours:$minutes:$seconds";
   }
+  // ... resto de la lógica igual que en home_page.dart
+  
+  return nextTime;
+}
+
+String _formatDuration(Duration duration) {
+  if (duration.isNegative || duration == Duration.zero) {
+    return '--:--:--';
+  }
+  
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60);
+  final seconds = duration.inSeconds.remainder(60);
+  
+  return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+}
   // --- End Countdown Logic ---
 
   String _groupingOptionToString(
@@ -329,78 +353,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                // Tarjeta para configuración de Snooze
-                Card(
-                  elevation: 2.0,
-                  margin: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Configuración de Posponer (Snooze)',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // Duración del Snooze
-                        Text(
-                          'Duración: $_snoozeDuration minutos',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Slider(
-                          value: _snoozeDuration.toDouble(),
-                          min: 1,
-                          max: 30,
-                          divisions: 29,
-                          label: '$_snoozeDuration min',
-                          onChanged: (double value) {
-                            _saveSnoozeDuration(value.toInt());
-                          },
-                          activeColor: Colors.green,
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('1 min'),
-                            Text('15 min'),
-                            Text('30 min'),
-                          ],
-                        ),
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Número máximo de Snoozes
-                        Text(
-                          'Número máximo: $_maxSnoozes veces',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Slider(
-                          value: _maxSnoozes.toDouble(),
-                          min: 1,
-                          max: 10,
-                          divisions: 9,
-                          label: '$_maxSnoozes veces',
-                          onChanged: (double value) {
-                            _saveMaxSnoozes(value.toInt());
-                          },
-                          activeColor: Colors.green,
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('1 vez'),
-                            Text('5 veces'),
-                            Text('10 veces'),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                
                 const SizedBox(height: 16),
 
                 // Add more settings here in separate Cards if needed
