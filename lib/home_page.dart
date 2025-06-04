@@ -44,6 +44,8 @@ class _HomePageState extends State<HomePage> {
   bool _hasUnhandledAlarm = false;
   int? _pendingAlarmId;
 
+  bool moreAlarms = false;
+
   @override
   void initState() {
     super.initState();
@@ -1332,7 +1334,12 @@ class _HomePageState extends State<HomePage> {
 
     return Container(
       margin: const EdgeInsets.all(8.0),
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.only(
+        left: 16.0,
+        top: 16.0,
+        bottom: 0,
+        right: 16.0,
+      ),
       decoration: BoxDecoration(
         color: Colors.green.shade100,
         borderRadius: BorderRadius.circular(12.0),
@@ -1359,7 +1366,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 8),
           Container(
-            margin: const EdgeInsets.only(bottom: 8),
+            margin: const EdgeInsets.all(0),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -1395,16 +1402,70 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                otherActiveAlarmsCount > 0
-                    ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
-                    : 'No hay otras alarmas activas',
-              ),
-            ],
+          const SizedBox(height: 8),
+          Container(
+            margin: const EdgeInsets.all(0),
+            padding: const EdgeInsets.all(0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(width: 16),
+                Text(
+                  otherActiveAlarmsCount > 0
+                      ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
+                      : 'No hay otras alarmas activas',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+                if (otherActiveAlarmsCount > 0) ...[
+                  IconButton(
+                    icon: Icon(
+                      moreAlarms ? Icons.visibility_off : Icons.visibility,
+                      size: 20,
+                      color: Colors.green,
+                    ),
+                    onPressed: () => {
+                      setState(() {
+                        moreAlarms = !moreAlarms;
+                      }),
+                      // funcion para mostrar todas las alarmas activas
+                    },
+                  ),
+                ],
+                if (moreAlarms) ...[
+                  Expanded(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _alarms.length,
+                      itemBuilder: (context, index) {
+                        final alarm = _alarms[index];
+                        if (alarm.id != nextAlarm.id && alarm.isActive) {
+                          return ListTile(
+                            title: Text(alarm.title),
+                            subtitle: alarm.message.isNotEmpty
+                                ? Text(alarm.message)
+                                : null,
+                            trailing: Switch(
+                              value: alarm.isActive,
+                              onChanged: (bool value) {
+                                _toggleAlarmState(alarm.id, value);
+                              },
+                              activeColor: Colors.green,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ],
+              // if existen alarmas activas y icono de visivility esta activo, mostrarlas
+            ),
           ),
         ],
       ),
@@ -1812,7 +1873,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
-          
+
           Expanded(
             // El ListView/ExpansionPanelList debe estar en un Expanded
             child: _alarms.isEmpty
