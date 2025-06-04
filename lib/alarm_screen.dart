@@ -35,6 +35,25 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
       // Cargar la duración del snooze desde SharedPreferences
       _loadSnoozeDuration();
+      
+      // NUEVO: Notificar que la alarma está sonando cuando se abre la pantalla
+      _notifyAlarmRinging();
+    }
+  }
+
+  // NUEVO: Método para notificar que la alarma está sonando
+  Future<void> _notifyAlarmRinging() async {
+    try {
+      await platform.invokeMethod('notifyAlarmRinging', {
+        'alarmId': alarmId,
+        'title': title,
+        'message': message,
+        'snoozeCount': snoozeCount,
+        'maxSnoozes': maxSnoozes,
+        'snoozeDurationMinutes': snoozeDurationMinutes,
+      });
+    } catch (e) {
+      print('Error notifying alarm ringing: $e');
     }
   }
 
@@ -134,7 +153,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
           IconButton(
             icon: const Icon(Icons.home, color: Colors.white, size: 30),
             onPressed: () {
-              Navigator.of(context).pushNamed('/');
+              // MODIFICADO: Usar pop en lugar de pushNamed para volver a la instancia existente
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
           ),
         ],

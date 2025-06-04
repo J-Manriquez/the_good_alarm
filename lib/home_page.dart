@@ -30,6 +30,20 @@ class _HomePageState extends State<HomePage> {
   static const String _showNextAlarmKey =
       'show_next_alarm'; // Key para SharedPreferences
 
+  // NUEVO: Variables para controlar la alarma que está sonando
+  bool _isAlarmRinging = false;
+  int? _ringingAlarmId;
+  String _ringingAlarmTitle = '';
+  String _ringingAlarmMessage = '';
+  int _ringingAlarmSnoozeCount = 0;
+  int _ringingAlarmMaxSnoozes = 3;
+  int _ringingAlarmSnoozeDuration = 5;
+
+  // NUEVO: Variables para controlar el estado de la aplicación
+  bool _isAppInForeground = true;
+  bool _hasUnhandledAlarm = false;
+  int? _pendingAlarmId;
+
   @override
   void initState() {
     super.initState();
@@ -312,6 +326,14 @@ class _HomePageState extends State<HomePage> {
         final title = call.arguments['title'] as String;
         final message = call.arguments['message'] as String;
 
+        // NUEVO: Marcar que hay una alarma sonando
+        setState(() {
+          _isAlarmRinging = true;
+          _ringingAlarmId = alarmId;
+          _ringingAlarmTitle = title;
+          _ringingAlarmMessage = message;
+        });
+
         // Encontrar la alarma para obtener sus configuraciones
         final alarm = _alarms.firstWhere(
           (alarm) => alarm.id == alarmId,
@@ -322,6 +344,13 @@ class _HomePageState extends State<HomePage> {
             message: message,
           ),
         );
+
+        // NUEVO: Actualizar configuraciones de snooze
+        setState(() {
+          _ringingAlarmSnoozeCount = alarm.snoozeCount;
+          _ringingAlarmMaxSnoozes = alarm.maxSnoozes;
+          _ringingAlarmSnoozeDuration = alarm.snoozeDurationMinutes;
+        });
 
         if (mounted) {
           Navigator.of(context).push(
@@ -340,9 +369,36 @@ class _HomePageState extends State<HomePage> {
           );
         }
         break;
+      // NUEVO: Manejar notificación de alarma sonando
+      case 'notifyAlarmRinging':
+        final alarmId = call.arguments['alarmId'] as int;
+        final title = call.arguments['title'] as String;
+        final message = call.arguments['message'] as String;
+        final snoozeCount = call.arguments['snoozeCount'] as int;
+        final maxSnoozes = call.arguments['maxSnoozes'] as int;
+        final snoozeDuration = call.arguments['snoozeDurationMinutes'] as int;
 
+        setState(() {
+          _isAlarmRinging = true;
+          _ringingAlarmId = alarmId;
+          _ringingAlarmTitle = title;
+          _ringingAlarmMessage = message;
+          _ringingAlarmSnoozeCount = snoozeCount;
+          _ringingAlarmMaxSnoozes = maxSnoozes;
+          _ringingAlarmSnoozeDuration = snoozeDuration;
+        });
+        break;
       case 'alarmManuallyStopped':
         print('Alarm manually stopped: $alarmId');
+        // NUEVO: Ocultar el contenedor de alarma sonando
+        setState(() {
+          _isAlarmRinging = false;
+          _ringingAlarmId = null;
+          _ringingAlarmTitle = '';
+          _ringingAlarmMessage = '';
+          _ringingAlarmSnoozeCount = 0;
+        });
+
         if (alarmId != null) {
           await _handleAlarmStopped(alarmId);
         }
@@ -355,6 +411,15 @@ class _HomePageState extends State<HomePage> {
       case 'alarmManuallySnoozed':
         final alarmId = call.arguments['alarmId'] as int;
         final newTimeInMillis = call.arguments['newTimeInMillis'] as int;
+
+        // NUEVO: Ocultar el contenedor de alarma sonando cuando se pospone
+        setState(() {
+          _isAlarmRinging = false;
+          _ringingAlarmId = null;
+          _ringingAlarmTitle = '';
+          _ringingAlarmMessage = '';
+          _ringingAlarmSnoozeCount = 0;
+        });
 
         // Encontrar la alarma y actualizar su snoozeCount
         final alarmIndex = _alarms.indexWhere((alarm) => alarm.id == alarmId);
@@ -372,6 +437,15 @@ class _HomePageState extends State<HomePage> {
         break;
       case 'closeAlarmScreenIfOpen':
         print('Closing alarm screen if open for alarm: $alarmId');
+        // NUEVO: También ocultar el contenedor cuando se cierra la pantalla
+        setState(() {
+          _isAlarmRinging = false;
+          _ringingAlarmId = null;
+          _ringingAlarmTitle = '';
+          _ringingAlarmMessage = '';
+          _ringingAlarmSnoozeCount = 0;
+        });
+
         if (mounted && Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
@@ -1256,33 +1330,59 @@ class _HomePageState extends State<HomePage> {
         .where((a) => a.isActive && a.id != nextAlarm.id)
         .length;
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.all(8.0),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Próxima Alarma: ${TimeOfDay.fromDateTime(nextAlarm.time).format(context)}',
-              style: Theme.of(context).textTheme.titleLarge,
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: Colors.green.shade100,
+        borderRadius: BorderRadius.circular(12.0),
+        border: Border.all(color: Colors.green.shade400, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.shade200,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Próxima Alarma: ${TimeOfDay.fromDateTime(nextAlarm.time).format(context)}'
+                .toUpperCase(),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.green.shade700,
             ),
-            Text(
-              nextAlarm.title,
-              style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green.shade300),
             ),
-            if (nextAlarm.message.isNotEmpty)
-              Text(
-                nextAlarm.message,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  otherActiveAlarmsCount > 0
-                      ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
-                      : 'No hay otras alarmas activas',
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    Text(
+                      nextAlarm.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (nextAlarm.message.isNotEmpty)
+                      Text(
+                        nextAlarm.message,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
                 ),
                 Switch(
                   value: nextAlarm.isActive,
@@ -1294,8 +1394,19 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                otherActiveAlarmsCount > 0
+                    ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
+                    : 'No hay otras alarmas activas',
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1315,15 +1426,21 @@ class _HomePageState extends State<HomePage> {
           const PopupMenuItem<String>(value: 'delete', child: Text('Eliminar')),
         ],
       ),
-      title: Text(alarm.title),
+      title: Text(alarm.title, style: TextStyle(fontWeight: FontWeight.bold)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(alarm.message.isNotEmpty ? alarm.message : 'Sin mensaje'),
-          if (alarm.isActive)
-            Text(
-              'Próxima vez: ${TimeOfDay.fromDateTime(alarm.time).format(context)}',
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Text('Próxima vez: '),
+              Text(
+                TimeOfDay.fromDateTime(alarm.time).format(context),
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
           if (alarm.isActive)
             Builder(
               // Use Builder to get a fresh context if needed for TextTheme
@@ -1349,6 +1466,189 @@ class _HomePageState extends State<HomePage> {
         },
         activeColor: Colors.green,
         inactiveThumbColor: Colors.black,
+      ),
+    );
+  }
+
+  // NUEVO: Método para construir el contenedor de alarma sonando
+  Widget _buildRingingAlarmContainer() {
+    if (!_isAlarmRinging || _ringingAlarmId == null) {
+      return const SizedBox.shrink();
+    }
+
+    final canSnooze = _ringingAlarmSnoozeCount < _ringingAlarmMaxSnoozes;
+
+    return GestureDetector(
+      onTap: () {
+        // Navegar a AlarmScreen cuando se toca el contenedor
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => AlarmScreen(
+              arguments: {
+                'alarmId': _ringingAlarmId!,
+                'title': _ringingAlarmTitle,
+                'message': _ringingAlarmMessage,
+                'snoozeCount': _ringingAlarmSnoozeCount,
+                'maxSnoozes': _ringingAlarmMaxSnoozes,
+                'snoozeDurationMinutes': _ringingAlarmSnoozeDuration,
+              },
+            ),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          color: Colors.red.shade100,
+          borderRadius: BorderRadius.circular(12.0),
+          border: Border.all(color: Colors.red.shade400, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.red.shade200,
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Icon(Icons.alarm, color: Colors.red.shade700, size: 35),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'ALARMA SONANDO',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _ringingAlarmTitle.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 35,
+                      fontWeight: FontWeight.bold,
+                      color: Color.fromARGB(255, 235, 64, 52),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (_ringingAlarmMessage.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _ringingAlarmMessage,
+                      style: TextStyle(
+                        fontSize: 20,
+                        color: Colors.red.shade600,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                ElevatedButton(
+                  onPressed: () async {
+                    try {
+                      await platform.invokeMethod('stopAlarm', {
+                        'alarmId': _ringingAlarmId,
+                      });
+                    } catch (e) {
+                      print('Error stopping alarm: $e');
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'APAGAR ALARMA',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                if (canSnooze)
+                  ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await platform.invokeMethod('snoozeAlarm', {
+                          'alarmId': _ringingAlarmId,
+                          'maxSnoozes': _ringingAlarmMaxSnoozes,
+                          'snoozeDurationMinutes': _ringingAlarmSnoozeDuration,
+                        });
+                      } catch (e) {
+                        print('Error snoozing alarm: $e');
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'POSPONER $_ringingAlarmSnoozeDuration MIN',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                if (!canSnooze) ...[
+                  Container(
+                    padding: const EdgeInsets.all(8.0),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(6.0),
+                      border: Border.all(color: Colors.red.shade300),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Icon(Icons.warning, color: Colors.white, size: 25),
+                        Text(
+                          'Máximo Posposiciones Alcanzado ($_ringingAlarmSnoozeCount/$_ringingAlarmMaxSnoozes)',
+                          style: TextStyle(
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1387,7 +1687,6 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        // Envolver en Column para añadir la nueva sección
         children: [
           Container(
             width: double.infinity,
@@ -1401,103 +1700,119 @@ class _HomePageState extends State<HomePage> {
               textAlign: TextAlign.center,
             ),
           ),
-          _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
 
+          // NUEVO: Contenedor para alarma sonando
+          _buildRingingAlarmContainer(),
           if (_getSnoozedAlarms().isNotEmpty)
-            Card(
-              margin: const EdgeInsets.all(16.0),
-              color: Colors.orange.shade100,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.snooze, color: Colors.orange.shade700),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Alarmas Pospuestas (${_getSnoozedAlarms().length})',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade700,
+            Container(
+              margin: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(16.0),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(12.0),
+                border: Border.all(color: Colors.orange.shade400, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orange.shade200,
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.snooze,
+                        color: Colors.orange.shade700,
+                        size: 35,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Alarmas Pospuestas (${_getSnoozedAlarms().length})'
+                            .toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ..._getSnoozedAlarms()
+                      .map(
+                        (alarm) => Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange.shade300),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      alarm.title,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Sonará: ${DateFormat('HH:mm').format(alarm.time)}',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
+                                      style: TextStyle(
+                                        color: Colors.orange.shade700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () async {
+                                  // Desactivar alarma pospuesta
+                                  await _toggleAlarmState(alarm.id, false);
+                                  // Resetear contador de snooze
+                                  setState(() {
+                                    final index = _alarms.indexWhere(
+                                      (a) => a.id == alarm.id,
+                                    );
+                                    if (index != -1) {
+                                      _alarms[index].snoozeCount = 0;
+                                    }
+                                  });
+                                  await _saveAlarms();
+                                },
+                                icon: Icon(
+                                  Icons.cancel,
+                                  color: Colors.red.shade600,
+                                ),
+                                tooltip: 'Desactivar alarma pospuesta',
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    ..._getSnoozedAlarms()
-                        .map(
-                          (alarm) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.orange.shade300),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        alarm.title,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Sonará: ${DateFormat('HH:mm').format(alarm.time)}',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade600,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
-                                        style: TextStyle(
-                                          color: Colors.orange.shade700,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () async {
-                                    // Desactivar alarma pospuesta
-                                    await _toggleAlarmState(alarm.id, false);
-                                    // Resetear contador de snooze
-                                    setState(() {
-                                      final index = _alarms.indexWhere(
-                                        (a) => a.id == alarm.id,
-                                      );
-                                      if (index != -1) {
-                                        _alarms[index].snoozeCount = 0;
-                                      }
-                                    });
-                                    await _saveAlarms();
-                                  },
-                                  icon: Icon(
-                                    Icons.cancel,
-                                    color: Colors.red.shade600,
-                                  ),
-                                  tooltip: 'Desactivar alarma pospuesta',
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                ),
+                      )
+                      .toList(),
+                ],
               ),
             ),
+          _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
+          
           Expanded(
             // El ListView/ExpansionPanelList debe estar en un Expanded
             child: _alarms.isEmpty
