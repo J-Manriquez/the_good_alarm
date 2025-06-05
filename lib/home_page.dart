@@ -334,14 +334,14 @@ class _HomePageState extends State<HomePage> {
   // MODIFICADA: Función para calcular correctamente el tiempo hasta la próxima alarma
   Duration _calculateTimeUntilAlarm(Alarm alarm) {
     final now = DateTime.now();
-    
+
     if (!alarm.isRepeating()) {
       // Para alarmas no repetitivas, usar la lógica anterior
       DateTime alarmTime = alarm.time;
-      
-      if (alarmTime.isBefore(now) || 
-          (alarmTime.hour < now.hour || 
-           (alarmTime.hour == now.hour && alarmTime.minute <= now.minute))) {
+
+      if (alarmTime.isBefore(now) ||
+          (alarmTime.hour < now.hour ||
+              (alarmTime.hour == now.hour && alarmTime.minute <= now.minute))) {
         alarmTime = DateTime(
           now.year,
           now.month,
@@ -350,14 +350,15 @@ class _HomePageState extends State<HomePage> {
           alarm.time.minute,
         );
       }
-      
+
       return alarmTime.difference(now);
     }
-    
+
     // Para alarmas repetitivas
     DateTime nextAlarmTime = _getNextRepeatAlarmTime(alarm, now);
     return nextAlarmTime.difference(now);
   }
+
   // NUEVA: Función para calcular la próxima vez que sonará una alarma repetitiva
   DateTime _getNextRepeatAlarmTime(Alarm alarm, DateTime now) {
     DateTime todayAlarmTime = DateTime(
@@ -367,7 +368,7 @@ class _HomePageState extends State<HomePage> {
       alarm.time.hour,
       alarm.time.minute,
     );
-    
+
     if (alarm.isDaily) {
       // Si es diaria y aún no ha pasado hoy, es hoy
       if (todayAlarmTime.isAfter(now)) {
@@ -376,58 +377,61 @@ class _HomePageState extends State<HomePage> {
       // Si ya pasó, es mañana
       return todayAlarmTime.add(const Duration(days: 1));
     }
-    
+
     if (alarm.isWeekend) {
       // Fin de semana: sábado (6) y domingo (7)
       int currentWeekday = now.weekday;
-      
+
       // Si es sábado o domingo y aún no ha pasado la hora
-      if ((currentWeekday == 6 || currentWeekday == 7) && todayAlarmTime.isAfter(now)) {
+      if ((currentWeekday == 6 || currentWeekday == 7) &&
+          todayAlarmTime.isAfter(now)) {
         return todayAlarmTime;
       }
-      
+
       // Calcular días hasta el próximo fin de semana
       int daysUntilSaturday;
-      if (currentWeekday == 7) { // Domingo
+      if (currentWeekday == 7) {
+        // Domingo
         daysUntilSaturday = 6; // Próximo sábado
       } else {
         daysUntilSaturday = 6 - currentWeekday; // Días hasta sábado
       }
-      
+
       return todayAlarmTime.add(Duration(days: daysUntilSaturday));
     }
-    
+
     if (alarm.isWeekly) {
       // Semanal: mismo día de la semana
       int currentWeekday = now.weekday;
       int alarmWeekday = alarm.time.weekday;
-      
+
       // Si es el mismo día y aún no ha pasado la hora
       if (currentWeekday == alarmWeekday && todayAlarmTime.isAfter(now)) {
         return todayAlarmTime;
       }
-      
+
       // Calcular días hasta la próxima semana
       int daysUntilNextWeek = 7 - ((currentWeekday - alarmWeekday) % 7);
       if (daysUntilNextWeek == 7 && currentWeekday == alarmWeekday) {
         daysUntilNextWeek = 7; // Próxima semana
       }
-      
+
       return todayAlarmTime.add(Duration(days: daysUntilNextWeek));
     }
-    
+
     if (alarm.repeatDays.isNotEmpty) {
       // Días personalizados
       int currentWeekday = now.weekday;
-      
+
       // Verificar si hoy está en los días de repetición y aún no ha pasado
-      if (alarm.repeatDays.contains(currentWeekday) && todayAlarmTime.isAfter(now)) {
+      if (alarm.repeatDays.contains(currentWeekday) &&
+          todayAlarmTime.isAfter(now)) {
         return todayAlarmTime;
       }
-      
+
       // Buscar el próximo día de repetición
       List<int> sortedDays = List.from(alarm.repeatDays)..sort();
-      
+
       // Buscar el próximo día en esta semana
       for (int day in sortedDays) {
         if (day > currentWeekday) {
@@ -435,13 +439,13 @@ class _HomePageState extends State<HomePage> {
           return todayAlarmTime.add(Duration(days: daysUntil));
         }
       }
-      
+
       // Si no hay días restantes esta semana, usar el primer día de la próxima semana
       int firstDay = sortedDays.first;
       int daysUntilNextWeek = 7 - currentWeekday + firstDay;
       return todayAlarmTime.add(Duration(days: daysUntilNextWeek));
     }
-    
+
     // Fallback: mañana
     return todayAlarmTime.add(const Duration(days: 1));
   }
@@ -1167,23 +1171,44 @@ class _HomePageState extends State<HomePage> {
     DateTime nextTime = alarm.time;
 
     if (alarm.isDaily) {
-      // Para alarmas diarias
-      if (nextTime.isBefore(now) || nextTime.isAtSameMomentAs(now)) {
-        nextTime = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          alarm.time.hour,
-          alarm.time.minute,
-        ).add(const Duration(days: 1));
+      // Para alarmas diarias - crear la hora de hoy primero
+      DateTime todayAlarmTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        alarm.time.hour,
+        alarm.time.minute,
+      );
+
+      // Si la hora de hoy ya pasó, programar para mañana
+      if (todayAlarmTime.isBefore(now) ||
+          todayAlarmTime.isAtSameMomentAs(now)) {
+        nextTime = todayAlarmTime.add(const Duration(days: 1));
+      } else {
+        // Si aún no ha pasado, usar la hora de hoy
+        nextTime = todayAlarmTime;
       }
     } else if (alarm.isWeekly) {
       // Para alarmas semanales
       final targetWeekday = alarm.time.weekday;
       int daysUntilNext = (targetWeekday - now.weekday) % 7;
-      if (daysUntilNext == 0 && nextTime.isBefore(now)) {
-        daysUntilNext = 7;
+
+      // Si es el mismo día, verificar si la hora ya pasó
+      if (daysUntilNext == 0) {
+        DateTime todayAlarmTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        );
+
+        if (todayAlarmTime.isBefore(now) ||
+            todayAlarmTime.isAtSameMomentAs(now)) {
+          daysUntilNext = 7; // Próxima semana
+        }
       }
+
       nextTime = DateTime(
         now.year,
         now.month,
@@ -1193,56 +1218,84 @@ class _HomePageState extends State<HomePage> {
       ).add(Duration(days: daysUntilNext));
     } else if (alarm.isWeekend) {
       // Para alarmas de fin de semana
-      DateTime nextSaturday = now.add(
-        Duration(days: (DateTime.saturday - now.weekday) % 7),
-      );
-      DateTime nextSunday = now.add(
-        Duration(days: (DateTime.sunday - now.weekday) % 7),
-      );
+      List<DateTime> weekendTimes = [];
 
-      if (nextSaturday.isBefore(now))
+      // Calcular próximo sábado
+      int daysUntilSaturday = (DateTime.saturday - now.weekday) % 7;
+      DateTime nextSaturday = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        alarm.time.hour,
+        alarm.time.minute,
+      ).add(Duration(days: daysUntilSaturday));
+
+      // Si es sábado y la hora ya pasó, usar el próximo sábado
+      if (daysUntilSaturday == 0 && nextSaturday.isBefore(now)) {
         nextSaturday = nextSaturday.add(const Duration(days: 7));
-      if (nextSunday.isBefore(now))
-        nextSunday = nextSunday.add(const Duration(days: 7));
+      }
 
-      nextTime = nextSaturday.isBefore(nextSunday)
-          ? DateTime(
-              nextSaturday.year,
-              nextSaturday.month,
-              nextSaturday.day,
-              alarm.time.hour,
-              alarm.time.minute,
-            )
-          : DateTime(
-              nextSunday.year,
-              nextSunday.month,
-              nextSunday.day,
+      // Calcular próximo domingo
+      int daysUntilSunday = (DateTime.sunday - now.weekday) % 7;
+      DateTime nextSunday = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        alarm.time.hour,
+        alarm.time.minute,
+      ).add(Duration(days: daysUntilSunday));
+
+      // Si es domingo y la hora ya pasó, usar el próximo domingo
+      if (daysUntilSunday == 0 && nextSunday.isBefore(now)) {
+        nextSunday = nextSunday.add(const Duration(days: 7));
+      }
+
+      // Elegir el más cercano
+      nextTime = nextSaturday.isBefore(nextSunday) ? nextSaturday : nextSunday;
+    } else if (alarm.repeatDays.isNotEmpty) {
+      // Para alarmas personalizadas
+      DateTime? closestTime;
+
+      // Verificar si hoy está en los días de repetición
+      if (alarm.repeatDays.contains(now.weekday)) {
+        DateTime todayAlarmTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        );
+
+        // Si la hora de hoy aún no ha pasado, usarla
+        if (todayAlarmTime.isAfter(now)) {
+          closestTime = todayAlarmTime;
+        }
+      }
+
+      // Si no encontramos una hora válida hoy, buscar en los próximos días
+      if (closestTime == null) {
+        for (int daysToAdd = 1; daysToAdd <= 7; daysToAdd++) {
+          final testDate = now.add(Duration(days: daysToAdd));
+          if (alarm.repeatDays.contains(testDate.weekday)) {
+            closestTime = DateTime(
+              testDate.year,
+              testDate.month,
+              testDate.day,
               alarm.time.hour,
               alarm.time.minute,
             );
-    } else if (alarm.repeatDays.isNotEmpty) {
-      // Para alarmas personalizadas
-      int daysToAdd = 1;
-      while (daysToAdd <= 7) {
-        final testDate = now.add(Duration(days: daysToAdd));
-        if (alarm.repeatDays.contains(testDate.weekday)) {
-          nextTime = DateTime(
-            testDate.year,
-            testDate.month,
-            testDate.day,
-            alarm.time.hour,
-            alarm.time.minute,
-          );
-          break;
+            break;
+          }
         }
-        daysToAdd++;
       }
+
+      nextTime = closestTime ?? nextTime;
     }
 
     return nextTime;
   }
 
-    String _formatDuration(Duration duration) {
+  String _formatDuration(Duration duration) {
     if (duration.isNegative || duration == Duration.zero) {
       return '--:--:--';
     }
@@ -1499,7 +1552,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-    Widget _buildAlarmItem(Alarm alarm) {
+  Widget _buildAlarmItem(Alarm alarm) {
     return ListTile(
       leading: PopupMenuButton<String>(
         onSelected: (String result) {
@@ -1557,7 +1610,9 @@ class _HomePageState extends State<HomePage> {
                 final durationUntilAlarm = _calculateTimeUntilAlarm(alarm);
                 return Text(
                   'Faltan: ${_formatDuration(durationUntilAlarm)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.green),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.green),
                 );
               },
             ),
@@ -1573,6 +1628,7 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
   // NUEVO: Método para construir el contenedor de alarma sonando
   Widget _buildRingingAlarmContainer() {
     if (!_isAlarmRinging || _ringingAlarmId == null) {
@@ -1761,34 +1817,34 @@ class _HomePageState extends State<HomePage> {
     if (!alarm.isRepeating()) {
       return '';
     }
-    
+
     if (alarm.isDaily) {
       return '[Diario] ';
     }
-    
+
     if (alarm.isWeekend) {
       return '[Fin de semana] ';
     }
-    
+
     if (alarm.isWeekly) {
       return '[Semanal] ';
     }
-    
+
     if (alarm.repeatDays.isNotEmpty) {
       List<String> dayNames = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
       List<String> activeDays = [];
-      
+
       for (int day in alarm.repeatDays) {
         if (day >= 1 && day <= 7) {
           activeDays.add(dayNames[day - 1]);
         }
       }
-      
+
       if (activeDays.isNotEmpty) {
         return '[${activeDays.join(',')}] ';
       }
     }
-    
+
     return '';
   }
 
@@ -1837,7 +1893,7 @@ class _HomePageState extends State<HomePage> {
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               color: hasActiveAlarms ? Colors.green : Colors.black,
               child: Text(
-                hasActiveAlarms 
+                hasActiveAlarms
                     ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
                     : 'No hay alarmas activas',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
