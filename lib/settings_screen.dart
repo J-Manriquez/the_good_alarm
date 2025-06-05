@@ -239,17 +239,27 @@ DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
   return nextTime;
 }
 
-String _formatDuration(Duration duration) {
-  if (duration.isNegative || duration == Duration.zero) {
-    return '--:--:--';
+  String _formatDuration(Duration duration) {
+    if (duration.isNegative || duration == Duration.zero) {
+      return '--:--:--';
+    }
+  
+    final days = duration.inDays;
+    final hours = duration.inHours.remainder(24);
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+  
+    if (days > 0) {
+      // Formato: dd:hh:mm:ss
+      return '${days.toString().padLeft(2, '0')}:${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    } else if (hours > 0) {
+      // Formato: hh:mm:ss
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    } else {
+      // Formato: mm:ss
+      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
   }
-  
-  final hours = duration.inHours;
-  final minutes = duration.inMinutes.remainder(60);
-  final seconds = duration.inSeconds.remainder(60);
-  
-  return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-}
   // --- End Countdown Logic ---
 
   String _groupingOptionToString(
@@ -285,6 +295,10 @@ String _formatDuration(Duration duration) {
     double sliderValue = _selectedGrouping.index.toDouble();
     final sliderDivisions = AlarmGroupingOption.values.length - 1; // 0 to 4
 
+    // Verificar si hay alarmas activas
+    final hasActiveAlarms = _alarms.any((alarm) => alarm.isActive);
+    final nextAlarm = _getNextActiveAlarm();
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color.fromARGB(255, 0, 0, 0),
@@ -309,12 +323,14 @@ String _formatDuration(Duration duration) {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8.0),
-              color: Colors.green, // Or your preferred color
+              color: hasActiveAlarms ? Colors.green : Colors.black,
               child: Text(
-                'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(color: Colors.white),
+                hasActiveAlarms 
+                    ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
+                    : 'No hay alarmas activas',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: const Color.fromARGB(255, 255, 255, 255),
+                ),
                 textAlign: TextAlign.center,
               ),
             ),
