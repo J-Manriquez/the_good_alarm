@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,11 +32,11 @@ class _AlarmScreenState extends State<AlarmScreen> {
       message = widget.arguments!['message'] ?? '¡Es hora de despertar!';
       snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
       maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
-      snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes']?? 5;
+      snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes'] ?? 5;
 
       // Cargar la duración del snooze desde SharedPreferences
       _loadSnoozeDuration();
-      
+
       // NUEVO: Notificar que la alarma está sonando cuando se abre la pantalla
       _notifyAlarmRinging();
     }
@@ -79,7 +80,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        snoozeDurationMinutes = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
+        snoozeDurationMinutes =
+            prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
       });
     }
   }
@@ -97,12 +99,11 @@ class _AlarmScreenState extends State<AlarmScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  
   Future<void> _snoozeAlarm() async {
     print('=== SNOOZE ALARM START ===');
     print('Snoozing alarm ID: $alarmId for $snoozeDurationMinutes minutes');
     print('Current snooze count: $snoozeCount, max: $maxSnoozes');
-    
+
     if (snoozeCount >= maxSnoozes) {
       print('Maximum snoozes reached, cannot snooze anymore');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -110,15 +111,15 @@ class _AlarmScreenState extends State<AlarmScreen> {
       );
       return;
     }
-    
+
     try {
       await platform.invokeMethod('snoozeAlarm', {
         'alarmId': alarmId,
-        'maxSnoozes': maxSnoozes,  // AGREGAR
-        'snoozeDurationMinutes': snoozeDurationMinutes,  // AGREGAR
+        'maxSnoozes': maxSnoozes, // AGREGAR
+        'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
       });
       print('Snooze command sent to native code');
-      
+
       if (mounted) {
         Navigator.of(context).pop();
       }
@@ -160,116 +161,148 @@ class _AlarmScreenState extends State<AlarmScreen> {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color.fromARGB(255, 255, 255, 255),
-              Color.fromARGB(255, 255, 255, 255),
-            ],
-          ),
-        ),
+        color: Colors.white,
         child: Center(
-          child: Card(
-            color: const Color.fromARGB(255, 0, 0, 0),
-            margin: const EdgeInsets.all(30.0),
-            elevation: 8.0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15.0),
+          child: Container(
+            margin: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Colors.red.shade100,
+              borderRadius: BorderRadius.circular(8.0),
+              border: Border.all(color: Colors.red.shade400, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.red.shade200,
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: const Color.fromARGB(255, 255, 255, 255),
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Text(
+                //   title,
+                //   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                //     color: const Color.fromARGB(255, 255, 255, 255),
+                //     fontWeight: FontWeight.bold,
+                //   ),
+                //   textAlign: TextAlign.center,
+                // ),
+                // const SizedBox(height: 10),
+                // Text(
+                //   message,
+                //   style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                //     color: const Color.fromARGB(255, 255, 255, 255),
+                //   ),
+                //   textAlign: TextAlign.center,
+                // ),
+                Center(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 35,
+                          fontWeight: FontWeight.bold,
+                          color: const Color.fromARGB(255, 211, 47, 47),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (message.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          message,
+                          style: TextStyle(
+                            fontSize: 20,
+                            color: Colors.red.shade600,
+                            fontWeight: FontWeight.w900,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    message,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: const Color.fromARGB(255, 255, 255, 255),
+                ),
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: double
+                      .infinity, // Esto hace que el botón ocupe todo el ancho disponible
+                  child: ElevatedButton(
+                    onPressed: _stopAlarm,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 40,
+                        vertical: 15,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
-                    textAlign: TextAlign.center,
+                    child: const Text(
+                      'APAGAR ALARMA',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 40),
+                ),
+                const SizedBox(height: 20),
+                if (canSnooze)
                   SizedBox(
-                    width: double
-                        .infinity, // Esto hace que el botón ocupe todo el ancho disponible
+                    width: double.infinity,
+                    // En el método build
                     child: ElevatedButton(
-                      onPressed: _stopAlarm,
+                      onPressed: _snoozeAlarm,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        backgroundColor: Colors.red,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 40,
                           vertical: 15,
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Text(
-                        'Apagar',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
+                      child: Text(
+                        'POSPONER $snoozeDurationMinutes MIN',
+                        style: TextStyle(fontSize: 18,fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  if (canSnooze)
-                    // En el método build
-                    ElevatedButton(
-                      onPressed: _snoozeAlarm,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color.fromARGB(
-                          255,
-                          255,
-                          255,
-                          255,
-                        ),
-                        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 40,
-                          vertical: 15,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: Text(
-                        'Posponer $snoozeDurationMinutes min',
-                        style: TextStyle(fontSize: 18),
-                      ),
+                const SizedBox(height: 20),
+                // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
+                if (!canSnooze) ...[
+                  Container(
+                    padding: const EdgeInsets.all(8.0),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(8.0),
+                      border: Border.all(color: Colors.red.shade300),
                     ),
-                  const SizedBox(height: 20),
-                  // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
-                  if (!canSnooze)
-                    Container(
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(10.0),
-                      ),
-                      child: Text(
-                        'Número máximo de alarmas pospuestas alcanzado \n($snoozeCount/$maxSnoozes)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontStyle: FontStyle.italic,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Icon(Icons.warning, color: Colors.white, size: 25),
+                        Text(
+                          'Máximo Posposiciones Alcanzado ($snoozeCount/$maxSnoozes)',
+                          style: TextStyle(
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
+                      ],
                     ),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
         ),

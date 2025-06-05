@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
 import 'settings_screen.dart'; // Importar SettingsScreen
+import 'alarm_edit_screen.dart';
 import 'package:intl/intl.dart';
 
 class HomePage extends StatefulWidget {
@@ -44,7 +45,7 @@ class _HomePageState extends State<HomePage> {
   bool _hasUnhandledAlarm = false;
   int? _pendingAlarmId;
 
-  bool moreAlarms = false;
+  bool moreAlarms = false; // Oculto por defecto
 
   @override
   void initState() {
@@ -80,236 +81,273 @@ class _HomePageState extends State<HomePage> {
     }; // Por defecto mostrar todas
   }
 
-  Future<Map<String, dynamic>?> _showAlarmDetailsDialog({
-    String? initialTitle,
-    String? initialMessage,
-    List<int>? initialRepeatDays,
-    bool? initialIsDaily,
-    bool? initialIsWeekly,
-    bool? initialIsWeekend,
-    int? initialMaxSnoozes,
-    int? initialSnoozeDuration, // NUEVO PARÁMETRO
-  }) async {
-    final titleController = TextEditingController(text: initialTitle ?? '');
-    final messageController = TextEditingController(text: initialMessage ?? '');
+  // Future<Map<String, dynamic>?> _showAlarmDetailsDialog({
+  //   String? initialTitle,
+  //   String? initialMessage,
+  //   List<int>? initialRepeatDays,
+  //   bool? initialIsDaily,
+  //   bool? initialIsWeekly,
+  //   bool? initialIsWeekend,
+  //   int? initialMaxSnoozes,
+  //   int? initialSnoozeDuration, // NUEVO PARÁMETRO
+  // }) async {
+  //   final titleController = TextEditingController(text: initialTitle ?? '');
+  //   final messageController = TextEditingController(text: initialMessage ?? '');
 
-    // Valores iniciales para repetición
-    String repetitionType = 'none';
-    List<int> selectedDays = initialRepeatDays ?? [];
+  //   // Valores iniciales para repetición
+  //   String repetitionType = 'none';
+  //   List<int> selectedDays = initialRepeatDays ?? [];
 
-    if (initialIsDaily == true) {
-      repetitionType = 'daily';
-    } else if (initialIsWeekly == true) {
-      repetitionType = 'weekly';
-    } else if (initialIsWeekend == true) {
-      repetitionType = 'weekend';
-    } else if (initialRepeatDays != null && initialRepeatDays.isNotEmpty) {
-      repetitionType = 'custom';
-      selectedDays = List.from(initialRepeatDays);
-    }
+  //   if (initialIsDaily == true) {
+  //     repetitionType = 'daily';
+  //   } else if (initialIsWeekly == true) {
+  //     repetitionType = 'weekly';
+  //   } else if (initialIsWeekend == true) {
+  //     repetitionType = 'weekend';
+  //   } else if (initialRepeatDays != null && initialRepeatDays.isNotEmpty) {
+  //     repetitionType = 'custom';
+  //     selectedDays = List.from(initialRepeatDays);
+  //   }
 
-    // Valores para los días de la semana
-    final daysOfWeek = [
-      'Lunes',
-      'Martes',
-      'Miércoles',
-      'Jueves',
-      'Viernes',
-      'Sábado',
-      'Domingo',
-    ];
+  //   // Valores para los días de la semana
+  //   final daysOfWeek = [
+  //     'Lunes',
+  //     'Martes',
+  //     'Miércoles',
+  //     'Jueves',
+  //     'Viernes',
+  //     'Sábado',
+  //     'Domingo',
+  //   ];
 
-    // Opciones de repetición
-    final repetitionOptions = [
-      {'value': 'none', 'label': 'Sin repetición'},
-      {'value': 'daily', 'label': 'Diaria'},
-      {'value': 'weekly', 'label': 'Semanal (mismo día)'},
-      {'value': 'weekend', 'label': 'Fines de semana (Sáb-Dom)'},
-      {'value': 'custom', 'label': 'Personalizada'},
-    ];
+  //   // Opciones de repetición
+  //   final repetitionOptions = [
+  //     {'value': 'none', 'label': 'Sin repetición'},
+  //     {'value': 'daily', 'label': 'Diaria'},
+  //     {'value': 'weekly', 'label': 'Semanal (mismo día)'},
+  //     {'value': 'weekend', 'label': 'Fines de semana (Sáb-Dom)'},
+  //     {'value': 'custom', 'label': 'Personalizada'},
+  //   ];
 
-    // Valor para el número máximo de snoozes
-    int maxSnoozes = initialMaxSnoozes ?? 3;
-    int snoozeDuration = initialSnoozeDuration ?? 5; // NUEVA VARIABLE
+  //   // Valor para el número máximo de snoozes
+  //   int maxSnoozes = initialMaxSnoozes ?? 3;
+  //   int snoozeDuration = initialSnoozeDuration ?? 5; // NUEVA VARIABLE
 
-    return showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text(
-                initialTitle == null ? 'Nueva Alarma' : 'Editar Alarma',
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(hintText: 'Título'),
-                    ),
-                    TextField(
-                      controller: messageController,
-                      decoration: const InputDecoration(labelText: 'Mensaje'),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Repetición:'),
-                    ...repetitionOptions.map(
-                      (option) => RadioListTile<String>(
-                        title: Text(option['label'] as String),
-                        value: option['value'] as String,
-                        groupValue: repetitionType,
-                        onChanged: (value) {
-                          setState(() {
-                            repetitionType = value!;
+  //   return showDialog<Map<String, dynamic>>(
+  //     context: context,
+  //     builder: (context) {
+  //       return StatefulBuilder(
+  //         builder: (context, setState) {
+  //           return AlertDialog(
+  //             title: Text(
+  //               initialTitle == null ? 'Nueva Alarma' : 'Editar Alarma',
+  //             ),
+  //             content: SingleChildScrollView(
+  //               child: Column(
+  //                 mainAxisSize: MainAxisSize.min,
+  //                 crossAxisAlignment: CrossAxisAlignment.start,
+  //                 children: [
+  //                   TextField(
+  //                     controller: titleController,
+  //                     decoration: const InputDecoration(hintText: 'Título'),
+  //                   ),
+  //                   TextField(
+  //                     controller: messageController,
+  //                     decoration: const InputDecoration(labelText: 'Mensaje'),
+  //                   ),
+  //                   const SizedBox(height: 16),
+  //                   const Text('Repetición:'),
+  //                   ...repetitionOptions.map(
+  //                     (option) => RadioListTile<String>(
+  //                       title: Text(option['label'] as String),
+  //                       value: option['value'] as String,
+  //                       groupValue: repetitionType,
+  //                       onChanged: (value) {
+  //                         setState(() {
+  //                           repetitionType = value!;
 
-                            // Si cambiamos a semanal, añadimos el día actual
-                            if (value == 'weekly') {
-                              final now = DateTime.now();
-                              selectedDays = [now.weekday];
-                            }
-                            // Si cambiamos a fin de semana, seleccionamos sábado y domingo
-                            else if (value == 'weekend') {
-                              selectedDays = [
-                                DateTime.saturday,
-                                DateTime.sunday,
-                              ];
-                            }
-                            // Si no es personalizado, limpiamos la selección
-                            else if (value != 'custom') {
-                              selectedDays = [];
-                            }
-                          });
-                        },
-                      ),
-                    ),
+  //                           // Si cambiamos a semanal, añadimos el día actual
+  //                           if (value == 'weekly') {
+  //                             final now = DateTime.now();
+  //                             selectedDays = [now.weekday];
+  //                           }
+  //                           // Si cambiamos a fin de semana, seleccionamos sábado y domingo
+  //                           else if (value == 'weekend') {
+  //                             selectedDays = [
+  //                               DateTime.saturday,
+  //                               DateTime.sunday,
+  //                             ];
+  //                           }
+  //                           // Si no es personalizado, limpiamos la selección
+  //                           else if (value != 'custom') {
+  //                             selectedDays = [];
+  //                           }
+  //                         });
+  //                       },
+  //                     ),
+  //                   ),
 
-                    // Mostrar selección de días si es personalizado
-                    if (repetitionType == 'custom')
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 8),
-                          const Text('Selecciona los días:'),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8.0,
-                            children: List.generate(7, (index) {
-                              final dayValue =
-                                  index + 1; // 1-7 para Lunes-Domingo
-                              return FilterChip(
-                                label: Text(daysOfWeek[index]),
-                                selected: selectedDays.contains(dayValue),
-                                onSelected: (selected) {
-                                  setState(() {
-                                    if (selected) {
-                                      selectedDays.add(dayValue);
-                                    } else {
-                                      selectedDays.remove(dayValue);
-                                    }
-                                  });
-                                },
-                              );
-                            }),
-                          ),
-                        ],
-                      ),
+  //                   // Mostrar selección de días si es personalizado
+  //                   if (repetitionType == 'custom')
+  //                     Column(
+  //                       crossAxisAlignment: CrossAxisAlignment.start,
+  //                       children: [
+  //                         const SizedBox(height: 8),
+  //                         const Text('Selecciona los días:'),
+  //                         const SizedBox(height: 8),
+  //                         Wrap(
+  //                           spacing: 8.0,
+  //                           children: List.generate(7, (index) {
+  //                             final dayValue =
+  //                                 index + 1; // 1-7 para Lunes-Domingo
+  //                             return FilterChip(
+  //                               label: Text(daysOfWeek[index]),
+  //                               selected: selectedDays.contains(dayValue),
+  //                               onSelected: (selected) {
+  //                                 setState(() {
+  //                                   if (selected) {
+  //                                     selectedDays.add(dayValue);
+  //                                   } else {
+  //                                     selectedDays.remove(dayValue);
+  //                                   }
+  //                                 });
+  //                               },
+  //                             );
+  //                           }),
+  //                         ),
+  //                       ],
+  //                     ),
 
-                    const SizedBox(height: 16),
-                    const Text('Configuración de Snooze:'),
-                    const SizedBox(height: 8),
+  //                   const SizedBox(height: 16),
+  //                   const Text('Configuración de Snooze:'),
+  //                   const SizedBox(height: 8),
 
-                    // Duración del snooze
-                    Text('Duración: $snoozeDuration minutos'),
-                    Slider(
-                      value: snoozeDuration.toDouble(),
-                      min: 1,
-                      max: 30,
-                      divisions: 29,
-                      label: '$snoozeDuration min',
-                      onChanged: (value) {
-                        setState(() {
-                          snoozeDuration = value.toInt();
-                        });
-                      },
-                    ),
+  //                   // Duración del snooze
+  //                   Text('Duración: $snoozeDuration minutos'),
+  //                   Slider(
+  //                     value: snoozeDuration.toDouble(),
+  //                     min: 1,
+  //                     max: 30,
+  //                     divisions: 29,
+  //                     label: '$snoozeDuration min',
+  //                     onChanged: (value) {
+  //                       setState(() {
+  //                         snoozeDuration = value.toInt();
+  //                       });
+  //                     },
+  //                   ),
 
-                    const SizedBox(height: 8),
-                    const Text('Número máximo de snoozes:'),
-                    Slider(
-                      value: maxSnoozes.toDouble(),
-                      min: 0,
-                      max: 10,
-                      divisions: 10,
-                      label: maxSnoozes.toString(),
-                      onChanged: (value) {
-                        setState(() {
-                          maxSnoozes = value.toInt();
-                        });
-                      },
-                    ),
-                    Text('Valor actual: $maxSnoozes'),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancelar'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // Validar que al menos hay un título
-                    if (titleController.text.trim().isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Por favor, ingresa un título'),
-                        ),
-                      );
-                      return;
-                    }
+  //                   const SizedBox(height: 8),
+  //                   const Text('Número máximo de snoozes:'),
+  //                   Slider(
+  //                     value: maxSnoozes.toDouble(),
+  //                     min: 0,
+  //                     max: 10,
+  //                     divisions: 10,
+  //                     label: maxSnoozes.toString(),
+  //                     onChanged: (value) {
+  //                       setState(() {
+  //                         maxSnoozes = value.toInt();
+  //                       });
+  //                     },
+  //                   ),
+  //                   Text('Valor actual: $maxSnoozes'),
+  //                 ],
+  //               ),
+  //             ),
+  //             actions: [
+  //               TextButton(
+  //                 onPressed: () => Navigator.pop(context),
+  //                 child: const Text('Cancelar'),
+  //               ),
+  //               TextButton(
+  //                 onPressed: () {
+  //                   // // Validar que al menos hay un título
+  //                   // if (titleController.text.trim().isEmpty) {
+  //                   //   ScaffoldMessenger.of(context).showSnackBar(
+  //                   //     const SnackBar(
+  //                   //       content: Text('Por favor, ingresa un título'),
+  //                   //     ),
+  //                   //   );
+  //                   //   return;
+  //                   // }
 
-                    // Validar que si es personalizado, al menos hay un día seleccionado
-                    if (repetitionType == 'custom' && selectedDays.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Por favor, selecciona al menos un día',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
+  //                   // Validar que si es personalizado, al menos hay un día seleccionado
+  //                   if (repetitionType == 'custom' && selectedDays.isEmpty) {
+  //                     ScaffoldMessenger.of(context).showSnackBar(
+  //                       const SnackBar(
+  //                         content: Text(
+  //                           'Por favor, selecciona al menos un día',
+  //                         ),
+  //                       ),
+  //                     );
+  //                     return;
+  //                   }
 
-                    // Preparar resultado
-                    final result = {
-                      'title': titleController.text,
-                      'message': messageController.text,
-                      'repetitionType': repetitionType,
-                      'repeatDays': selectedDays,
-                      'maxSnoozes': maxSnoozes,
-                      'snoozeDuration': snoozeDuration, // AGREGAR
-                    };
+  //                   // Preparar resultado
+  //                   final result = {
+  //                     'title': titleController.text,
+  //                     'message': messageController.text,
+  //                     'repetitionType': repetitionType,
+  //                     'repeatDays': selectedDays,
+  //                     'maxSnoozes': maxSnoozes,
+  //                     'snoozeDuration': snoozeDuration, // AGREGAR
+  //                   };
 
-                    Navigator.pop(context, result);
-                  },
-                  child: const Text('Guardar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+  //                   Navigator.pop(context, result);
+  //                 },
+  //                 child: const Text('Guardar'),
+  //               ),
+  //             ],
+  //           );
+  //         },
+  //       );
+  //     },
+  //   );
+  // }
 
   // NUEVO: Obtener alarmas pospuestas
   List<Alarm> _getSnoozedAlarms() {
     return _alarms
         .where((alarm) => alarm.snoozeCount > 0 && alarm.isActive)
         .toList();
+  }
+
+  // NUEVA: Función para calcular la hora real de una alarma pospuesta
+  DateTime _calculateSnoozedAlarmTime(Alarm alarm) {
+    if (alarm.snoozeCount == 0) {
+      return alarm.time;
+    }
+
+    // Calcular la hora original + (minutos de posposición * número de posposiciones)
+    final totalSnoozeMinutes = alarm.snoozeDurationMinutes * alarm.snoozeCount;
+    return alarm.time.add(Duration(minutes: totalSnoozeMinutes));
+  }
+
+  // NUEVA: Función para calcular tiempo faltante para alarma pospuesta
+  Duration _calculateTimeUntilSnoozedAlarm(Alarm alarm) {
+    final now = DateTime.now();
+    final snoozedTime = _calculateSnoozedAlarmTime(alarm);
+    return snoozedTime.difference(now);
+  }
+
+  // MODIFICADA: Función para calcular correctamente el tiempo hasta la próxima alarma
+  Duration _calculateTimeUntilAlarm(Alarm alarm) {
+    final now = DateTime.now();
+    DateTime alarmTime = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      alarm.time.hour,
+      alarm.time.minute,
+    ); // Inicializa alarmTime con la fecha actual y la hora de la alarma.
+
+    // Si la hora de la alarma ya pasó hoy, es para mañana
+    if (alarmTime.isBefore(now)) {
+      alarmTime = alarmTime.add(Duration(days: 1)); // Suma un día
+    }
+
+    return alarmTime.difference(now);
   }
 
   Future<void> _handleNativeCalls(MethodCall call) async {
@@ -600,112 +638,23 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _setAlarm() async {
-    // Mostrar el diálogo para obtener título, mensaje y configuración de repetición
-    final alarmDetails = await _showAlarmDetailsDialog();
-    // mostrar dialogo de configuracion de hora
-    final TimeOfDay? selectedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
-      confirmText: 'Aceptar', // Cambia el texto del botón OK
-      helpText: 'Seleccionar Hora',
-      initialEntryMode: TimePickerEntryMode.input,
-      builder: (BuildContext context, Widget? child) {
-        return Theme(
-          data: ThemeData.dark().copyWith(
-            timePickerTheme: TimePickerThemeData(
-              backgroundColor: Colors.black,
-              hourMinuteTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
-              ),
-              hourMinuteColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
-              ),
-              dayPeriodTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
-              ),
-              dayPeriodColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
-              ),
-              dialHandColor: Colors.green,
-              dialBackgroundColor: Colors.grey.shade800,
-              entryModeIconColor: Colors.green,
-              helpTextStyle: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-              ),
-              confirmButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-                backgroundColor: MaterialStateProperty.all(Colors.green),
-                textStyle: MaterialStateProperty.all(
-                  const TextStyle(fontSize: 20),
-                ),
-                // Aquí configuras el radio de borde
-                shape: MaterialStateProperty.all(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      10,
-                    ), // Radio de borde de 10
-                  ),
-                ),
-              ),
-              cancelButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 0, 0, 0),
-                ),
-                backgroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-                textStyle: MaterialStateProperty.all(
-                  const TextStyle(fontSize: 20),
-                ),
-                // Aquí configuras el radio de borde
-                shape: MaterialStateProperty.all(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      10,
-                    ), // Radio de borde de 10
-                  ),
-                ),
-              ), // Color del texto "SELECCIONAR HORA"
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (context) => const AlarmEditScreen()),
     );
 
-    if (selectedTime != null && mounted) {
-      // Obtener la fecha y hora actual
+    if (result != null && mounted) {
+      final selectedTime = result['time'] as TimeOfDay;
       final now = DateTime.now();
 
-      // Crear una fecha con la hora seleccionada
       var alarmTime = DateTime(
         now.year,
         now.month,
         now.day,
         selectedTime.hour,
         selectedTime.minute,
-        0, // seconds
-        0, // milliseconds
+        0,
+        0,
       );
 
       // Si la hora seleccionada ya pasó hoy, programarla para mañana
@@ -723,18 +672,14 @@ class _HomePageState extends State<HomePage> {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      if (alarmDetails == null) return;
-
-      final title = alarmDetails['title']!.isNotEmpty
-          ? alarmDetails['title']!
-          : 'Alarma';
-      final message = alarmDetails['message']!.isNotEmpty
-          ? alarmDetails['message']!
+      final title = result['title']!.isNotEmpty ? result['title']! : 'Alarma';
+      final message = result['message']!.isNotEmpty
+          ? result['message']!
           : '¡Es hora de despertar!';
-      final repetitionType = alarmDetails['repetitionType'] as String;
-      final repeatDays = alarmDetails['repeatDays'] as List<int>;
-      final maxSnoozes = alarmDetails['maxSnoozes'] ?? 3;
-      final snoozeDuration = alarmDetails['snoozeDuration'] ?? 5;
+      final repetitionType = result['repetitionType'] as String;
+      final repeatDays = result['repeatDays'] as List<int>;
+      final maxSnoozes = result['maxSnoozes'] ?? 3;
+      final snoozeDuration = result['snoozeDuration'] ?? 5;
 
       // Configurar los valores de repetición
       bool isDaily = repetitionType == 'daily';
@@ -783,116 +728,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _editAlarm(Alarm alarm) async {
-    // Mostrar el diálogo para editar título, mensaje y configuración de repetición
-    final result = await _showAlarmDetailsDialog(
-      initialTitle: alarm.title,
-      initialMessage: alarm.message,
-      initialRepeatDays: alarm.repeatDays,
-      initialIsDaily: alarm.isDaily,
-      initialIsWeekly: alarm.isWeekly,
-      initialIsWeekend: alarm.isWeekend,
-      initialMaxSnoozes: alarm.maxSnoozes,
-      initialSnoozeDuration: alarm.snoozeDurationMinutes, // AGREGAR
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (context) => AlarmEditScreen(alarm: alarm)),
     );
-    // Mostrar el selector de tiempo con la hora actual de la alarma
-    final TimeOfDay initialTime = TimeOfDay(
-      hour: alarm.time.hour,
-      minute: alarm.time.minute,
-    );
-    final TimeOfDay? selectedTime = await showTimePicker(
-      context: context,
-      initialTime: initialTime,
-      cancelText: 'Cerrar', // Cambia el texto del botón Cancelar
-      confirmText: 'Aceptar', // Cambia el texto del botón OK
-      helpText: 'Seleccionar Hora',
-      initialEntryMode: TimePickerEntryMode.input,
-      builder: (BuildContext context, Widget? child) {
-        return Theme(
-          data: ThemeData.dark().copyWith(
-            timePickerTheme: TimePickerThemeData(
-              backgroundColor: Colors.black,
-              hourMinuteTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
-              ),
-              hourMinuteColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
-              ),
-              dayPeriodTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
-              ),
-              dayPeriodColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
-              ),
-              dialHandColor: Colors.green,
-              dialBackgroundColor: Colors.grey.shade800,
-              entryModeIconColor: Colors.green,
-              helpTextStyle: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-              ),
-              confirmButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-                backgroundColor: MaterialStateProperty.all(Colors.green),
-                textStyle: MaterialStateProperty.all(
-                  const TextStyle(fontSize: 20),
-                ),
-                // Aquí configuras el radio de borde
-                shape: MaterialStateProperty.all(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      10,
-                    ), // Radio de borde de 10
-                  ),
-                ),
-              ),
-              cancelButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 0, 0, 0),
-                ),
-                backgroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-                textStyle: MaterialStateProperty.all(
-                  const TextStyle(fontSize: 20),
-                ),
-                // Aquí configuras el radio de borde
-                shape: MaterialStateProperty.all(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      10,
-                    ), // Radio de borde de 10
-                  ),
-                ),
-              ),
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (selectedTime != null) {
-      // Obtener la fecha y hora actual
+
+    if (result != null && mounted) {
+      final selectedTime = result['time'] as TimeOfDay;
       final now = DateTime.now();
 
-      // Crear una fecha con la hora seleccionada pero manteniendo la fecha original
       DateTime alarmTime = DateTime(
         now.year,
         now.month,
@@ -902,7 +746,6 @@ class _HomePageState extends State<HomePage> {
       );
 
       // Si la hora seleccionada ya pasó hoy, programarla para mañana
-      // (solo para alarmas no repetitivas o si estamos cambiando la hora)
       final nowNormalized = DateTime(
         now.year,
         now.month,
@@ -919,77 +762,74 @@ class _HomePageState extends State<HomePage> {
         alarmTime = alarmTime.add(const Duration(days: 1));
       }
 
-      if (result != null) {
-        final title = result['title'] as String;
-        final message = result['message'] as String;
-        final repetitionType = result['repetitionType'] as String;
-        final repeatDays = result['repeatDays'] as List<int>;
-        final maxSnoozes = result['maxSnoozes'] ?? 3;
-        final snoozeDuration = result['snoozeDuration'] ?? 5;
+      final title = (result['title'] as String).isNotEmpty
+          ? result['title'] as String
+          : 'Alarma';
+      final message = result['message'] as String;
+      final repetitionType = result['repetitionType'] as String;
+      final repeatDays = result['repeatDays'] as List<int>;
+      final maxSnoozes = result['maxSnoozes'] ?? 3;
+      final snoozeDuration = result['snoozeDuration'] ?? 5;
 
-        // Configurar los valores de repetición
-        bool isDaily = repetitionType == 'daily';
-        bool isWeekly = repetitionType == 'weekly';
-        bool isWeekend = repetitionType == 'weekend';
+      // Configurar los valores de repetición
+      bool isDaily = repetitionType == 'daily';
+      bool isWeekly = repetitionType == 'weekly';
+      bool isWeekend = repetitionType == 'weekend';
 
-        // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
-        List<int> finalRepeatDays = List.from(repeatDays);
-        if (isWeekly && finalRepeatDays.isEmpty) {
-          finalRepeatDays.add(alarm.time.weekday);
+      // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
+      List<int> finalRepeatDays = List.from(repeatDays);
+      if (isWeekly && finalRepeatDays.isEmpty) {
+        finalRepeatDays.add(alarm.time.weekday);
+      }
+
+      // Cancelar la alarma anterior
+      try {
+        await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+      } catch (e) {
+        print('Error al cancelar la alarma anterior: $e');
+      }
+
+      // Actualizar la alarma en la lista
+      setState(() {
+        final index = _alarms.indexWhere((a) => a.id == alarm.id);
+        if (index != -1) {
+          _alarms[index] = Alarm(
+            id: alarm.id,
+            time: alarmTime,
+            title: title,
+            message: message,
+            isActive: alarm.isActive,
+            repeatDays: finalRepeatDays,
+            isDaily: isDaily,
+            isWeekly: isWeekly,
+            isWeekend: isWeekend,
+            maxSnoozes: maxSnoozes,
+            snoozeCount: alarm.snoozeCount,
+            snoozeDurationMinutes: snoozeDuration,
+          );
+          _saveAlarms();
         }
+      });
 
-        // Cancelar la alarma anterior
+      // Reprogramar la alarma si está activa
+      if (alarm.isActive) {
         try {
-          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
-        } catch (e) {
-          print('Error al cancelar la alarma anterior: $e');
-        }
-
-        // Actualizar la alarma en la lista
-        setState(() {
-          final index = _alarms.indexWhere((a) => a.id == alarm.id);
-          if (index != -1) {
-            _alarms[index] = Alarm(
-              id: alarm.id,
-              time: alarmTime, // Usar la nueva hora ajustada
-              title: title,
-              message: message,
-              isActive: alarm.isActive,
-              repeatDays: finalRepeatDays,
-              isDaily: isDaily,
-              isWeekly: isWeekly,
-              isWeekend: isWeekend,
-              maxSnoozes: maxSnoozes,
-              snoozeCount: alarm.snoozeCount,
-              snoozeDurationMinutes: snoozeDuration,
-            );
-            _saveAlarms();
-          }
-        });
-
-        // Reprogramar la alarma si está activa
-        if (alarm.isActive) {
-          try {
-            final updatedAlarm =
-                _alarms[_alarms.indexWhere((a) => a.id == alarm.id)];
-            await _setNativeAlarm(updatedAlarm);
-
-            // Actualizar el temporizador de cuenta regresiva
-            _startOrUpdateCountdown();
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Alarma actualizada para ${DateFormat('HH:mm').format(alarm.time)}',
-                ),
+          final updatedAlarm =
+              _alarms[_alarms.indexWhere((a) => a.id == alarm.id)];
+          await _setNativeAlarm(updatedAlarm);
+          _startOrUpdateCountdown();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Alarma actualizada para ${DateFormat('HH:mm').format(alarm.time)}',
               ),
-            );
-          } catch (e) {
-            print('Error al reprogramar la alarma: $e');
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Error al reprogramar la alarma')),
-            );
-          }
+            ),
+          );
+        } catch (e) {
+          print('Error al reprogramar la alarma: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error al reprogramar la alarma')),
+          );
         }
       }
     }
@@ -1005,15 +845,15 @@ class _HomePageState extends State<HomePage> {
         if (isActive) {
           // Reactivar alarma: setearla de nuevo
           await _setNativeAlarm(alarm);
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Alarma activada')));
+          // ScaffoldMessenger.of(
+          //   context,
+          // ).showSnackBar(const SnackBar(content: Text('Alarma activada')));
         } else {
           // Desactivar alarma: cancelarla
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Alarma desactivada')));
+          // ScaffoldMessenger.of(
+          //   context,
+          // ).showSnackBar(const SnackBar(content: Text('Alarma desactivada')));
         }
         _alarms[index].isActive = isActive;
         await _saveAlarms(); // Guardar y refrescar UI
@@ -1021,6 +861,9 @@ class _HomePageState extends State<HomePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Alarma ${isActive ? "activada" : "desactivada"}'),
+            backgroundColor: isActive
+                ? Colors.green
+                : const Color.fromARGB(255, 211, 47, 47),
           ),
         );
       } on PlatformException catch (e) {
@@ -1329,7 +1172,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     final otherActiveAlarmsCount = _alarms
-        .where((a) => a.isActive && a.id != nextAlarm.id)
+        .where((alarm) => alarm.id != nextAlarm.id && alarm.isActive)
         .length;
 
     return Container(
@@ -1342,7 +1185,7 @@ class _HomePageState extends State<HomePage> {
       ),
       decoration: BoxDecoration(
         color: Colors.green.shade100,
-        borderRadius: BorderRadius.circular(12.0),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.green.shade400, width: 2),
         boxShadow: [
           BoxShadow(
@@ -1406,65 +1249,143 @@ class _HomePageState extends State<HomePage> {
           Container(
             margin: const EdgeInsets.all(0),
             padding: const EdgeInsets.all(0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
+            child: Column(
               children: [
-                const SizedBox(width: 16),
-                Text(
-                  otherActiveAlarmsCount > 0
-                      ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
-                      : 'No hay otras alarmas activas',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade700,
-                  ),
-                ),
-                if (otherActiveAlarmsCount > 0) ...[
-                  IconButton(
-                    icon: Icon(
-                      moreAlarms ? Icons.visibility_off : Icons.visibility,
-                      size: 20,
-                      color: Colors.green,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        otherActiveAlarmsCount > 0
+                            ? '$otherActiveAlarmsCount otra${otherActiveAlarmsCount > 1 ? 's' : ''} alarma${otherActiveAlarmsCount > 1 ? 's' : ''} activa${otherActiveAlarmsCount > 1 ? 's' : ''}'
+                            : 'No hay otras alarmas activas',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade700,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
-                    onPressed: () => {
-                      setState(() {
-                        moreAlarms = !moreAlarms;
-                      }),
-                      // funcion para mostrar todas las alarmas activas
-                    },
-                  ),
-                ],
-                if (moreAlarms) ...[
-                  Expanded(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _alarms.length,
-                      itemBuilder: (context, index) {
-                        final alarm = _alarms[index];
-                        if (alarm.id != nextAlarm.id && alarm.isActive) {
-                          return ListTile(
-                            title: Text(alarm.title),
-                            subtitle: alarm.message.isNotEmpty
-                                ? Text(alarm.message)
-                                : null,
-                            trailing: Switch(
-                              value: alarm.isActive,
-                              onChanged: (bool value) {
-                                _toggleAlarmState(alarm.id, value);
-                              },
-                              activeColor: Colors.green,
+                    if (otherActiveAlarmsCount > 0) ...[
+                      IconButton(
+                        icon: Icon(
+                          moreAlarms ? Icons.visibility_off : Icons.visibility,
+                          size: 20,
+                          color: Colors.green,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            moreAlarms = !moreAlarms;
+                          });
+                        },
+                        tooltip: moreAlarms
+                            ? 'Ocultar alarmas'
+                            : 'Mostrar alarmas',
+                      ),
+                    ],
+                    const SizedBox(width: 16),
+                  ],
+                ),
+                // Lista de alarmas adicionales (ahora fuera del Row)
+                if (moreAlarms && otherActiveAlarmsCount > 0) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.green.shade400,
+                        width: 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: _alarms
+                          .where(
+                            (alarm) =>
+                                alarm.id != nextAlarm.id && alarm.isActive,
+                          )
+                          .map(
+                            (alarm) => Container(
+                              // decoration: BoxDecoration(
+                              //   border: Border(
+                              //     bottom: BorderSide(
+                              //       color: Colors.grey[700]!,
+                              //       width: 0.5,
+                              //     ),
+                              //   ),
+                              // ),
+                              child: ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  Icons.alarm,
+                                  color: Colors.green,
+                                  size: 20,
+                                ),
+                                title: Text(
+                                  alarm.title,
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (alarm.message.isNotEmpty)
+                                      Text(
+                                        alarm.message,
+                                        style: TextStyle(
+                                          color: const Color.fromARGB(
+                                            255,
+                                            0,
+                                            0,
+                                            0,
+                                          ),
+                                          fontSize: 11,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    Text(
+                                      'Sonará a las ${DateFormat('HH:mm').format(alarm.time)}',
+                                      style: TextStyle(
+                                        color: const Color.fromARGB(
+                                          255,
+                                          0,
+                                          0,
+                                          0,
+                                        ),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                trailing: Switch(
+                                  value: alarm.isActive,
+                                  onChanged: (bool value) {
+                                    _toggleAlarmState(alarm.id, value);
+                                  },
+                                  activeColor: Colors.green,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onTap: () {
+                                  _editAlarm(alarm);
+                                },
+                              ),
                             ),
-                          );
-                        }
-                      },
+                          )
+                          .toList(),
                     ),
                   ),
                 ],
               ],
-              // if existen alarmas activas y icono de visivility esta activo, mostrarlas
             ),
           ),
         ],
@@ -1504,12 +1425,8 @@ class _HomePageState extends State<HomePage> {
           ),
           if (alarm.isActive)
             Builder(
-              // Use Builder to get a fresh context if needed for TextTheme
               builder: (context) {
-                final now = DateTime.now();
-                final durationUntilAlarm = alarm.time.isAfter(now)
-                    ? alarm.time.difference(now)
-                    : Duration.zero;
+                final durationUntilAlarm = _calculateTimeUntilAlarm(alarm);
                 return Text(
                   'Faltan: ${_formatDuration(durationUntilAlarm)}',
                   style: Theme.of(
@@ -1562,7 +1479,7 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.all(16.0),
         decoration: BoxDecoration(
           color: Colors.red.shade100,
-          borderRadius: BorderRadius.circular(12.0),
+          borderRadius: BorderRadius.circular(8.0),
           border: Border.all(color: Colors.red.shade400, width: 2),
           boxShadow: [
             BoxShadow(
@@ -1603,7 +1520,7 @@ class _HomePageState extends State<HomePage> {
                     style: const TextStyle(
                       fontSize: 35,
                       fontWeight: FontWeight.bold,
-                      color: Color.fromARGB(255, 235, 64, 52),
+                      color: Color.fromARGB(255, 211, 47, 47),
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -1687,7 +1604,7 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.all(8.0),
                     decoration: BoxDecoration(
                       color: Colors.red,
-                      borderRadius: BorderRadius.circular(6.0),
+                      borderRadius: BorderRadius.circular(8.0),
                       border: Border.all(color: Colors.red.shade300),
                     ),
                     child: Row(
@@ -1741,155 +1658,174 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.settings, color: Colors.white, size: 30),
             onPressed: () async {
               await Navigator.pushNamed(context, '/settings');
-              _loadSettingsAndAlarms(); // Recargar configuración y alarmas al volver
+              _loadSettingsAndAlarms();
             },
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            color: Colors.green,
-            child: Text(
-              'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: const Color.fromARGB(255, 255, 255, 255),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-
-          // NUEVO: Contenedor para alarma sonando
-          _buildRingingAlarmContainer(),
-          if (_getSnoozedAlarms().isNotEmpty)
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Container(
-              margin: const EdgeInsets.all(8.0),
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade100,
-                borderRadius: BorderRadius.circular(12.0),
-                border: Border.all(color: Colors.orange.shade400, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orange.shade200,
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.snooze,
-                        color: Colors.orange.shade700,
-                        size: 35,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Alarmas Pospuestas (${_getSnoozedAlarms().length})'
-                            .toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  ..._getSnoozedAlarms()
-                      .map(
-                        (alarm) => Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.shade300),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      alarm.title,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Sonará: ${DateFormat('HH:mm').format(alarm.time)}',
-                                      style: TextStyle(
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
-                                      style: TextStyle(
-                                        color: Colors.orange.shade700,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                onPressed: () async {
-                                  // Desactivar alarma pospuesta
-                                  await _toggleAlarmState(alarm.id, false);
-                                  // Resetear contador de snooze
-                                  setState(() {
-                                    final index = _alarms.indexWhere(
-                                      (a) => a.id == alarm.id,
-                                    );
-                                    if (index != -1) {
-                                      _alarms[index].snoozeCount = 0;
-                                    }
-                                  });
-                                  await _saveAlarms();
-                                },
-                                icon: Icon(
-                                  Icons.cancel,
-                                  color: Colors.red.shade600,
-                                ),
-                                tooltip: 'Desactivar alarma pospuesta',
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ],
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              color: Colors.green,
+              child: Text(
+                'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: const Color.fromARGB(255, 255, 255, 255),
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
-          _buildNextAlarmSection(), // Mostrar la sección de la próxima alarma
 
-          Expanded(
-            // El ListView/ExpansionPanelList debe estar en un Expanded
-            child: _alarms.isEmpty
-                ? const Center(child: Text('No hay alarmas configuradas'))
-                : _currentGroupingOption == AlarmGroupingOption.none
-                ? ListView.builder(
-                    itemCount: _alarms.length,
-                    itemBuilder: (context, index) {
-                      final alarm = _alarms[index];
-                      return _buildAlarmItem(alarm);
-                    },
+            // Contenedor para alarma sonando
+            _buildRingingAlarmContainer(),
+
+            // Contenedor para alarmas pospuestas
+            if (_getSnoozedAlarms().isNotEmpty)
+              Container(
+                margin: const EdgeInsets.all(8.0),
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(8.0),
+                  border: Border.all(color: Colors.orange.shade400, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.orange.shade200,
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.snooze,
+                          color: Colors.orange.shade700,
+                          size: 35,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Alarmas Pospuestas (${_getSnoozedAlarms().length})'
+                              .toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ..._getSnoozedAlarms()
+                        .map(
+                          (alarm) => Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(
+                                            alarm.title,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Faltan: ${_formatDuration(_calculateTimeUntilSnoozedAlarm(alarm))}',
+                                            style: TextStyle(
+                                              color: Colors.orange.shade700,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Text(
+                                        'Sonará a las: ${DateFormat('HH:mm').format(_calculateSnoozedAlarmTime(alarm))}',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
+                                        style: TextStyle(
+                                          color: Colors.orange.shade700,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () async {
+                                    // Desactivar alarma pospuesta
+                                    await _toggleAlarmState(alarm.id, false);
+                                    // Resetear contador de snooze
+                                    setState(() {
+                                      final index = _alarms.indexWhere(
+                                        (a) => a.id == alarm.id,
+                                      );
+                                      if (index != -1) {
+                                        _alarms[index].snoozeCount = 0;
+                                      }
+                                    });
+                                    await _saveAlarms();
+                                  },
+                                  icon: Icon(
+                                    Icons.cancel,
+                                    color: Colors.red.shade600,
+                                  ),
+                                  tooltip: 'Desactivar alarma pospuesta',
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ],
+                ),
+              ),
+
+            // Sección de próxima alarma
+            _buildNextAlarmSection(),
+
+            // Lista de alarmas (sin Expanded, ahora dentro del scroll)
+            _alarms.isEmpty
+                ? Container(
+                    height: 200,
+                    child: const Center(
+                      child: Text('No hay alarmas configuradas'),
+                    ),
                   )
-                : ListView.builder(
-                    itemCount: groupedAlarms.keys.length,
-                    itemBuilder: (context, index) {
-                      String groupKey = groupedAlarms.keys.elementAt(index);
+                : _currentGroupingOption == AlarmGroupingOption.none
+                ? Column(
+                    children: _alarms
+                        .map((alarm) => _buildAlarmItem(alarm))
+                        .toList(),
+                  )
+                : Column(
+                    children: groupedAlarms.keys.map((groupKey) {
                       List<Alarm> alarmsInGroup = groupedAlarms[groupKey]!;
                       bool showActiveOnly =
                           _groupShowActiveOnlyState[groupKey] ?? false;
@@ -1898,12 +1834,6 @@ class _HomePageState extends State<HomePage> {
                           ? alarmsInGroup.where((a) => a.isActive).toList()
                           : alarmsInGroup;
 
-                      if (alarmsInGroup.isEmpty &&
-                          !(_groupExpansionState[groupKey] ?? false)) {
-                        // No mostrar el grupo si está vacío y no se fuerza la expansión (opcional)
-                        // return const SizedBox.shrink();
-                      }
-
                       return Card(
                         margin: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -1911,14 +1841,12 @@ class _HomePageState extends State<HomePage> {
                         ),
                         elevation: 1.0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4.0),
+                          borderRadius: BorderRadius.circular(8.0),
                           side: BorderSide.none,
                         ),
                         child: ExpansionTile(
                           collapsedIconColor: Colors.transparent,
-                          key: PageStorageKey(
-                            groupKey,
-                          ), // Para mantener estado de expansión
+                          key: PageStorageKey(groupKey),
                           title: Row(
                             mainAxisAlignment: MainAxisAlignment.start,
                             children: [
@@ -1960,9 +1888,7 @@ class _HomePageState extends State<HomePage> {
                               _groupExpansionState[groupKey] = isExpanded;
                             });
                           },
-                          shape: Border.all(
-                            color: Colors.transparent,
-                          ), // Elimina el borde cuando está colapsado
+                          shape: Border.all(color: Colors.transparent),
                           children: displayAlarms.isEmpty
                               ? [
                                   const ListTile(
@@ -1978,10 +1904,10 @@ class _HomePageState extends State<HomePage> {
                                     .toList(),
                         ),
                       );
-                    },
+                    }).toList(),
                   ),
-          ),
-        ],
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _setAlarm,
