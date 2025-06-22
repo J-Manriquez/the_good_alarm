@@ -24,8 +24,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSnoozeSettings();
-
+    
     if (widget.arguments != null) {
       alarmId = widget.arguments!['alarmId'] ?? 0;
       title = widget.arguments!['title'] ?? 'Alarma';
@@ -33,11 +32,16 @@ class _AlarmScreenState extends State<AlarmScreen> {
       snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
       maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
       snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes'] ?? 5;
-
-      // Cargar la duración del snooze desde SharedPreferences
-      _loadSnoozeDuration();
-
-      // NUEVO: Notificar que la alarma está sonando cuando se abre la pantalla
+      
+      // AGREGAR LOGS DE DEPURACIÓN
+      print('=== ALARM SCREEN INIT DEBUG ===');
+      print('AlarmId: $alarmId');
+      print('MaxSnoozes: $maxSnoozes');
+      print('SnoozeDurationMinutes: $snoozeDurationMinutes');
+      print('SnoozeCount: $snoozeCount');
+      print('Arguments received: ${widget.arguments}');
+      print('=== ALARM SCREEN INIT DEBUG END ===');
+      
       _notifyAlarmRinging();
     }
   }

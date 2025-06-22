@@ -23,7 +23,15 @@ class AlarmService : Service() {
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("AlarmService", "onStartCommand called")
+        // Asegurar que el servicio se reinicie si es terminado
         return START_STICKY
+    }
+    
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Reiniciar servicio si la tarea es removida
+        val restartServiceIntent = Intent(applicationContext, AlarmService::class.java)
+        startForegroundService(restartServiceIntent)
     }
     
     override fun onBind(intent: Intent?): IBinder? {

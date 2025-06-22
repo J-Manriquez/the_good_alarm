@@ -42,13 +42,22 @@
         </activity>
         
         <!-- Registrar el BroadcastReceiver para las alarmas -->
-        <receiver
-            android:name=".AlarmReceiver"
-            android:enabled="true"
-            android:exported="true">
+        <receiver 
+            android:name=".AlarmReceiver" 
+            android:enabled="true" 
+            android:exported="false">
             <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.example.the_good_alarm.ALARM_TRIGGERED" />
+                <action android:name="com.example.the_good_alarm.STOP_ALARM_ACTION" />
+                <action android:name="com.example.the_good_alarm.SNOOZE_ALARM_ACTION" />
+            </intent-filter>
+        </receiver>
+        
+        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
         

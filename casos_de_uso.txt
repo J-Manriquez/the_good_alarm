@@ -1,0 +1,20 @@
+1.  **Crear una alarma básica**: El usuario crea una nueva alarma con una hora y un título, sin repetición.
+2.  **Editar una alarma existente**: El usuario modifica la hora y el mensaje de una alarma previamente creada.
+3.  **Eliminar una alarma**: El usuario borra una alarma de la lista.
+4.  **Activar/Desactivar una alarma**: El usuario cambia el estado de una alarma de activa a inactiva y viceversa.
+5.  **Configurar alarma diaria**: El usuario crea una alarma que se repite todos los días.
+6.  **Configurar alarma semanal**: El usuario crea una alarma que se repite el mismo día de la semana (ej. todos los lunes).
+7.  **Configurar alarma de fin de semana**: El usuario crea una alarma que se repite los sábados y domingos.
+8.  **Configurar alarma personalizada**: El usuario selecciona días específicos de la semana para que la alarma se repita (ej. martes y jueves).
+9.  **Establecer título y mensaje para una alarma**: El usuario añade un título y un mensaje descriptivo a una alarma.
+10. **Posponer una alarma**: Cuando una alarma suena, el usuario selecciona la opción de posponerla por un período de tiempo predefinido.
+11. **Detener una alarma**: Cuando una alarma suena, el usuario selecciona la opción de detenerla completamente.
+12. **Alcanzar el límite de posposiciones**: El usuario intenta posponer una alarma más allá del número máximo permitido de posposiciones.
+13. **Ver la próxima alarma**: El usuario verifica la sección de la pantalla principal que muestra la cuenta regresiva hasta la próxima alarma activa.
+14. **Ocultar la sección de próxima alarma**: El usuario desactiva la visualización de la sección de la próxima alarma desde la pantalla de configuración.
+15. **Cambiar la duración de la posposición**: El usuario ajusta el tiempo de posposición predeterminado en la configuración de la aplicación.
+16. **Cambiar el número máximo de posposiciones**: El usuario modifica el número de veces que se puede posponer una alarma en la configuración.
+17. **Agrupar alarmas por franja horaria (12 horas)**: El usuario selecciona la opción de agrupar alarmas en bloques de 12 horas en la configuración.
+18. **Agrupar alarmas por franja horaria (6 horas)**: El usuario selecciona la opción de agrupar alarmas en bloques de 6 horas en la configuración.
+19. **Agrupar alarmas por franja horaria (4 horas)**: El usuario selecciona la opción de agrupar alarmas en bloques de 4 horas en la configuración.
+20. **Agrupar alarmas por franja horaria (2 horas)**: El usuario selecciona la opción de agrupar alarmas en bloques de 2 horas en la configuración.

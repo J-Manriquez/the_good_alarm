@@ -19,15 +19,32 @@ import android.app.Notification
 
 class AlarmReceiver : BroadcastReceiver() {
     
-    private val STOP_ACTION = "com.example.the_good_alarm.STOP_ALARM_ACTION"
-    private val SNOOZE_ACTION = "com.example.the_good_alarm.SNOOZE_ALARM_ACTION"
+    companion object {
+        var currentRingtone: Ringtone? = null
+        var currentVibrator: Vibrator? = null
+        const val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
+        private const val STOP_ACTION = "com.example.the_good_alarm.STOP_ALARM_ACTION"
+        private const val SNOOZE_ACTION = "com.example.the_good_alarm.SNOOZE_ALARM_ACTION"
+
+        fun stopAlarmSound() {
+            try {
+                Log.d("AlarmReceiver", "Stopping alarm sound and vibration")
+                currentRingtone?.stop()
+                currentRingtone = null
+                currentVibrator?.cancel()
+                currentVibrator = null
+                Log.d("AlarmReceiver", "Alarm sound and vibration stopped")
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error stopping alarm sound", e)
+            }
+        }
+    }
 
     override fun onReceive(context: Context, intent: Intent) {
         Log.d("AlarmReceiver", "onReceive called with action: ${intent.action}")
         
         val alarmId = intent.getIntExtra("alarmId", -1)
         Log.d("AlarmReceiver", "Alarm ID: $alarmId")
-        // Asegúrate de que el alarmId se propague correctamente para las acciones
 
         when (intent.action) {
             "com.example.the_good_alarm.ALARM_TRIGGERED" -> {
@@ -37,10 +54,8 @@ class AlarmReceiver : BroadcastReceiver() {
             STOP_ACTION -> {
                 Log.d("AlarmReceiver", "Stop action received for alarmId: $alarmId")
                 stopAlarmSound()
-                // También cancela la notificación
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(alarmId) 
-                // Llama a MainActivity para cancelar la alarma en AlarmManager y actualizar Flutter
                 val mainActivityIntent = Intent(context, MainActivity::class.java).apply {
                     action = "STOP_ALARM_FROM_NOTIFICATION"
                     putExtra("alarmId", alarmId)
@@ -54,10 +69,12 @@ class AlarmReceiver : BroadcastReceiver() {
                 stopAlarmSound()
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(alarmId)
-                // Llama a MainActivity para posponer la alarma
                 val mainActivityIntent = Intent(context, MainActivity::class.java).apply {
                     action = "SNOOZE_ALARM_FROM_NOTIFICATION"
                     putExtra("alarmId", alarmId)
+                    // AGREGAR PARÁMETROS DE POSPOSICIÓN
+                    putExtra("maxSnoozes", intent.getIntExtra("maxSnoozes", 3))
+                    putExtra("snoozeDurationMinutes", intent.getIntExtra("snoozeDurationMinutes", 5))
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
                 Log.d("AlarmReceiver", "Starting MainActivity with SNOOZE_ALARM_FROM_NOTIFICATION action")
@@ -71,50 +88,26 @@ class AlarmReceiver : BroadcastReceiver() {
         val alarmId = intent.getIntExtra("alarmId", -1)
         val title = intent.getStringExtra("title") ?: "Alarma"
         val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
-        val maxSnoozes = intent.getIntExtra("maxSnoozes", 3) // AGREGAR
-        val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5) // AGREGAR
-
-        Log.d("AlarmReceiver", "Alarm triggered - ID: $alarmId, Title: $title")
+        val maxSnoozes = intent.getIntExtra("maxSnoozes", 3)
+        val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
+    
+        Log.d("AlarmReceiver", "Alarm triggered - ID: $alarmId, Title: $title, MaxSnoozes: $maxSnoozes, SnoozeDuration: $snoozeDurationMinutes")
         
         try {
-            // Crear canal de notificación con IMPORTANCE_HIGH para mantener visible
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Log.d("AlarmReceiver", "Creating HIGH importance notification channel")
-                val channel = NotificationChannel(
-                    NOTIFICATION_CHANNEL_ID, 
-                    "Alarm Notifications", 
-                    NotificationManager.IMPORTANCE_HIGH  // CAMBIO: HIGH en lugar de LOW
-                ).apply {
-                    this.description = "Channel for alarm notifications"
-                    this.setBypassDnd(true)
-                    this.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    this.enableVibration(false)  // Sin vibración en canal
-                    this.enableLights(true)
-                    this.setSound(null, null)  // Sin sonido en canal
-                }
-                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.createNotificationChannel(channel)
-                Log.d("AlarmReceiver", "Notification channel created with HIGH importance")
-            }
-            
             Log.d("AlarmReceiver", "handleAlarmTrigger: Starting alarm handling process")
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val wakeLock = powerManager.newWakeLock(
                 PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
                 "TheGoodAlarm::AlarmWakeLock"
             )
-            wakeLock.acquire(60 * 1000L) // Adquirir por 60 segundos
+            wakeLock.acquire(60 * 1000L)
             Log.d("AlarmReceiver", "WakeLock acquired for 60 seconds")
 
-            val alarmId = intent.getIntExtra("alarmId", 0)
-            val title = intent.getStringExtra("title") ?: "Alarma"
-            val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
             Log.d("AlarmReceiver", "Alarm details - ID: $alarmId, Title: $title, Message: $message")
 
             // Play sound and vibrate
             try {
                 Log.d("AlarmReceiver", "Setting up ringtone")
-                // Verificar si ya hay un sonido reproduciéndose
                 if (currentRingtone == null || !currentRingtone!!.isPlaying) {
                     currentRingtone = RingtoneManager.getRingtone(
                         context, 
@@ -152,63 +145,70 @@ class AlarmReceiver : BroadcastReceiver() {
                 Log.e("AlarmReceiver", "Error starting vibration", e)
             }
 
-            // Intent para abrir MainActivity cuando se presiona la notificación
+            // Intent para abrir MainActivity
             Log.d("AlarmReceiver", "Creating launch intent for MainActivity")
             val launchIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("alarmId", alarmId)
                 putExtra("title", title)
                 putExtra("message", message)
                 putExtra("screenRoute", "/alarm")
-                putExtra("autoShowAlarm", true) // Importante para que MainActivity sepa que debe mostrar la pantalla
-                putExtra("maxSnoozes", maxSnoozes) // AGREGAR
-                putExtra("snoozeDurationMinutes", snoozeDurationMinutes) // AGREGAR
+                putExtra("autoShowAlarm", true)
+                putExtra("maxSnoozes", maxSnoozes)
+                putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+                putExtra("snoozeCount", 0)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
+            
+            // AGREGAR LOG DETALLADO
+            Log.d("AlarmReceiver", "Launch intent extras: alarmId=$alarmId, maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, title=$title")
+            
             val pendingLaunchIntent = PendingIntent.getActivity(
-                context, alarmId + 1000, launchIntent, // requestCode debe ser único
+                context, alarmId + 1000, launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // Acción para detener la alarma desde la notificación
+            // Acción para detener la alarma
             Log.d("AlarmReceiver", "Creating stop intent for notification action")
             val stopIntent = Intent(context, AlarmReceiver::class.java).apply {
                 action = STOP_ACTION
                 putExtra("alarmId", alarmId)
             }
             val pendingStopIntent = PendingIntent.getBroadcast(
-                context, alarmId + 2000, stopIntent, // requestCode debe ser único
+                context, alarmId + 2000, stopIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // Acción para posponer la alarma desde la notificación
+            // Acción para posponer la alarma
             Log.d("AlarmReceiver", "Creating snooze intent for notification action")
             val snoozeIntent = Intent(context, AlarmReceiver::class.java).apply {
                 action = SNOOZE_ACTION
                 putExtra("alarmId", alarmId)
+                putExtra("maxSnoozes", maxSnoozes)
+                putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
             }
             val pendingSnoozeIntent = PendingIntent.getBroadcast(
-                context, alarmId + 3000, snoozeIntent, // requestCode debe ser único
+                context, alarmId + 3000, snoozeIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             Log.d("AlarmReceiver", "Got NotificationManager service")
 
-            // Asegúrate de que el canal de notificación exista
+            // Crear canal de notificación
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Log.d("AlarmReceiver", "Creating notification channel")
                 try {
                     val channel = NotificationChannel(
                         NOTIFICATION_CHANNEL_ID, 
                         "Alarm Notifications", 
-                        NotificationManager.IMPORTANCE_LOW  // Cambiar de IMPORTANCE_HIGH a IMPORTANCE_LOW
+                        NotificationManager.IMPORTANCE_HIGH
                     ).apply {
                         this.description = "Channel for alarm notifications"
                         this.setBypassDnd(true)
                         this.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                        this.enableVibration(false)  // Desactivar vibración del canal
+                        this.enableVibration(false)
                         this.enableLights(true)
-                        this.setSound(null, null)  // Desactivar sonido del canal
+                        this.setSound(null, null)
                     }
                     notificationManager.createNotificationChannel(channel)
                     Log.d("AlarmReceiver", "Notification channel created successfully")
@@ -222,24 +222,23 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                 .setContentTitle(title)
                 .setContentText(message)
-                .setPriority(NotificationCompat.PRIORITY_MAX) // Cambiado a MAX para mayor visibilidad
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setFullScreenIntent(pendingLaunchIntent, true)
                 .setContentIntent(pendingLaunchIntent)
                 .addAction(0, "Apagar", pendingStopIntent)
-                .addAction(0, "Posponer 1 min", pendingSnoozeIntent)
+                .addAction(0, "Posponer", pendingSnoozeIntent)
                 .setAutoCancel(false)
                 .setOngoing(true)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // Asegura que sea visible en la pantalla de bloqueo
-                .setSound(null) // Asegurarse de que la notificación no reproduzca sonido
-                .setVibrate(null) // Asegurarse de que la notificación no vibre
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setSound(null)
+                .setVibrate(null)
 
             try {
                 Log.d("AlarmReceiver", "Showing notification with ID: $alarmId")
                 notificationManager.notify(alarmId, notificationBuilder.build())
                 Log.d("AlarmReceiver", "Notification should be visible now")
                 
-                // También intentamos iniciar la actividad directamente como respaldo
                 Log.d("AlarmReceiver", "Also starting MainActivity directly as backup")
                 context.startActivity(launchIntent)
             } catch (e: Exception) {
@@ -248,25 +247,6 @@ class AlarmReceiver : BroadcastReceiver() {
 
         } catch (e: Exception) {
             Log.e("AlarmReceiver", "Error in handleAlarmTrigger", e)
-        }
-    }
-    
-    companion object {
-        var currentRingtone: Ringtone? = null
-        var currentVibrator: Vibrator? = null
-        const val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
-
-        fun stopAlarmSound() {
-            try {
-                Log.d("AlarmReceiver", "Stopping alarm sound and vibration")
-                currentRingtone?.stop()
-                currentRingtone = null
-                currentVibrator?.cancel()
-                currentVibrator = null
-                Log.d("AlarmReceiver", "Alarm sound and vibration stopped")
-            } catch (e: Exception) {
-                Log.e("AlarmReceiver", "Error stopping alarm sound", e)
-            }
         }
     }
 }

@@ -20,6 +20,7 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.os.Looper
 import android.view.WindowManager
+import android.os.PowerManager
 import androidx.annotation.NonNull
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -29,6 +30,25 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.util.Log
 import java.util.*
+import org.json.JSONArray
+import org.json.JSONObject
+import android.os.Handler
+// import android.os.Looper
+
+data class AlarmData(
+    val id: Int,
+    val title: String,
+    val message: String,
+    val isActive: Boolean,
+    val repeatDays: List<Int>,
+    val isDaily: Boolean,
+    val isWeekly: Boolean,
+    val isWeekend: Boolean,
+    val maxSnoozes: Int,
+    val snoozeDurationMinutes: Int,
+    val hour: Int,
+    val minute: Int
+)
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.the_good_alarm/alarm"
@@ -37,15 +57,18 @@ class MainActivity : FlutterActivity() {
     private lateinit var alarmManager: AlarmManager
     private lateinit var alarmReceiver: BroadcastReceiver
     private var methodChannel: MethodChannel? = null
+    private var timeZoneReceiver: BroadcastReceiver? = null
     
-    private fun checkDoNotDisturbPermission() {
+    private fun checkDndPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (!notificationManager.isNotificationPolicyAccessGranted) {
-                val intent = Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
                 startActivity(intent)
+                return false
             }
         }
+        return true
     }
     
     private val REQUEST_CODE_OVERLAY_PERMISSION = 123
@@ -70,7 +93,6 @@ class MainActivity : FlutterActivity() {
                     Log.d("MainActivity", "Overlay permission granted")
                 } else {
                     Log.w("MainActivity", "Overlay permission not granted")
-                    // Puedes mostrar un mensaje al usuario aquí si el permiso es crucial
                 }
             }
         }
@@ -81,10 +103,11 @@ class MainActivity : FlutterActivity() {
         Log.d("MainActivity", "configureFlutterEngine called")
         
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        createNotificationChannel() // Asegúrate que esto crea el canal con IMPORTANCE_HIGH
+        createNotificationChannel()
         checkDoNotDisturbPermission()
-        checkOverlayPermission() // <-- Añade esta llamada
-        // registerAlarmReceiver() // Esta función parece redundante si AlarmReceiver se declara en el Manifest
+        checkOverlayPermission()
+        requestBatteryOptimizationExemption()
+        handleTimeZoneChange()
         
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel?.setMethodCallHandler { call, result ->
@@ -106,8 +129,10 @@ class MainActivity : FlutterActivity() {
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             if (alarmManager.canScheduleExactAlarms()) {
-                                setAlarm(timeInMillis, alarmId, title, message, screenRoute, 
-                                       repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes)
+                                setAlarm(
+                                    timeInMillis, alarmId, title, message, screenRoute,
+                                    repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes
+                                )
                                 result.success(true)
                             } else {
                                 val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
@@ -116,8 +141,10 @@ class MainActivity : FlutterActivity() {
                                 result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
                             }
                         } else {
-                            setAlarm(timeInMillis, alarmId, title, message, screenRoute,
-                                   repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes)
+                            setAlarm(
+                                timeInMillis, alarmId, title, message, screenRoute,
+                                repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes
+                            )
                             result.success(true)
                         }
                     } catch (e: Exception) {
@@ -129,23 +156,25 @@ class MainActivity : FlutterActivity() {
                     cancelAlarm(alarmId)
                     result.success(true)
                 }
-                // En el método onMethodCall, caso "stopAlarm"
                 "stopAlarm" -> {
                     val alarmId = call.argument<Int>("alarmId") ?: 0
                     Log.d("MainActivity", "Stopping alarm: $alarmId")
                     AlarmReceiver.stopAlarmSound()
                     cancelAlarm(alarmId)
-                    
-                    // AGREGAR: Notificar a Flutter que la alarma fue detenida
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmId))
-                    
                     result.success(true)
                 }
                 "snoozeAlarm" -> {
                     Log.d("MainActivity", "=== SNOOZE ALARM METHOD START ===")
                     val alarmId = call.argument<Int>("alarmId")
-                    val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3  // OBTENER DEL FLUTTER
-                    val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5  // OBTENER DEL FLUTTER
+                    val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
+                    val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
+                    
+                    // AGREGAR LOGS DETALLADOS
+                    Log.d("MainActivity", "Received snooze parameters:")
+                    Log.d("MainActivity", "  - alarmId: $alarmId")
+                    Log.d("MainActivity", "  - maxSnoozes: $maxSnoozes")
+                    Log.d("MainActivity", "  - snoozeDurationMinutes: $snoozeDurationMinutes")
                     
                     Log.d("MainActivity", "Snoozing alarm ID: $alarmId for $snoozeDurationMinutes minutes, max: $maxSnoozes")
                     
@@ -154,9 +183,9 @@ class MainActivity : FlutterActivity() {
                         cancelAlarm(alarmId)
                         
                         val calendar = Calendar.getInstance()
+                        Log.d("MainActivity", "Current time before adding snooze: ${calendar.time}")
                         calendar.add(Calendar.MINUTE, snoozeDurationMinutes)
-                        
-                        Log.d("MainActivity", "New snooze time: ${calendar.time}")
+                        Log.d("MainActivity", "New snooze time after adding $snoozeDurationMinutes minutes: ${calendar.time}")
                         
                         setAlarm(
                             timeInMillis = calendar.timeInMillis,
@@ -164,9 +193,15 @@ class MainActivity : FlutterActivity() {
                             title = "Alarma Pospuesta",
                             message = "¡Es hora de despertar!",
                             screenRoute = "/alarm",
-                            maxSnoozes = maxSnoozes,  // USAR VALOR CORRECTO
-                            snoozeDurationMinutes = snoozeDurationMinutes  // USAR VALOR CORRECTO
+                            repeatDays = emptyList(),
+                            isDaily = false,
+                            isWeekly = false,
+                            isWeekend = false,
+                            maxSnoozes = maxSnoozes,
+                            snoozeDurationMinutes = snoozeDurationMinutes
                         )
+                        
+                        Log.d("MainActivity", "Alarm rescheduled with correct parameters")
                         
                         methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf(
                             "alarmId" to alarmId, 
@@ -180,6 +215,17 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_ALARM_ID", "Alarm ID is required", null)
                     }
                     Log.d("MainActivity", "=== SNOOZE ALARM METHOD END ===")
+                }
+                "checkDoNotDisturbPermission" -> {
+                    result.success(checkDoNotDisturbPermission())
+                }
+                "requestDoNotDisturbPermission" -> {
+                    requestDoNotDisturbPermission()
+                    result.success(true)
+                }
+                "notifyAlarmRinging" -> {
+                    Log.d("MainActivity", "Alarm ringing notification received")
+                    result.success(null)
                 }
                 "getSystemSounds" -> {
                     val sounds = getSystemAlarmSounds()
@@ -195,11 +241,23 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "vibrate" -> {
-                    val pattern = call.argument<LongArray>("pattern") ?: longArrayOf(0, 500, 500, 500)
+                    val pattern = call.argument<List<Long>>("pattern")?.toLongArray() 
+                        ?: longArrayOf(0, 500, 500, 500)
                     vibrate(pattern)
                     result.success(true)
                 }
-                else -> result.notImplemented()
+                "restoreAlarmsAfterBoot" -> {
+                    val alarmsJson = call.argument<String>("alarmsData")
+                    if (alarmsJson != null) {
+                        restoreAlarmsFromJson(alarmsJson)
+                        result.success(true)
+                    } else {
+                        result.error("NO_DATA", "No alarm data provided", null)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
     }
@@ -207,7 +265,6 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Solicitar permiso de notificaciones en Android 13 (Tiramisu) y superiores
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
@@ -215,7 +272,6 @@ class MainActivity : FlutterActivity() {
             }
         }
         
-        // Solicitar permiso para programar alarmas exactas en Android 12 (S) y superiores
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
                 val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
@@ -225,17 +281,17 @@ class MainActivity : FlutterActivity() {
             }
         }
         
-        handleAlarmIntent(intent)
+        handleAlarmIntent()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d("MainActivity", "onNewIntent called with action: ${intent.action}")
-        setIntent(intent) // Es crucial actualizar el intent de la actividad
-        handleAlarmIntent(intent) // Procesa el intent actual
+        setIntent(intent)
+        handleAlarmIntent()
     }
 
-    private fun handleAlarmIntent(intent: Intent?) {
+    private fun handleAlarmIntent() {
         if (intent == null) {
             Log.d("MainActivity", "handleAlarmIntent: intent is null")
             return
@@ -248,12 +304,10 @@ class MainActivity : FlutterActivity() {
             "STOP_ALARM_FROM_NOTIFICATION" -> {
                 if (alarmIdFromIntent != -1) {
                     Log.d("MainActivity", "Stopping alarm from notification: $alarmIdFromIntent")
-                    AlarmReceiver.stopAlarmSound() // Detiene sonido/vibración
-                    cancelAlarm(alarmIdFromIntent) // Cancela la alarma en AlarmManager
-                    // Informa a Flutter para actualizar la UI y posiblemente eliminar la alarma de la lista
+                    AlarmReceiver.stopAlarmSound()
+                    cancelAlarm(alarmIdFromIntent)
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallyStopped")
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmIdFromIntent))
-                    // Cierra la pantalla de alarma si está abierta
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
                     methodChannel?.invokeMethod("closeAlarmScreenIfOpen", mapOf("alarmId" to alarmIdFromIntent))
                 }
@@ -262,21 +316,25 @@ class MainActivity : FlutterActivity() {
                 if (alarmIdFromIntent != -1) {
                     Log.d("MainActivity", "Snoozing alarm from notification: $alarmIdFromIntent")
                     AlarmReceiver.stopAlarmSound()
-                    cancelAlarm(alarmIdFromIntent) // Cancela la alarma actual
+                    cancelAlarm(alarmIdFromIntent)
                     
+                    val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
                     val calendar = Calendar.getInstance()
-                    calendar.add(Calendar.MINUTE, 1) // Posponer 1 minuto
-                    Log.d("MainActivity", "Setting new alarm for 1 minute later: ${calendar.time}")
+                    calendar.add(Calendar.MINUTE, snoozeDurationMinutes) // Usar la duración correcta
+                    Log.d("MainActivity", "Setting new alarm for $snoozeDurationMinutes minutes later: ${calendar.time}")
                     setAlarm(
                         timeInMillis = calendar.timeInMillis,
-                        alarmId = alarmIdFromIntent, // Reutiliza el ID o genera uno nuevo si es necesario
+                        alarmId = alarmIdFromIntent,
                         title = intent.getStringExtra("title") ?: "Alarma Pospuesta",
                         message = intent.getStringExtra("message") ?: "¡Es hora de despertar!",
                         screenRoute = "/alarm",
-                        maxSnoozes = intent.getIntExtra("maxSnoozes", 3),  // Obtener del intent o usar valor por defecto
-                        snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)  // Obtener del intent o usar valor por defecto
+                        repeatDays = emptyList(),
+                        isDaily = false,
+                        isWeekly = false,
+                        isWeekend = false,
+                        maxSnoozes = intent.getIntExtra("maxSnoozes", 3),
+                        snoozeDurationMinutes = snoozeDurationMinutes
                     )
-                    // Informa a Flutter para actualizar la UI
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallySnoozed")
                     methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf("alarmId" to alarmIdFromIntent, "newTimeInMillis" to calendar.timeInMillis))
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
@@ -284,13 +342,18 @@ class MainActivity : FlutterActivity() {
                 }
             }
             else -> {
-                 // Lógica existente para mostrar la pantalla de alarma cuando la app se abre por la notificación
                 val title = intent.getStringExtra("title")
                 val message = intent.getStringExtra("message")
                 val screenRoute = intent.getStringExtra("screenRoute")
                 val autoShow = intent.getBooleanExtra("autoShowAlarm", false)
+                val maxSnoozes = intent.getIntExtra("maxSnoozes", 3)
+                val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
+                val snoozeCount = intent.getIntExtra("snoozeCount", 0)
 
                 Log.d("MainActivity", "Checking if should show alarm screen - alarmId: $alarmIdFromIntent, screenRoute: $screenRoute, autoShow: $autoShow")
+                Log.d("MainActivity", "Alarm parameters: maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, snoozeCount=$snoozeCount")
+                Log.d("MainActivity", "Intent extras: ${intent.extras?.keySet()?.joinToString()}") // AGREGAR ESTE LOG
+                
                 if (alarmIdFromIntent != -1 && screenRoute == "/alarm" && autoShow) {
                     Log.d("MainActivity", "Setting window flags to show over lock screen")
                     try {
@@ -306,18 +369,18 @@ class MainActivity : FlutterActivity() {
                     }
                     
                     Log.d("MainActivity", "Scheduling delayed call to show alarm screen")
-                    android.os.Handler(Looper.getMainLooper()).postDelayed({
+                    Handler(Looper.getMainLooper()).postDelayed({
                         Log.d("MainActivity", "Now showing alarm screen via Flutter")
-                        methodChannel?.invokeMethod(
-                            "showAlarmScreen",
-                            mapOf(
-                                "alarmId" to alarmIdFromIntent,
-                                "title" to (title ?: "Alarma"),
-                                "message" to (message ?: "¡Es hora de despertar!")
-                            )
-                        )
+                        Log.d("MainActivity", "Passing parameters: alarmId=$alarmIdFromIntent, maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, snoozeCount=$snoozeCount") // AGREGAR ESTE LOG
+                        methodChannel?.invokeMethod("showAlarmScreen", mapOf(
+                            "alarmId" to alarmIdFromIntent,
+                            "title" to title,
+                            "message" to message,
+                            "maxSnoozes" to maxSnoozes,
+                            "snoozeDurationMinutes" to snoozeDurationMinutes,
+                            "snoozeCount" to snoozeCount
+                        ))
                     }, 500)
-                    // Limpia el extra para que no se vuelva a procesar si la actividad se recrea
                     intent.removeExtra("autoShowAlarm") 
                 }
             }
@@ -325,242 +388,320 @@ class MainActivity : FlutterActivity() {
     }
     
     private fun setAlarm(
-        timeInMillis: Long, 
-        alarmId: Int, 
-        title: String, 
-        message: String, 
+        timeInMillis: Long,
+        alarmId: Int,
+        title: String,
+        message: String,
         screenRoute: String,
-        repeatDays: List<Int> = emptyList(),
-        isDaily: Boolean = false,
-        isWeekly: Boolean = false,
-        isWeekend: Boolean = false,
-        maxSnoozes: Int = 3, // NUEVO PARÁMETRO
-        snoozeDurationMinutes: Int = 5 // NUEVO PARÁMETRO
+        repeatDays: List<Int>,
+        isDaily: Boolean,
+        isWeekly: Boolean,
+        isWeekend: Boolean,
+        maxSnoozes: Int,
+        snoozeDurationMinutes: Int
     ) {
-        Log.d("MainActivity", "=== SET ALARM START ===")
-        Log.d("MainActivity", "Setting alarm - ID: $alarmId, Time: ${Date(timeInMillis)}")
-        Log.d("MainActivity", "Repeat config - Daily: $isDaily, Weekly: $isWeekly, Weekend: $isWeekend, Days: $repeatDays")
-        Log.d("MainActivity", "Snooze config - Duration: $snoozeDurationMinutes min, Max: $maxSnoozes")
+        try {
+            val intent = Intent(this, AlarmReceiver::class.java).apply {
+                action = ALARM_ACTION
+                putExtra("alarmId", alarmId)
+                putExtra("title", title)
+                putExtra("message", message)
+                putExtra("screenRoute", screenRoute)
+                putExtra("repeatDays", repeatDays.toIntArray())
+                putExtra("isDaily", isDaily)
+                putExtra("isWeekly", isWeekly)
+                putExtra("isWeekend", isWeekend)
+                putExtra("maxSnoozes", maxSnoozes)
+                putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+            }
 
-        val intent = Intent(this, AlarmReceiver::class.java).apply {
-            action = ALARM_ACTION
-            putExtra("alarmId", alarmId)
-            putExtra("title", title)
-            putExtra("message", message)
-            putExtra("screenRoute", screenRoute)
-            putExtra("repeatDays", repeatDays.toIntArray())
-            putExtra("isDaily", isDaily)
-            putExtra("isWeekly", isWeekly)
-            putExtra("isWeekend", isWeekend)
-            putExtra("maxSnoozes", maxSnoozes) // AGREGAR
-            putExtra("snoozeDurationMinutes", snoozeDurationMinutes) // AGREGAR
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                alarmId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    timeInMillis,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    timeInMillis,
+                    pendingIntent
+                )
+            }
+
+            Log.d("MainActivity", "Alarm set for: ${Date(timeInMillis)}")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting alarm", e)
+        }
+    }
+
+    private fun checkDoNotDisturbPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            return notificationManager.isNotificationPolicyAccessGranted
+        }
+        return true
+    }
+
+    private fun requestDoNotDisturbPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+            startActivity(intent)
+        }
+    }
+
+    private fun cancelAlarm(alarmId: Int) {
+        try {
+            val intent = Intent(this, AlarmReceiver::class.java).apply {
+                action = ALARM_ACTION  // Agregar esta línea
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                alarmId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+            Log.d("MainActivity", "Alarm canceled successfully")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error canceling alarm", e)
+        }
+    }
+
+    // IMPLEMENTACIÓN CORREGIDA: requestBatteryOptimizationExemption
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val packageName = packageName
+            
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    intent.data = Uri.parse("package:$packageName")
+                    startActivity(intent)
+                    Log.d("MainActivity", "Requesting battery optimization exemption")
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error requesting battery optimization exemption", e)
+                    // Fallback: abrir configuración general de batería
+                    try {
+                        val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        startActivity(fallbackIntent)
+                    } catch (e2: Exception) {
+                        Log.e("MainActivity", "Error opening battery settings", e2)
+                    }
+                }
+            } else {
+                Log.d("MainActivity", "App already exempted from battery optimization")
+            }
+        }
+    }
+
+    // IMPLEMENTACIÓN CORREGIDA: handleTimeZoneChange
+    private fun handleTimeZoneChange() {
+        timeZoneReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    Intent.ACTION_TIMEZONE_CHANGED -> {
+                        Log.d("MainActivity", "Time zone changed, notifying Flutter")
+                        methodChannel?.invokeMethod("timeZoneChanged", mapOf(
+                            "newTimeZone" to TimeZone.getDefault().id,
+                            "timestamp" to System.currentTimeMillis()
+                        ))
+                    }
+                    Intent.ACTION_TIME_CHANGED -> {
+                        Log.d("MainActivity", "System time changed, notifying Flutter")
+                        methodChannel?.invokeMethod("systemTimeChanged", mapOf(
+                            "timestamp" to System.currentTimeMillis()
+                        ))
+                    }
+                }
+            }
         }
         
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            alarmId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        // Calcular el tiempo correcto para la alarma
-        val finalTimeInMillis = calculateAlarmTime(timeInMillis, isDaily, isWeekly, isWeekend, repeatDays)
-        Log.d("MainActivity", "Final alarm time calculated: ${Date(finalTimeInMillis)}")
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+        }
         
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, finalTimeInMillis, pendingIntent)
-            } else {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, finalTimeInMillis, pendingIntent)
-            }
-            Log.d("MainActivity", "Alarm set successfully in AlarmManager")
+            registerReceiver(timeZoneReceiver, filter)
+            Log.d("MainActivity", "Time zone change receiver registered")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error setting alarm in AlarmManager", e)
+            Log.e("MainActivity", "Error registering time zone receiver", e)
         }
-        
-        val serviceIntent = Intent(this, AlarmService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
+    }
+
+    // FUNCIÓN CORREGIDA: restoreAlarmsFromJson usando JSONObject en lugar de Gson
+    private fun restoreAlarmsFromJson(alarmsJson: String) {
+        try {
+            val jsonArray = JSONArray(alarmsJson)
+            
+            for (i in 0 until jsonArray.length()) {
+                val alarmJson = jsonArray.getJSONObject(i)
+                
+                val alarm = AlarmData(
+                    id = alarmJson.getInt("id"),
+                    title = alarmJson.getString("title"),
+                    message = alarmJson.getString("message"),
+                    isActive = alarmJson.getBoolean("isActive"),
+                    repeatDays = parseIntArray(alarmJson.optJSONArray("repeatDays")),
+                    isDaily = alarmJson.optBoolean("isDaily", false),
+                    isWeekly = alarmJson.optBoolean("isWeekly", false),
+                    isWeekend = alarmJson.optBoolean("isWeekend", false),
+                    maxSnoozes = alarmJson.optInt("maxSnoozes", 3),
+                    snoozeDurationMinutes = alarmJson.optInt("snoozeDurationMinutes", 5),
+                    hour = alarmJson.optInt("hour", 0),
+                    minute = alarmJson.optInt("minute", 0)
+                )
+                
+                if (alarm.isActive) {
+                    val nextTime = calculateNextAlarmTime(alarm)
+                    if (nextTime > System.currentTimeMillis()) {
+                        setAlarm(
+                            timeInMillis = nextTime,
+                            alarmId = alarm.id,
+                            title = alarm.title,
+                            message = alarm.message,
+                            screenRoute = "/alarm",
+                            repeatDays = alarm.repeatDays,
+                            isDaily = alarm.isDaily,
+                            isWeekly = alarm.isWeekly,
+                            isWeekend = alarm.isWeekend,
+                            maxSnoozes = alarm.maxSnoozes,
+                            snoozeDurationMinutes = alarm.snoozeDurationMinutes
+                        )
+                        Log.d("MainActivity", "Restored alarm: ${alarm.title} for ${Date(nextTime)}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error restoring alarms from JSON", e)
         }
-        Log.d("MainActivity", "=== SET ALARM END ===")
     }
     
-    private fun calculateAlarmTime(
-        originalTimeInMillis: Long,
-        isDaily: Boolean,
-        isWeekly: Boolean, 
-        isWeekend: Boolean,
-        repeatDays: List<Int>
-    ): Long {
-        Log.d("MainActivity", "=== CALCULATE ALARM TIME START ===")
+    private fun parseIntArray(jsonArray: JSONArray?): List<Int> {
+        if (jsonArray == null) return emptyList()
+        val result = mutableListOf<Int>()
+        for (i in 0 until jsonArray.length()) {
+            result.add(jsonArray.getInt(i))
+        }
+        return result
+    }
+
+    private fun calculateNextAlarmTime(alarm: AlarmData): Long {
+        val calendar = Calendar.getInstance()
         val now = Calendar.getInstance()
-        val alarmTime = Calendar.getInstance().apply {
-            timeInMillis = originalTimeInMillis
-        }
         
-        Log.d("MainActivity", "Current time: ${now.time}")
-        Log.d("MainActivity", "Original alarm time: ${alarmTime.time}")
+        calendar.set(Calendar.HOUR_OF_DAY, alarm.hour)
+        calendar.set(Calendar.MINUTE, alarm.minute)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
         
-        // Si no es repetitiva, usar lógica simple
-        if (!isDaily && !isWeekly && !isWeekend && repeatDays.isEmpty()) {
-            Log.d("MainActivity", "Non-repeating alarm")
-            if (alarmTime.before(now)) {
-                alarmTime.add(Calendar.DAY_OF_MONTH, 1)
-                Log.d("MainActivity", "Time passed today, scheduling for tomorrow: ${alarmTime.time}")
-            } else {
-                Log.d("MainActivity", "Time hasn't passed today, scheduling for today: ${alarmTime.time}")
+        if (alarm.isDaily) {
+            if (calendar.before(now)) {
+                calendar.add(Calendar.DAY_OF_MONTH, 1)
             }
-            return alarmTime.timeInMillis
+            return calendar.timeInMillis
         }
         
-        // Para alarmas repetitivas
-        if (isDaily) {
-            Log.d("MainActivity", "Daily alarm")
-            if (alarmTime.before(now)) {
-                alarmTime.add(Calendar.DAY_OF_MONTH, 1)
-                Log.d("MainActivity", "Daily alarm scheduled for tomorrow: ${alarmTime.time}")
-            } else {
-                Log.d("MainActivity", "Daily alarm scheduled for today: ${alarmTime.time}")
+        if (alarm.isWeekend) {
+            val weekendDays = listOf(Calendar.SATURDAY, Calendar.SUNDAY)
+            while (!weekendDays.contains(calendar.get(Calendar.DAY_OF_WEEK)) || calendar.before(now)) {
+                calendar.add(Calendar.DAY_OF_MONTH, 1)
             }
-        } else if (isWeekend) {
-            Log.d("MainActivity", "Weekend alarm")
-            val nextWeekendDay = findNextWeekendDay(now, alarmTime)
-            Log.d("MainActivity", "Next weekend day: ${Date(nextWeekendDay)}")
-            return nextWeekendDay
-        } else if (isWeekly) {
-            Log.d("MainActivity", "Weekly alarm")
-            val nextWeeklyDay = findNextWeeklyDay(now, alarmTime)
-            Log.d("MainActivity", "Next weekly day: ${Date(nextWeeklyDay)}")
-            return nextWeeklyDay
-        } else if (repeatDays.isNotEmpty()) {
-            Log.d("MainActivity", "Custom days alarm: $repeatDays")
-            val nextCustomDay = findNextCustomDay(now, alarmTime, repeatDays)
-            Log.d("MainActivity", "Next custom day: ${Date(nextCustomDay)}")
-            return nextCustomDay
+            return calendar.timeInMillis
         }
         
-        Log.d("MainActivity", "Final calculated time: ${alarmTime.time}")
-        Log.d("MainActivity", "=== CALCULATE ALARM TIME END ===")
-        return alarmTime.timeInMillis
-    }
-
-    private fun findNextWeekendDay(now: Calendar, alarmTime: Calendar): Long {
-        val result = Calendar.getInstance().apply {
-            timeInMillis = alarmTime.timeInMillis
-        }
-        
-        // Encontrar el próximo sábado o domingo
-        while (result.get(Calendar.DAY_OF_WEEK) != Calendar.SATURDAY && 
-               result.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
-            result.add(Calendar.DAY_OF_MONTH, 1)
-        }
-        
-        // Si es hoy pero ya pasó la hora, ir al siguiente día de fin de semana
-        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
-            result.before(now)) {
-            result.add(Calendar.DAY_OF_MONTH, 1)
-            while (result.get(Calendar.DAY_OF_WEEK) != Calendar.SATURDAY && 
-                   result.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
-                result.add(Calendar.DAY_OF_MONTH, 1)
+        if (alarm.repeatDays.isNotEmpty()) {
+            val calendarDays = alarm.repeatDays.map { day ->
+                when (day) {
+                    1 -> Calendar.MONDAY
+                    2 -> Calendar.TUESDAY
+                    3 -> Calendar.WEDNESDAY
+                    4 -> Calendar.THURSDAY
+                    5 -> Calendar.FRIDAY
+                    6 -> Calendar.SATURDAY
+                    7 -> Calendar.SUNDAY
+                    else -> Calendar.MONDAY
+                }
             }
-        }
-        
-        return result.timeInMillis
-    }
-
-    private fun findNextWeeklyDay(now: Calendar, alarmTime: Calendar): Long {
-        val result = Calendar.getInstance().apply {
-            timeInMillis = alarmTime.timeInMillis
-        }
-        
-        val targetDayOfWeek = result.get(Calendar.DAY_OF_WEEK)
-        
-        // Si es hoy pero ya pasó la hora, programar para la próxima semana
-        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
-            result.before(now)) {
-            result.add(Calendar.WEEK_OF_YEAR, 1)
-        }
-        // Si no es hoy, encontrar el próximo día de la semana
-        else if (result.before(now)) {
-            while (result.get(Calendar.DAY_OF_WEEK) != targetDayOfWeek || result.before(now)) {
-                result.add(Calendar.DAY_OF_MONTH, 1)
+            
+            if (calendar.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
+                calendar.before(now)) {
+                calendar.add(Calendar.DAY_OF_MONTH, 1)
             }
-        }
-        
-        return result.timeInMillis
-    }
-
-    private fun findNextCustomDay(now: Calendar, alarmTime: Calendar, repeatDays: List<Int>): Long {
-        val result = Calendar.getInstance().apply {
-            timeInMillis = alarmTime.timeInMillis
-        }
-        
-        // Convertir días de lunes=1 a domingo=7 al formato de Calendar
-        val calendarDays = repeatDays.map { day ->
-            when (day) {
-                1 -> Calendar.MONDAY
-                2 -> Calendar.TUESDAY
-                3 -> Calendar.WEDNESDAY
-                4 -> Calendar.THURSDAY
-                5 -> Calendar.FRIDAY
-                6 -> Calendar.SATURDAY
-                7 -> Calendar.SUNDAY
-                else -> Calendar.MONDAY
+            
+            while (!calendarDays.contains(calendar.get(Calendar.DAY_OF_WEEK))) {
+                calendar.add(Calendar.DAY_OF_MONTH, 1)
             }
+            
+            return calendar.timeInMillis
         }
         
-        // Si es hoy pero ya pasó la hora, buscar el siguiente día válido
-        if (result.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
-            result.before(now)) {
-            result.add(Calendar.DAY_OF_MONTH, 1)
+        if (calendar.before(now)) {
+            calendar.add(Calendar.DAY_OF_MONTH, 1)
         }
         
-        // Buscar el próximo día válido
-        while (!calendarDays.contains(result.get(Calendar.DAY_OF_WEEK))) {
-            result.add(Calendar.DAY_OF_MONTH, 1)
-        }
-        
-        return result.timeInMillis
+        return calendar.timeInMillis
     }
     
     private fun getSystemAlarmSounds(): List<Map<String, String>> {
         val soundsList = mutableListOf<Map<String, String>>()
         
-        val ringtoneManager = RingtoneManager(this)
-        ringtoneManager.setType(RingtoneManager.TYPE_ALARM)
-        val cursor = ringtoneManager.cursor
-        
-        while (cursor.moveToNext()) {
-            val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX)
-            val uri = ringtoneManager.getRingtoneUri(cursor.position).toString()
-            soundsList.add(mapOf("title" to title, "uri" to uri))
+        try {
+            val ringtoneManager = RingtoneManager(this)
+            ringtoneManager.setType(RingtoneManager.TYPE_ALARM)
+            val cursor = ringtoneManager.cursor
+            
+            while (cursor.moveToNext()) {
+                val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX)
+                val uri = ringtoneManager.getRingtoneUri(cursor.position).toString()
+                soundsList.add(mapOf("title" to title, "uri" to uri))
+            }
+            cursor.close()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error getting system alarm sounds", e)
         }
         
         return soundsList
     }
     
     private fun playSound(soundUri: Uri) {
-        val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
-        ringtone.play()
+        try {
+            val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
+            ringtone.play()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error playing sound", e)
+        }
     }
     
     private fun vibrate(pattern: LongArray) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-            val vibrator = vibratorManager.defaultVibrator
-            val effect = VibrationEffect.createWaveform(pattern, 0)
-            vibrator.vibrate(effect)
-        } else {
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                val vibrator = vibratorManager.defaultVibrator
                 val effect = VibrationEffect.createWaveform(pattern, 0)
                 vibrator.vibrate(effect)
             } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(pattern, 0)
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = VibrationEffect.createWaveform(pattern, 0)
+                    vibrator.vibrate(effect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(pattern, 0)
+                }
             }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error vibrating", e)
         }
     }
     
@@ -588,93 +729,14 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    private fun registerAlarmReceiver() {
-        alarmReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action == ALARM_ACTION) {
-                    val alarmId = intent.getIntExtra("alarmId", 0)
-                    val title = intent.getStringExtra("title") ?: "Alarma"
-                    val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
-                    
-                    showNotification(alarmId, title, message)
-                }
-            }
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            registerReceiver(alarmReceiver, IntentFilter(ALARM_ACTION), Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(alarmReceiver, IntentFilter(ALARM_ACTION))
-        }
-    }
-    
-    private fun showNotification(alarmId: Int, title: String, message: String) {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            alarmId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
-            .setVibrate(longArrayOf(0, 500, 500, 500))
-        
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(alarmId, builder.build())
-    }
-    
     override fun onDestroy() {
         super.onDestroy()
         try {
-            unregisterReceiver(alarmReceiver)
-        } catch (e: Exception) {
-            // El receptor puede no estar registrado
-        }
-    }
-    
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Log.d("MainActivity", "POST_NOTIFICATIONS permission granted")
-                // Aquí puedes realizar acciones adicionales si el permiso fue concedido
-            } else {
-                Log.d("MainActivity", "POST_NOTIFICATIONS permission denied")
-                // Aquí puedes manejar el caso en que el permiso fue denegado
+            timeZoneReceiver?.let { receiver ->
+                unregisterReceiver(receiver)
             }
-        }
-    }
-    private fun cancelAlarm(alarmId: Int) {
-        Log.d("MainActivity", "Canceling alarm with ID: $alarmId")
-        val intent = Intent(this, AlarmReceiver::class.java).apply {
-            action = ALARM_ACTION
-        }
-        
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            alarmId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        try {
-            alarmManager.cancel(pendingIntent)
-            pendingIntent.cancel()
-            Log.d("MainActivity", "Alarm canceled successfully")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error canceling alarm", e)
+            Log.e("MainActivity", "Error unregistering time zone receiver", e)
         }
     }
 }

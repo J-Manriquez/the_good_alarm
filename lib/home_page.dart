@@ -449,6 +449,35 @@ class _HomePageState extends State<HomePage> {
     // Fallback: mañana
     return todayAlarmTime.add(const Duration(days: 1));
   }
+  void _handleShowAlarmScreen(MethodCall call) {
+  final arguments = call.arguments as Map<String, dynamic>;
+  final alarmId = arguments['alarmId'] as int;
+  final title = arguments['title'] as String? ?? 'Alarma';
+  final message = arguments['message'] as String? ?? '¡Es hora de despertar!';
+  final maxSnoozes = arguments['maxSnoozes'] as int? ?? 3; // AGREGAR
+  final snoozeDurationMinutes = arguments['snoozeDurationMinutes'] as int? ?? 5; // AGREGAR
+  final snoozeCount = arguments['snoozeCount'] as int? ?? 0; // AGREGAR
+  
+  print('=== SHOW ALARM SCREEN DEBUG ===');
+  print('AlarmId: $alarmId');
+  print('MaxSnoozes: $maxSnoozes');
+  print('SnoozeDurationMinutes: $snoozeDurationMinutes');
+  print('SnoozeCount: $snoozeCount');
+  print('=== SHOW ALARM SCREEN DEBUG END ===');
+  
+  Navigator.pushNamed(
+    context,
+    '/alarm',
+    arguments: {
+      'alarmId': alarmId,
+      'title': title,
+      'message': message,
+      'maxSnoozes': maxSnoozes, // AGREGAR
+      'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
+      'snoozeCount': snoozeCount, // AGREGAR
+    },
+  );
+}
 
   Future<void> _handleNativeCalls(MethodCall call) async {
     print('=== HANDLE NATIVE CALLS START ===');
@@ -508,6 +537,7 @@ class _HomePageState extends State<HomePage> {
             ),
           );
         }
+        _handleShowAlarmScreen(call);
         break;
       // NUEVO: Manejar notificación de alarma sonando
       case 'notifyAlarmRinging':
@@ -665,6 +695,36 @@ class _HomePageState extends State<HomePage> {
         'Found alarm: ${alarm.title}, current snooze count: ${alarm.snoozeCount}',
       );
 
+      // SOLUCIÓN: Validar máximo de posposiciones antes de actualizar
+      if (alarm.snoozeCount >= alarm.maxSnoozes) {
+        print('Maximum snoozes reached for alarm $alarmId, deactivating alarm');
+        
+        // Desactivar la alarma si alcanzó el máximo
+        final updatedAlarm = Alarm(
+          id: alarm.id,
+          time: alarm.time,
+          title: alarm.title,
+          message: alarm.message,
+          isActive: false, // Desactivar
+          repeatDays: alarm.repeatDays,
+          isDaily: alarm.isDaily,
+          isWeekly: alarm.isWeekly,
+          isWeekend: alarm.isWeekend,
+          snoozeCount: 0, // Resetear contador
+          maxSnoozes: alarm.maxSnoozes,
+          snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+        );
+        
+        setState(() {
+          _alarms[index] = updatedAlarm;
+        });
+        
+        await _saveAlarms();
+        _startOrUpdateCountdown();
+        return;
+      }
+      
+      // Continuar con la posposición normal
       setState(() {
         // Actualizar tiempo de la alarma al tiempo de snooze
         _alarms[index] = Alarm(

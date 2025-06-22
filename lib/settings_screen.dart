@@ -22,7 +22,6 @@ class SettingsScreen extends StatefulWidget {
   static const String snoozeDurationKey = 'snooze_duration_minutes';
   static const String maxSnoozesKey = 'max_snoozes';
 
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -30,7 +29,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   AlarmGroupingOption _selectedGrouping = AlarmGroupingOption.none;
   bool _showNextAlarmSection = true;
-
+  int _defaultSnoozeDuration = 5;
+  int _defaultMaxSnoozes = 3;
 
   // Countdown timer variables (similar to HomePage)
   Timer? _countdownTimer;
@@ -58,10 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AlarmGroupingOption.none.index;
     final showNextAlarm =
         prefs.getBool(SettingsScreen.showNextAlarmKey) ?? true;
-    final snoozeDuration =
-        prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
-    final maxSnoozes =
-        prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
+    final snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
+    final maxSnoozes = prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
 
     // Load alarms to calculate next alarm countdown
     final alarmsString = prefs.getStringList(_alarmsKey);
@@ -74,10 +72,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _selectedGrouping = AlarmGroupingOption.values[groupingIndex];
         _showNextAlarmSection = showNextAlarm;
-      
+        _defaultSnoozeDuration = snoozeDuration;
+        _defaultMaxSnoozes = maxSnoozes;
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
+  }
+
+  // Agregar estos métodos
+  Future<void> _saveSnoozeDuration(int duration) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.snoozeDurationKey, duration);
+    if (mounted) {
+      setState(() {
+        _defaultSnoozeDuration = duration;
+      });
+    }
+  }
+
+  Future<void> _saveMaxSnoozes(int maxSnoozes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.maxSnoozesKey, maxSnoozes);
+    if (mounted) {
+      setState(() {
+        _defaultMaxSnoozes = maxSnoozes;
+      });
+    }
   }
 
   Future<void> _saveGroupingOption(AlarmGroupingOption option) async {
@@ -90,8 +110,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-
-
   Future<void> _saveShowNextAlarmOption(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsScreen.showNextAlarmKey, value);
@@ -102,68 +120,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-
-
   // --- Countdown Logic (adapted from HomePage) ---
   // Agregar estos métodos a la clase _SettingsScreenState
 
   void _startOrUpdateCountdown() {
-  _countdownTimer?.cancel();
-  
-  final nextAlarm = _getNextActiveAlarm();
-  _currentNextAlarmForCountdown = nextAlarm;
-  
-  if (nextAlarm != null) {
-    _updateCountdown();
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _updateCountdown();
-    });
-  } else {
-    if (mounted) {
-      setState(() {
-        _timeUntilNextAlarm = Duration.zero;
-      });
-    }
-  }
-}
+    _countdownTimer?.cancel();
 
-void _updateCountdown() {
-  if (_currentNextAlarmForCountdown != null) {
-    final now = DateTime.now();
-    final difference = _currentNextAlarmForCountdown!.time.difference(now);
-    
-    if (difference.isNegative) {
-      _startOrUpdateCountdown();
+    final nextAlarm = _getNextActiveAlarm();
+    _currentNextAlarmForCountdown = nextAlarm;
+
+    if (nextAlarm != null) {
+      _updateCountdown();
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        _updateCountdown();
+      });
     } else {
       if (mounted) {
         setState(() {
-          _timeUntilNextAlarm = difference;
+          _timeUntilNextAlarm = Duration.zero;
         });
       }
     }
   }
-}
 
-Alarm? _getNextActiveAlarm() {
-  final now = DateTime.now();
-  final activeAlarms = _alarms.where((alarm) => alarm.isActive).toList();
-  
-  if (activeAlarms.isEmpty) return null;
-  
-  Alarm? nextAlarm;
-  Duration? shortestDuration;
-  
-  for (final alarm in activeAlarms) {
-    DateTime nextAlarmTime;
-    
-    if (alarm.isRepeating()) {
-      nextAlarmTime = _calculateNextOccurrence(alarm, now);
-    } else {
-      nextAlarmTime = alarm.time;
-      
-      // Si la hora ya pasó hoy, programar para mañana
-      if (nextAlarmTime.isBefore(now)) {
-        nextAlarmTime = DateTime(
+  void _updateCountdown() {
+    if (_currentNextAlarmForCountdown != null) {
+      final now = DateTime.now();
+      final difference = _currentNextAlarmForCountdown!.time.difference(now);
+
+      if (difference.isNegative) {
+        _startOrUpdateCountdown();
+      } else {
+        if (mounted) {
+          setState(() {
+            _timeUntilNextAlarm = difference;
+          });
+        }
+      }
+    }
+  }
+
+  Alarm? _getNextActiveAlarm() {
+    final now = DateTime.now();
+    final activeAlarms = _alarms.where((alarm) => alarm.isActive).toList();
+
+    if (activeAlarms.isEmpty) return null;
+
+    Alarm? nextAlarm;
+    Duration? shortestDuration;
+
+    for (final alarm in activeAlarms) {
+      DateTime nextAlarmTime;
+
+      if (alarm.isRepeating()) {
+        nextAlarmTime = _calculateNextOccurrence(alarm, now);
+      } else {
+        nextAlarmTime = alarm.time;
+
+        // Si la hora ya pasó hoy, programar para mañana
+        if (nextAlarmTime.isBefore(now)) {
+          nextAlarmTime = DateTime(
+            now.year,
+            now.month,
+            now.day,
+            alarm.time.hour,
+            alarm.time.minute,
+          ).add(const Duration(days: 1));
+        }
+      }
+
+      final duration = nextAlarmTime.difference(now);
+      if (duration.isNegative) continue;
+
+      if (shortestDuration == null || duration < shortestDuration) {
+        shortestDuration = duration;
+        nextAlarm = Alarm(
+          id: alarm.id,
+          time: nextAlarmTime,
+          title: alarm.title,
+          message: alarm.message,
+          isActive: alarm.isActive,
+          repeatDays: alarm.repeatDays,
+          isDaily: alarm.isDaily,
+          isWeekly: alarm.isWeekly,
+          isWeekend: alarm.isWeekend,
+          snoozeCount: alarm.snoozeCount,
+          maxSnoozes: alarm.maxSnoozes,
+          snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+        );
+      }
+    }
+
+    return nextAlarm;
+  }
+
+  DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
+    DateTime nextTime = alarm.time;
+
+    if (alarm.isDaily) {
+      if (nextTime.isBefore(now) || nextTime.isAtSameMomentAs(now)) {
+        nextTime = DateTime(
           now.year,
           now.month,
           now.day,
@@ -171,84 +227,78 @@ Alarm? _getNextActiveAlarm() {
           alarm.time.minute,
         ).add(const Duration(days: 1));
       }
-    }
-    
-    final duration = nextAlarmTime.difference(now);
-    if (duration.isNegative) continue;
-    
-    if (shortestDuration == null || duration < shortestDuration) {
-      shortestDuration = duration;
-      nextAlarm = Alarm(
-        id: alarm.id,
-        time: nextAlarmTime,
-        title: alarm.title,
-        message: alarm.message,
-        isActive: alarm.isActive,
-        repeatDays: alarm.repeatDays,
-        isDaily: alarm.isDaily,
-        isWeekly: alarm.isWeekly,
-        isWeekend: alarm.isWeekend,
-        snoozeCount: alarm.snoozeCount,
-        maxSnoozes: alarm.maxSnoozes,
-        snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-      );
-    }
-  }
-  
-  return nextAlarm;
-}
-
-DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
-  DateTime nextTime = alarm.time;
-  
-  if (alarm.isDaily) {
-    if (nextTime.isBefore(now) || nextTime.isAtSameMomentAs(now)) {
-      nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
-          .add(const Duration(days: 1));
-    }
-  } else if (alarm.isWeekly) {
-    final targetWeekday = alarm.time.weekday;
-    int daysUntilNext = (targetWeekday - now.weekday) % 7;
-    if (daysUntilNext == 0 && nextTime.isBefore(now)) {
-      daysUntilNext = 7;
-    }
-    nextTime = DateTime(now.year, now.month, now.day, alarm.time.hour, alarm.time.minute)
-        .add(Duration(days: daysUntilNext));
-  } else if (alarm.isWeekend) {
-    DateTime nextSaturday = now.add(Duration(days: (DateTime.saturday - now.weekday) % 7));
-    DateTime nextSunday = now.add(Duration(days: (DateTime.sunday - now.weekday) % 7));
-    
-    if (nextSaturday.isBefore(now)) nextSaturday = nextSaturday.add(const Duration(days: 7));
-    if (nextSunday.isBefore(now)) nextSunday = nextSunday.add(const Duration(days: 7));
-    
-    nextTime = nextSaturday.isBefore(nextSunday) ? 
-        DateTime(nextSaturday.year, nextSaturday.month, nextSaturday.day, alarm.time.hour, alarm.time.minute) :
-        DateTime(nextSunday.year, nextSunday.month, nextSunday.day, alarm.time.hour, alarm.time.minute);
-  } else if (alarm.repeatDays.isNotEmpty) {
-    int daysToAdd = 1;
-    while (daysToAdd <= 7) {
-      final testDate = now.add(Duration(days: daysToAdd));
-      if (alarm.repeatDays.contains(testDate.weekday)) {
-        nextTime = DateTime(testDate.year, testDate.month, testDate.day, alarm.time.hour, alarm.time.minute);
-        break;
+    } else if (alarm.isWeekly) {
+      final targetWeekday = alarm.time.weekday;
+      int daysUntilNext = (targetWeekday - now.weekday) % 7;
+      if (daysUntilNext == 0 && nextTime.isBefore(now)) {
+        daysUntilNext = 7;
       }
-      daysToAdd++;
+      nextTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        alarm.time.hour,
+        alarm.time.minute,
+      ).add(Duration(days: daysUntilNext));
+    } else if (alarm.isWeekend) {
+      DateTime nextSaturday = now.add(
+        Duration(days: (DateTime.saturday - now.weekday) % 7),
+      );
+      DateTime nextSunday = now.add(
+        Duration(days: (DateTime.sunday - now.weekday) % 7),
+      );
+
+      if (nextSaturday.isBefore(now))
+        nextSaturday = nextSaturday.add(const Duration(days: 7));
+      if (nextSunday.isBefore(now))
+        nextSunday = nextSunday.add(const Duration(days: 7));
+
+      nextTime = nextSaturday.isBefore(nextSunday)
+          ? DateTime(
+              nextSaturday.year,
+              nextSaturday.month,
+              nextSaturday.day,
+              alarm.time.hour,
+              alarm.time.minute,
+            )
+          : DateTime(
+              nextSunday.year,
+              nextSunday.month,
+              nextSunday.day,
+              alarm.time.hour,
+              alarm.time.minute,
+            );
+    } else if (alarm.repeatDays.isNotEmpty) {
+      int daysToAdd = 1;
+      while (daysToAdd <= 7) {
+        final testDate = now.add(Duration(days: daysToAdd));
+        if (alarm.repeatDays.contains(testDate.weekday)) {
+          nextTime = DateTime(
+            testDate.year,
+            testDate.month,
+            testDate.day,
+            alarm.time.hour,
+            alarm.time.minute,
+          );
+          break;
+        }
+        daysToAdd++;
+      }
     }
+
+    return nextTime;
   }
-  
-  return nextTime;
-}
 
   String _formatDuration(Duration duration) {
     if (duration.isNegative || duration == Duration.zero) {
       return '--:--:--';
     }
-  
+
     final days = duration.inDays;
     final hours = duration.inHours.remainder(24);
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-  
+
     if (days > 0) {
       // Formato: dd:hh:mm:ss
       return '${days.toString().padLeft(2, '0')}:${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
@@ -325,7 +375,7 @@ DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               color: hasActiveAlarms ? Colors.green : Colors.black,
               child: Text(
-                hasActiveAlarms 
+                hasActiveAlarms
                     ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
                     : 'No hay alarmas activas',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -407,7 +457,59 @@ DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Agregar esta nueva card después de la card de agrupación
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Configuración de Posposición',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 16),
 
+                        // Duración de posposición
+                        Text(
+                          'Duración de posposición: $_defaultSnoozeDuration minutos',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultSnoozeDuration.toDouble(),
+                          min: 1,
+                          max: 30,
+                          divisions: 29,
+                          label: '$_defaultSnoozeDuration min',
+                          onChanged: (double value) {
+                            _saveSnoozeDuration(value.toInt());
+                          },
+                          activeColor: Colors.green,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Máximo número de posposiciones
+                        Text(
+                          'Máximo de posposiciones: $_defaultMaxSnoozes',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultMaxSnoozes.toDouble(),
+                          min: 1,
+                          max: 10,
+                          divisions: 9,
+                          label: '$_defaultMaxSnoozes',
+                          onChanged: (double value) {
+                            _saveMaxSnoozes(value.toInt());
+                          },
+                          activeColor: Colors.green,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 // Add more settings here in separate Cards if needed
               ],
             ),
