@@ -114,41 +114,86 @@ class MainActivity : FlutterActivity() {
             Log.d("MainActivity", "MethodChannel call: ${call.method}")
             when (call.method) {
                 "setAlarm" -> {
-                    val timeInMillis = call.argument<Long>("timeInMillis") ?: 0
-                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    val id = call.argument<Int>("id") ?: return@setMethodCallHandler
+                    val hour = call.argument<Int>("hour") ?: return@setMethodCallHandler
+                    val minute = call.argument<Int>("minute") ?: return@setMethodCallHandler
                     val title = call.argument<String>("title") ?: "Alarma"
                     val message = call.argument<String>("message") ?: "¡Es hora de despertar!"
-                    val screenRoute = call.argument<String>("screenRoute") ?: "/alarm"
                     val repeatDays = call.argument<List<Int>>("repeatDays") ?: emptyList()
                     val isDaily = call.argument<Boolean>("isDaily") ?: false
                     val isWeekly = call.argument<Boolean>("isWeekly") ?: false
                     val isWeekend = call.argument<Boolean>("isWeekend") ?: false
                     val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
                     val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
-
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            if (alarmManager.canScheduleExactAlarms()) {
-                                setAlarm(
-                                    timeInMillis, alarmId, title, message, screenRoute,
-                                    repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes
-                                )
-                                result.success(true)
+                    
+                    // Crear un objeto AlarmData con la hora y minuto recibidos
+                    val alarm = AlarmData(
+                        id = id,
+                        title = title,
+                        message = message,
+                        isActive = true,
+                        repeatDays = repeatDays,
+                        isDaily = isDaily,
+                        isWeekly = isWeekly,
+                        isWeekend = isWeekend,
+                        maxSnoozes = maxSnoozes,
+                        snoozeDurationMinutes = snoozeDurationMinutes,
+                        hour = hour,
+                        minute = minute
+                    )
+                    
+                    // Calcular el próximo tiempo de alarma
+                    val nextTime = calculateNextAlarmTime(alarm)
+                    
+                    // Establecer la alarma solo si el tiempo calculado está en el futuro
+                    if (nextTime > System.currentTimeMillis()) {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                if (alarmManager.canScheduleExactAlarms()) {
+                                    setAlarm(
+                                        timeInMillis = nextTime,
+                                        alarmId = id,
+                                        title = title,
+                                        message = message,
+                                        screenRoute = "/alarm",
+                                        repeatDays = repeatDays,
+                                        isDaily = isDaily,
+                                        isWeekly = isWeekly,
+                                        isWeekend = isWeekend,
+                                        maxSnoozes = maxSnoozes,
+                                        snoozeDurationMinutes = snoozeDurationMinutes
+                                    )
+                                    Log.d("MainActivity", "Alarm set for: ${Date(nextTime)}")
+                                    result.success(true)
+                                } else {
+                                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                    intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                    startActivity(intent)
+                                    result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
+                                }
                             } else {
-                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-                                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                                startActivity(intent)
-                                result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
+                                setAlarm(
+                                    timeInMillis = nextTime,
+                                    alarmId = id,
+                                    title = title,
+                                    message = message,
+                                    screenRoute = "/alarm",
+                                    repeatDays = repeatDays,
+                                    isDaily = isDaily,
+                                    isWeekly = isWeekly,
+                                    isWeekend = isWeekend,
+                                    maxSnoozes = maxSnoozes,
+                                    snoozeDurationMinutes = snoozeDurationMinutes
+                                )
+                                Log.d("MainActivity", "Alarm set for: ${Date(nextTime)}")
+                                result.success(true)
                             }
-                        } else {
-                            setAlarm(
-                                timeInMillis, alarmId, title, message, screenRoute,
-                                repeatDays, isDaily, isWeekly, isWeekend, maxSnoozes, snoozeDurationMinutes
-                            )
-                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("ALARM_ERROR", e.localizedMessage, null)
                         }
-                    } catch (e: Exception) {
-                        result.error("ALARM_ERROR", e.localizedMessage, null)
+                    } else {
+                        Log.d("MainActivity", "Alarm time is in the past, not setting")
+                        result.success(false)
                     }
                 }
                 "cancelAlarm" -> {
@@ -600,24 +645,48 @@ class MainActivity : FlutterActivity() {
         val calendar = Calendar.getInstance()
         val now = Calendar.getInstance()
         
+        // SIEMPRE usar la fecha actual como base
+        calendar.set(Calendar.YEAR, now.get(Calendar.YEAR))
+        calendar.set(Calendar.MONTH, now.get(Calendar.MONTH))
+        calendar.set(Calendar.DAY_OF_MONTH, now.get(Calendar.DAY_OF_MONTH))
         calendar.set(Calendar.HOUR_OF_DAY, alarm.hour)
         calendar.set(Calendar.MINUTE, alarm.minute)
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
         
+        Log.d("MainActivity", "Calculating alarm time - Current: ${now.time}, Target hour: ${alarm.hour}:${alarm.minute}")
+        
         if (alarm.isDaily) {
-            if (calendar.before(now)) {
+            // Para alarmas diarias
+            if (calendar.before(now) || calendar.equals(now)) {
                 calendar.add(Calendar.DAY_OF_MONTH, 1)
+                Log.d("MainActivity", "Daily alarm: time passed today, scheduling for tomorrow")
+            } else {
+                Log.d("MainActivity", "Daily alarm: scheduling for today")
             }
             return calendar.timeInMillis
         }
         
         if (alarm.isWeekend) {
-            val weekendDays = listOf(Calendar.SATURDAY, Calendar.SUNDAY)
-            while (!weekendDays.contains(calendar.get(Calendar.DAY_OF_WEEK)) || calendar.before(now)) {
-                calendar.add(Calendar.DAY_OF_MONTH, 1)
+            val currentDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+            val isWeekend = currentDayOfWeek == Calendar.SATURDAY || currentDayOfWeek == Calendar.SUNDAY
+            
+            if (isWeekend && calendar.after(now)) {
+                // Es fin de semana y la hora aún no ha pasado
+                Log.d("MainActivity", "Weekend alarm: scheduling for today")
+                return calendar.timeInMillis
+            } else {
+                // Buscar el próximo fin de semana
+                while (true) {
+                    calendar.add(Calendar.DAY_OF_MONTH, 1)
+                    val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+                    if (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY) {
+                        Log.d("MainActivity", "Weekend alarm: scheduling for next weekend")
+                        break
+                    }
+                }
+                return calendar.timeInMillis
             }
-            return calendar.timeInMillis
         }
         
         if (alarm.repeatDays.isNotEmpty()) {
@@ -634,22 +703,37 @@ class MainActivity : FlutterActivity() {
                 }
             }
             
-            if (calendar.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) && 
-                calendar.before(now)) {
-                calendar.add(Calendar.DAY_OF_MONTH, 1)
+            val currentDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+            
+            // Si hoy está en los días de repetición y la hora no ha pasado
+            if (calendarDays.contains(currentDayOfWeek) && calendar.after(now)) {
+                Log.d("MainActivity", "Repeat alarm: scheduling for today")
+                return calendar.timeInMillis
             }
             
-            while (!calendarDays.contains(calendar.get(Calendar.DAY_OF_WEEK))) {
+            // Buscar el próximo día válido
+            var daysToAdd = 1
+            while (daysToAdd <= 7) {
                 calendar.add(Calendar.DAY_OF_MONTH, 1)
+                if (calendarDays.contains(calendar.get(Calendar.DAY_OF_WEEK))) {
+                    Log.d("MainActivity", "Repeat alarm: scheduling for next occurrence in $daysToAdd days")
+                    break
+                }
+                daysToAdd++
             }
             
             return calendar.timeInMillis
         }
         
-        if (calendar.before(now)) {
+        // Para alarmas no repetitivas (una sola vez)
+        if (calendar.before(now) || calendar.equals(now)) {
             calendar.add(Calendar.DAY_OF_MONTH, 1)
+            Log.d("MainActivity", "One-time alarm: time passed today, scheduling for tomorrow")
+        } else {
+            Log.d("MainActivity", "One-time alarm: scheduling for today")
         }
         
+        Log.d("MainActivity", "Final calculated time: ${calendar.time}")
         return calendar.timeInMillis
     }
     

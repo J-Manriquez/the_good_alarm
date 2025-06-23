@@ -449,35 +449,37 @@ class _HomePageState extends State<HomePage> {
     // Fallback: mañana
     return todayAlarmTime.add(const Duration(days: 1));
   }
+
   void _handleShowAlarmScreen(MethodCall call) {
-  final arguments = call.arguments as Map<String, dynamic>;
-  final alarmId = arguments['alarmId'] as int;
-  final title = arguments['title'] as String? ?? 'Alarma';
-  final message = arguments['message'] as String? ?? '¡Es hora de despertar!';
-  final maxSnoozes = arguments['maxSnoozes'] as int? ?? 3; // AGREGAR
-  final snoozeDurationMinutes = arguments['snoozeDurationMinutes'] as int? ?? 5; // AGREGAR
-  final snoozeCount = arguments['snoozeCount'] as int? ?? 0; // AGREGAR
-  
-  print('=== SHOW ALARM SCREEN DEBUG ===');
-  print('AlarmId: $alarmId');
-  print('MaxSnoozes: $maxSnoozes');
-  print('SnoozeDurationMinutes: $snoozeDurationMinutes');
-  print('SnoozeCount: $snoozeCount');
-  print('=== SHOW ALARM SCREEN DEBUG END ===');
-  
-  Navigator.pushNamed(
-    context,
-    '/alarm',
-    arguments: {
-      'alarmId': alarmId,
-      'title': title,
-      'message': message,
-      'maxSnoozes': maxSnoozes, // AGREGAR
-      'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
-      'snoozeCount': snoozeCount, // AGREGAR
-    },
-  );
-}
+    final arguments = call.arguments as Map<String, dynamic>;
+    final alarmId = arguments['alarmId'] as int;
+    final title = arguments['title'] as String? ?? 'Alarma';
+    final message = arguments['message'] as String? ?? '¡Es hora de despertar!';
+    final maxSnoozes = arguments['maxSnoozes'] as int? ?? 3; // AGREGAR
+    final snoozeDurationMinutes =
+        arguments['snoozeDurationMinutes'] as int? ?? 5; // AGREGAR
+    final snoozeCount = arguments['snoozeCount'] as int? ?? 0; // AGREGAR
+
+    print('=== SHOW ALARM SCREEN DEBUG ===');
+    print('AlarmId: $alarmId');
+    print('MaxSnoozes: $maxSnoozes');
+    print('SnoozeDurationMinutes: $snoozeDurationMinutes');
+    print('SnoozeCount: $snoozeCount');
+    print('=== SHOW ALARM SCREEN DEBUG END ===');
+
+    Navigator.pushNamed(
+      context,
+      '/alarm',
+      arguments: {
+        'alarmId': alarmId,
+        'title': title,
+        'message': message,
+        'maxSnoozes': maxSnoozes, // AGREGAR
+        'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
+        'snoozeCount': snoozeCount, // AGREGAR
+      },
+    );
+  }
 
   Future<void> _handleNativeCalls(MethodCall call) async {
     print('=== HANDLE NATIVE CALLS START ===');
@@ -698,7 +700,7 @@ class _HomePageState extends State<HomePage> {
       // SOLUCIÓN: Validar máximo de posposiciones antes de actualizar
       if (alarm.snoozeCount >= alarm.maxSnoozes) {
         print('Maximum snoozes reached for alarm $alarmId, deactivating alarm');
-        
+
         // Desactivar la alarma si alcanzó el máximo
         final updatedAlarm = Alarm(
           id: alarm.id,
@@ -714,16 +716,16 @@ class _HomePageState extends State<HomePage> {
           maxSnoozes: alarm.maxSnoozes,
           snoozeDurationMinutes: alarm.snoozeDurationMinutes,
         );
-        
+
         setState(() {
           _alarms[index] = updatedAlarm;
         });
-        
+
         await _saveAlarms();
         _startOrUpdateCountdown();
         return;
       }
-      
+
       // Continuar con la posposición normal
       setState(() {
         // Actualizar tiempo de la alarma al tiempo de snooze
@@ -779,8 +781,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _setNativeAlarm(Alarm alarm) async {
     try {
       await platform.invokeMethod('setAlarm', {
-        'timeInMillis': alarm.time.millisecondsSinceEpoch,
-        'alarmId': alarm.id,
+        'id': alarm.id,
+        'hour': alarm.time.hour,
+        'minute': alarm.time.minute,
         'title': alarm.title,
         'message': alarm.message,
         'screenRoute': '/alarm',
@@ -1003,21 +1006,40 @@ class _HomePageState extends State<HomePage> {
 
       try {
         if (isActive) {
-          // Reactivar alarma: setearla de nuevo
-          await _setNativeAlarm(alarm);
-          // ScaffoldMessenger.of(
-          //   context,
-          // ).showSnackBar(const SnackBar(content: Text('Alarma activada')));
+          // Reactivar alarma: calcular el próximo tiempo de alarma antes de activarla
+          final now = DateTime.now();
+          DateTime nextOccurrence = _calculateNextOccurrence(alarm, now);
+
+          // Crear una copia de la alarma con el tiempo actualizado para la próxima ocurrencia
+          final updatedAlarm = Alarm(
+            id: alarm.id,
+            time:
+                nextOccurrence, // Usar el tiempo calculado para la próxima ocurrencia
+            title: alarm.title,
+            message: alarm.message,
+            isActive: true,
+            repeatDays: alarm.repeatDays,
+            isDaily: alarm.isDaily,
+            isWeekly: alarm.isWeekly,
+            isWeekend: alarm.isWeekend,
+            snoozeCount: alarm.snoozeCount,
+            maxSnoozes: alarm.maxSnoozes,
+            snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+          );
+
+          // Setear la alarma con el tiempo actualizado
+          await _setNativeAlarm(updatedAlarm);
+
+          // Actualizar el objeto de alarma en la lista con el tiempo calculado
+          _alarms[index] = updatedAlarm;
         } else {
           // Desactivar alarma: cancelarla
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
-          // ScaffoldMessenger.of(
-          //   context,
-          // ).showSnackBar(const SnackBar(content: Text('Alarma desactivada')));
+          _alarms[index].isActive = false;
         }
-        _alarms[index].isActive = isActive;
+
         await _saveAlarms(); // Guardar y refrescar UI
-        _startOrUpdateCountdown(); // <--- ADD THIS LINE
+        _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Alarma ${isActive ? "activada" : "desactivada"}'),
@@ -1182,23 +1204,25 @@ class _HomePageState extends State<HomePage> {
     Duration? shortestDuration;
 
     for (final alarm in activeAlarms) {
-      DateTime nextAlarmTime = alarm.time;
+      DateTime nextAlarmTime;
 
-      // Si la alarma es repetitiva, calcular la próxima ocurrencia
+      // SIEMPRE calcular basándose en la hora actual, no en la fecha original
       if (alarm.isRepeating()) {
         nextAlarmTime = _calculateNextOccurrence(alarm, now);
       } else {
-        // Para alarmas no repetitivas, verificar si necesita ser programada para el día siguiente
-        nextAlarmTime = alarm.time;
+        // Para alarmas no repetitivas, usar la hora actual como base
+        nextAlarmTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        );
+
         // Si la hora ya pasó hoy, programar para mañana
-        if (nextAlarmTime.isBefore(now)) {
-          nextAlarmTime = DateTime(
-            now.year,
-            now.month,
-            now.day,
-            alarm.time.hour,
-            alarm.time.minute,
-          ).add(const Duration(days: 1));
+        if (nextAlarmTime.isBefore(now) ||
+            nextAlarmTime.isAtSameMomentAs(now)) {
+          nextAlarmTime = nextAlarmTime.add(const Duration(days: 1));
         }
       }
 
@@ -1209,7 +1233,7 @@ class _HomePageState extends State<HomePage> {
         shortestDuration = duration;
         nextAlarm = Alarm(
           id: alarm.id,
-          time: nextAlarmTime,
+          time: nextAlarmTime, // Usar el tiempo calculado, no el original
           title: alarm.title,
           message: alarm.message,
           isActive: alarm.isActive,
@@ -1228,131 +1252,99 @@ class _HomePageState extends State<HomePage> {
   }
 
   DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
-    DateTime nextTime = alarm.time;
+    // SIEMPRE usar la fecha actual como base, NO la fecha original de la alarma
+    DateTime baseTime = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      alarm.time.hour,
+      alarm.time.minute,
+    );
+
+    print(
+      'Calculating next occurrence - Current: $now, Target time: ${alarm.time.hour}:${alarm.time.minute}',
+    );
 
     if (alarm.isDaily) {
-      // Para alarmas diarias - crear la hora de hoy primero
-      DateTime todayAlarmTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        alarm.time.hour,
-        alarm.time.minute,
-      );
-
-      // Si la hora de hoy ya pasó, programar para mañana
-      if (todayAlarmTime.isBefore(now) ||
-          todayAlarmTime.isAtSameMomentAs(now)) {
-        nextTime = todayAlarmTime.add(const Duration(days: 1));
+      // Para alarmas diarias
+      if (baseTime.isAfter(now)) {
+        print('Daily alarm: scheduling for today');
+        return baseTime;
       } else {
-        // Si aún no ha pasado, usar la hora de hoy
-        nextTime = todayAlarmTime;
+        print('Daily alarm: time passed today, scheduling for tomorrow');
+        return baseTime.add(const Duration(days: 1));
       }
     } else if (alarm.isWeekly) {
-      // Para alarmas semanales
+      // Para alarmas semanales - usar el día de la semana original
       final targetWeekday = alarm.time.weekday;
       int daysUntilNext = (targetWeekday - now.weekday) % 7;
 
       // Si es el mismo día, verificar si la hora ya pasó
       if (daysUntilNext == 0) {
-        DateTime todayAlarmTime = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          alarm.time.hour,
-          alarm.time.minute,
-        );
-
-        if (todayAlarmTime.isBefore(now) ||
-            todayAlarmTime.isAtSameMomentAs(now)) {
+        if (baseTime.isAfter(now)) {
+          print('Weekly alarm: scheduling for today');
+          return baseTime;
+        } else {
           daysUntilNext = 7; // Próxima semana
+          print('Weekly alarm: time passed today, scheduling for next week');
         }
       }
 
-      nextTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        alarm.time.hour,
-        alarm.time.minute,
-      ).add(Duration(days: daysUntilNext));
+      return baseTime.add(Duration(days: daysUntilNext));
     } else if (alarm.isWeekend) {
       // Para alarmas de fin de semana
-      List<DateTime> weekendTimes = [];
+      final isCurrentlyWeekend =
+          now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
 
-      // Calcular próximo sábado
-      int daysUntilSaturday = (DateTime.saturday - now.weekday) % 7;
-      DateTime nextSaturday = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        alarm.time.hour,
-        alarm.time.minute,
-      ).add(Duration(days: daysUntilSaturday));
-
-      // Si es sábado y la hora ya pasó, usar el próximo sábado
-      if (daysUntilSaturday == 0 && nextSaturday.isBefore(now)) {
-        nextSaturday = nextSaturday.add(const Duration(days: 7));
+      if (isCurrentlyWeekend && baseTime.isAfter(now)) {
+        print('Weekend alarm: scheduling for today');
+        return baseTime;
       }
 
-      // Calcular próximo domingo
-      int daysUntilSunday = (DateTime.sunday - now.weekday) % 7;
-      DateTime nextSunday = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        alarm.time.hour,
-        alarm.time.minute,
-      ).add(Duration(days: daysUntilSunday));
-
-      // Si es domingo y la hora ya pasó, usar el próximo domingo
-      if (daysUntilSunday == 0 && nextSunday.isBefore(now)) {
-        nextSunday = nextSunday.add(const Duration(days: 7));
+      // Buscar el próximo fin de semana
+      DateTime nextWeekendTime = baseTime;
+      while (true) {
+        nextWeekendTime = nextWeekendTime.add(const Duration(days: 1));
+        if (nextWeekendTime.weekday == DateTime.saturday ||
+            nextWeekendTime.weekday == DateTime.sunday) {
+          print('Weekend alarm: scheduling for next weekend');
+          break;
+        }
       }
 
-      // Elegir el más cercano
-      nextTime = nextSaturday.isBefore(nextSunday) ? nextSaturday : nextSunday;
+      return nextWeekendTime;
     } else if (alarm.repeatDays.isNotEmpty) {
       // Para alarmas personalizadas
-      DateTime? closestTime;
 
-      // Verificar si hoy está en los días de repetición
-      if (alarm.repeatDays.contains(now.weekday)) {
-        DateTime todayAlarmTime = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          alarm.time.hour,
-          alarm.time.minute,
-        );
+      // Verificar si hoy está en los días de repetición y la hora no ha pasado
+      if (alarm.repeatDays.contains(now.weekday) && baseTime.isAfter(now)) {
+        print('Custom repeat alarm: scheduling for today');
+        return baseTime;
+      }
 
-        // Si la hora de hoy aún no ha pasado, usarla
-        if (todayAlarmTime.isAfter(now)) {
-          closestTime = todayAlarmTime;
+      // Buscar el próximo día válido
+      DateTime nextValidTime = baseTime;
+      for (int daysToAdd = 1; daysToAdd <= 7; daysToAdd++) {
+        nextValidTime = baseTime.add(Duration(days: daysToAdd));
+        if (alarm.repeatDays.contains(nextValidTime.weekday)) {
+          print(
+            'Custom repeat alarm: scheduling for next occurrence in $daysToAdd days',
+          );
+          break;
         }
       }
 
-      // Si no encontramos una hora válida hoy, buscar en los próximos días
-      if (closestTime == null) {
-        for (int daysToAdd = 1; daysToAdd <= 7; daysToAdd++) {
-          final testDate = now.add(Duration(days: daysToAdd));
-          if (alarm.repeatDays.contains(testDate.weekday)) {
-            closestTime = DateTime(
-              testDate.year,
-              testDate.month,
-              testDate.day,
-              alarm.time.hour,
-              alarm.time.minute,
-            );
-            break;
-          }
-        }
-      }
-
-      nextTime = closestTime ?? nextTime;
+      return nextValidTime;
     }
 
-    return nextTime;
+    // Para alarmas no repetitivas
+    if (baseTime.isAfter(now)) {
+      print('One-time alarm: scheduling for today');
+      return baseTime;
+    } else {
+      print('One-time alarm: time passed today, scheduling for tomorrow');
+      return baseTime.add(const Duration(days: 1));
+    }
   }
 
   String _formatDuration(Duration duration) {
