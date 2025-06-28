@@ -1,8 +1,9 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:the_good_alarm/games/modelo_juegos.dart';
 import 'package:the_good_alarm/settings_screen.dart'; // Necesario para MethodChannel y PlatformException
+import 'games/alarm_game_wrapper.dart'; // Agregar esta importación
 
 class AlarmScreen extends StatefulWidget {
   final Map<String, dynamic>? arguments;
@@ -21,10 +22,14 @@ class _AlarmScreenState extends State<AlarmScreen> {
   int snoozeDurationMinutes = 5; // Valor por defecto
   static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
+  // Agregar estas variables para manejar los juegos
+  bool requireGame = false;
+  GameConfig? gameConfig;
+
   @override
   void initState() {
     super.initState();
-    
+
     if (widget.arguments != null) {
       alarmId = widget.arguments!['alarmId'] ?? 0;
       title = widget.arguments!['title'] ?? 'Alarma';
@@ -32,7 +37,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
       snoozeCount = widget.arguments!['snoozeCount'] ?? 0;
       maxSnoozes = widget.arguments!['maxSnoozes'] ?? 3;
       snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes'] ?? 5;
-      
+      requireGame = widget.arguments!['requireGame'] as bool? ?? false;
+      gameConfig = widget.arguments!['gameConfig'] as GameConfig?;
+
       // AGREGAR LOGS DE DEPURACIÓN
       print('=== ALARM SCREEN INIT DEBUG ===');
       print('AlarmId: $alarmId');
@@ -41,7 +48,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
       print('SnoozeCount: $snoozeCount');
       print('Arguments received: ${widget.arguments}');
       print('=== ALARM SCREEN INIT DEBUG END ===');
-      
+
       _notifyAlarmRinging();
     }
   }
@@ -91,6 +98,43 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _stopAlarm() async {
+    // Si la alarma requiere juego, navegar al juego
+    if (requireGame && gameConfig != null) {
+      final gameCompleted = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AlarmGameWrapper(
+            alarmId: alarmId,
+            gameConfig: gameConfig!,
+            onGameCompleted: () {
+              // El juego se completó, proceder a apagar la alarma
+              _actuallyStopAlarm();
+            }, 
+            onGameFailed: () {
+              // El juego falló, mostrar mensaje y mantener la alarma activa
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Juego fallido. La alarma sigue activa.'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      
+      // Si el usuario regresó sin completar el juego, no hacer nada
+      // (la alarma sigue sonando)
+      if (gameCompleted == true) {
+        _actuallyStopAlarm();
+      }
+    } else {
+      // Si no requiere juego, apagar directamente
+      _actuallyStopAlarm();
+    }
+  }
+
+  Future<void> _actuallyStopAlarm() async {
     if (alarmId != 0) {
       try {
         await platform.invokeMethod('stopAlarm', {'alarmId': alarmId});
@@ -247,8 +291,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: const Text(
-                      'APAGAR ALARMA',
+                    child: Text(
+                      requireGame && gameConfig != null 
+                        ? 'JUGAR PARA APAGAR'
+                        : 'APAGAR ALARMA',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
@@ -276,7 +322,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
                       ),
                       child: Text(
                         'POSPONER $snoozeDurationMinutes MIN',
-                        style: TextStyle(fontSize: 18,fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),

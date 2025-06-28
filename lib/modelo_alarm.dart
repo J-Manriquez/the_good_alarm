@@ -1,34 +1,41 @@
-// Modelo para la alarma con soporte para repetición
+
+import 'package:the_good_alarm/games/modelo_juegos.dart';
+
 class Alarm {
   final int id;
   final DateTime time;
   final String title;
   final String message;
-  bool isActive; // Para saber si la alarma está activa o ya sonó
-  List<int> repeatDays; // Días de repetición (1-7 para lunes-domingo)
+  bool isActive;
+  List<int> repeatDays;
   bool isDaily;
   bool isWeekly;
   bool isWeekend;
   int snoozeCount;
   int maxSnoozes;
-  int snoozeDurationMinutes; // NUEVA PROPIEDAD
+  int snoozeDurationMinutes;
+  bool requireGame;
+  GameConfig? gameConfig;
+  bool syncToCloud;
 
   Alarm({
     required this.id,
     required this.time,
     required this.title,
     required this.message,
-    this.isActive = true, // Por defecto, la alarma está activa al crearse
+    this.isActive = true,
     this.repeatDays = const [],
     this.isDaily = false,
     this.isWeekly = false,
     this.isWeekend = false,
     this.snoozeCount = 0,
     this.maxSnoozes = 3,
-    this.snoozeDurationMinutes = 5, // VALOR POR DEFECTO
+    this.snoozeDurationMinutes = 5,
+    this.requireGame = false,
+    this.gameConfig,
+    this.syncToCloud = true,
   });
 
-  // Getter para determinar si la alarma es repetitiva
   bool isRepeating() {
     return isDaily || isWeekly || isWeekend || repeatDays.isNotEmpty;
   }
@@ -45,7 +52,10 @@ class Alarm {
     'isWeekend': isWeekend,
     'snoozeCount': snoozeCount,
     'maxSnoozes': maxSnoozes,
-    'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
+    'snoozeDurationMinutes': snoozeDurationMinutes,
+    'requireGame': requireGame,
+    'gameConfig': gameConfig?.toJson(),
+    'syncToCloud': syncToCloud,
   };
 
   factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
@@ -62,7 +72,11 @@ class Alarm {
     isWeekend: json['isWeekend'] as bool? ?? false,
     snoozeCount: json['snoozeCount'] as int? ?? 0,
     maxSnoozes: json['maxSnoozes'] as int? ?? 3,
-    snoozeDurationMinutes:
-        json['snoozeDurationMinutes'] as int? ?? 5, // AGREGAR
+    snoozeDurationMinutes: json['snoozeDurationMinutes'] as int? ?? 5,
+    requireGame: json['requireGame'] as bool? ?? false,
+    gameConfig: json['gameConfig'] != null 
+        ? GameConfig.fromJson(json['gameConfig']) 
+        : null,
+    syncToCloud: json['syncToCloud'] as bool? ?? true,
   );
 }

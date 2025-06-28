@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert'; // Para jsonEncode y jsonDecode
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:the_good_alarm/games/modelo_juegos.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
+
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
 import 'settings_screen.dart'; // Importar SettingsScreen
 import 'alarm_edit_screen.dart';
@@ -41,8 +43,8 @@ class _HomePageState extends State<HomePage> {
   int _ringingAlarmSnoozeDuration = 5;
 
   // NUEVO: Variables para controlar el estado de la aplicación
-  bool _isAppInForeground = true;
-  bool _hasUnhandledAlarm = false;
+  final bool _isAppInForeground = true;
+  final bool _hasUnhandledAlarm = false;
   int? _pendingAlarmId;
 
   bool moreAlarms = false; // Oculto por defecto
@@ -455,17 +457,21 @@ class _HomePageState extends State<HomePage> {
     final alarmId = arguments['alarmId'] as int;
     final title = arguments['title'] as String? ?? 'Alarma';
     final message = arguments['message'] as String? ?? '¡Es hora de despertar!';
-    final maxSnoozes = arguments['maxSnoozes'] as int? ?? 3; // AGREGAR
+    final maxSnoozes = arguments['maxSnoozes'] as int? ?? 3;
     final snoozeDurationMinutes =
-        arguments['snoozeDurationMinutes'] as int? ?? 5; // AGREGAR
-    final snoozeCount = arguments['snoozeCount'] as int? ?? 0; // AGREGAR
+        arguments['snoozeDurationMinutes'] as int? ?? 5;
+    final snoozeCount = arguments['snoozeCount'] as int? ?? 0;
 
-    print('=== SHOW ALARM SCREEN DEBUG ===');
-    print('AlarmId: $alarmId');
-    print('MaxSnoozes: $maxSnoozes');
-    print('SnoozeDurationMinutes: $snoozeDurationMinutes');
-    print('SnoozeCount: $snoozeCount');
-    print('=== SHOW ALARM SCREEN DEBUG END ===');
+    // Buscar la alarma para obtener los datos de juegos
+    final alarm = _alarms.firstWhere(
+      (alarm) => alarm.id == alarmId,
+      orElse: () => Alarm(
+        id: alarmId,
+        time: DateTime.now(),
+        title: title,
+        message: message,
+      ),
+    );
 
     Navigator.pushNamed(
       context,
@@ -474,9 +480,11 @@ class _HomePageState extends State<HomePage> {
         'alarmId': alarmId,
         'title': title,
         'message': message,
-        'maxSnoozes': maxSnoozes, // AGREGAR
-        'snoozeDurationMinutes': snoozeDurationMinutes, // AGREGAR
-        'snoozeCount': snoozeCount, // AGREGAR
+        'maxSnoozes': maxSnoozes,
+        'snoozeDurationMinutes': snoozeDurationMinutes,
+        'snoozeCount': snoozeCount,
+        'requireGame': alarm.requireGame, // Agregar
+        'gameConfig': alarm.gameConfig, // Agregar
       },
     );
   }
@@ -534,6 +542,8 @@ class _HomePageState extends State<HomePage> {
                   'snoozeCount': alarm.snoozeCount,
                   'maxSnoozes': alarm.maxSnoozes,
                   'snoozeDurationMinutes': alarm.snoozeDurationMinutes,
+                  'requireGame': alarm.requireGame, // Agregar
+                  'gameConfig': alarm.gameConfig,
                 },
               ),
             ),
@@ -715,6 +725,9 @@ class _HomePageState extends State<HomePage> {
           snoozeCount: 0, // Resetear contador
           maxSnoozes: alarm.maxSnoozes,
           snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+          requireGame: alarm.requireGame,
+          gameConfig: alarm.gameConfig,
+          syncToCloud: alarm.syncToCloud,
         );
 
         setState(() {
@@ -742,6 +755,9 @@ class _HomePageState extends State<HomePage> {
           snoozeCount: alarm.snoozeCount + 1,
           maxSnoozes: alarm.maxSnoozes,
           snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+          requireGame: alarm.requireGame,
+          gameConfig: alarm.gameConfig,
+          syncToCloud: alarm.syncToCloud,
         );
       });
 
@@ -843,6 +859,9 @@ class _HomePageState extends State<HomePage> {
       final repeatDays = result['repeatDays'] as List<int>;
       final maxSnoozes = result['maxSnoozes'] ?? 3;
       final snoozeDuration = result['snoozeDuration'] ?? 5;
+      final requireGame = result['requireGame'] ?? false;
+      final gameConfig = result['gameConfig'] as GameConfig?;
+      final syncToCloud = result['syncToCloud'] ?? true;
 
       // Configurar los valores de repetición
       bool isDaily = repetitionType == 'daily';
@@ -872,6 +891,9 @@ class _HomePageState extends State<HomePage> {
         maxSnoozes: maxSnoozes,
         snoozeCount: 0,
         snoozeDurationMinutes: snoozeDuration,
+        requireGame: requireGame,
+        gameConfig: gameConfig,
+        syncToCloud: syncToCloud,
       );
 
       try {
@@ -933,6 +955,8 @@ class _HomePageState extends State<HomePage> {
       final repeatDays = result['repeatDays'] as List<int>;
       final maxSnoozes = result['maxSnoozes'] ?? 3;
       final snoozeDuration = result['snoozeDuration'] ?? 5;
+      final requireGame = result['requireGame'] ?? false;
+      final gameConfig = result['gameConfig'] as GameConfig?;
 
       // Configurar los valores de repetición
       bool isDaily = repetitionType == 'daily';
@@ -969,6 +993,9 @@ class _HomePageState extends State<HomePage> {
             maxSnoozes: maxSnoozes,
             snoozeCount: alarm.snoozeCount,
             snoozeDurationMinutes: snoozeDuration,
+            requireGame: requireGame,
+            gameConfig: gameConfig,
+            syncToCloud: alarm.syncToCloud,
           );
           _saveAlarms();
         }
@@ -1025,6 +1052,9 @@ class _HomePageState extends State<HomePage> {
             snoozeCount: alarm.snoozeCount,
             maxSnoozes: alarm.maxSnoozes,
             snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+            requireGame: alarm.requireGame,
+            gameConfig: alarm.gameConfig,
+            syncToCloud: alarm.syncToCloud,
           );
 
           // Setear la alarma con el tiempo actualizado
@@ -1244,6 +1274,9 @@ class _HomePageState extends State<HomePage> {
           snoozeCount: alarm.snoozeCount,
           maxSnoozes: alarm.maxSnoozes,
           snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+          requireGame: alarm.requireGame,
+          gameConfig: alarm.gameConfig,
+          syncToCloud: alarm.syncToCloud,
         );
       }
     }
@@ -2077,7 +2110,7 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         )
-                        .toList(),
+                        ,
                   ],
                 ),
               ),
@@ -2087,7 +2120,7 @@ class _HomePageState extends State<HomePage> {
 
             // Lista de alarmas (sin Expanded, ahora dentro del scroll)
             _alarms.isEmpty
-                ? Container(
+                ? SizedBox(
                     height: 200,
                     child: const Center(
                       child: Text('No hay alarmas configuradas'),

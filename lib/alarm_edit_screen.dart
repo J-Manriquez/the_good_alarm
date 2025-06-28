@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
+import 'package:the_good_alarm/games/modelo_juegos.dart';
+import 'services/game_service.dart';
+import 'games/alarm_game_wrapper.dart';
+import 'settings_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AlarmEditScreen extends StatefulWidget {
   final Alarm? alarm; // null para crear nueva alarma, Alarm para editar
 
-  const AlarmEditScreen({Key? key, this.alarm}) : super(key: key);
+  const AlarmEditScreen({super.key, this.alarm});
 
   @override
   _AlarmEditScreenState createState() => _AlarmEditScreenState();
@@ -20,6 +25,10 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
   List<int> _selectedDays = [];
   int _maxSnoozes = 3;
   int _snoozeDuration = 5;
+  bool _requireGame = false;
+  GameConfig? _gameConfig;
+  bool _syncToCloud = true;
+  bool _cloudSyncEnabled = false;
 
   final List<String> _daysOfWeek = [
     'Lunes',
@@ -55,6 +64,9 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       );
       _maxSnoozes = widget.alarm!.maxSnoozes;
       _snoozeDuration = widget.alarm!.snoozeDurationMinutes;
+      _requireGame = widget.alarm!.requireGame;
+      _gameConfig = widget.alarm!.gameConfig;
+      _syncToCloud = widget.alarm!.syncToCloud;
 
       // Configurar repetición
       if (widget.alarm!.isDaily) {
@@ -77,13 +89,17 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
   // Agregar este método
   Future<void> _loadDefaultSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    if (widget.alarm == null) {
-      // Solo para alarmas nuevas
-      setState(() {
+    final cloudSyncEnabled = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+    
+    setState(() {
+      _cloudSyncEnabled = cloudSyncEnabled;
+      if (widget.alarm == null) {
+        // Solo para alarmas nuevas
         _maxSnoozes = prefs.getInt('max_snoozes') ?? 3;
         _snoozeDuration = prefs.getInt('snooze_duration_minutes') ?? 5;
-      });
-    }
+        _syncToCloud = cloudSyncEnabled; // Por defecto, sincronizar si está habilitado
+      }
+    });
   }
 
   @override
@@ -106,23 +122,23 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
           data: ThemeData.dark().copyWith(
             timePickerTheme: TimePickerThemeData(
               backgroundColor: Colors.black,
-              hourMinuteTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
+              hourMinuteTextColor: WidgetStateColor.resolveWith(
+                (states) => states.contains(WidgetState.selected)
                     ? const Color.fromARGB(255, 0, 0, 0)
                     : const Color.fromARGB(255, 0, 0, 0),
               ),
-              hourMinuteColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
+              hourMinuteColor: WidgetStateColor.resolveWith(
+                (states) => states.contains(WidgetState.selected)
                     ? const Color.fromARGB(255, 208, 252, 210)
                     : const Color.fromARGB(255, 255, 255, 255),
               ),
-              dayPeriodTextColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
+              dayPeriodTextColor: WidgetStateColor.resolveWith(
+                (states) => states.contains(WidgetState.selected)
                     ? const Color.fromARGB(255, 0, 0, 0)
                     : const Color.fromARGB(255, 0, 0, 0),
               ),
-              dayPeriodColor: MaterialStateColor.resolveWith(
-                (states) => states.contains(MaterialState.selected)
+              dayPeriodColor: WidgetStateColor.resolveWith(
+                (states) => states.contains(WidgetState.selected)
                     ? const Color.fromARGB(255, 208, 252, 210)
                     : const Color.fromARGB(255, 255, 255, 255),
               ),
@@ -135,30 +151,30 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 fontSize: 22,
               ),
               confirmButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
+                foregroundColor: WidgetStateProperty.all(
                   const Color.fromARGB(255, 255, 255, 255),
                 ),
-                backgroundColor: MaterialStateProperty.all(Colors.green),
-                textStyle: MaterialStateProperty.all(
+                backgroundColor: WidgetStateProperty.all(Colors.green),
+                textStyle: WidgetStateProperty.all(
                   const TextStyle(fontSize: 20),
                 ),
-                shape: MaterialStateProperty.all(
+                shape: WidgetStateProperty.all(
                   RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
               cancelButtonStyle: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
+                foregroundColor: WidgetStateProperty.all(
                   const Color.fromARGB(255, 0, 0, 0),
                 ),
-                backgroundColor: MaterialStateProperty.all(
+                backgroundColor: WidgetStateProperty.all(
                   const Color.fromARGB(255, 255, 255, 255),
                 ),
-                textStyle: MaterialStateProperty.all(
+                textStyle: WidgetStateProperty.all(
                   const TextStyle(fontSize: 20),
                 ),
-                shape: MaterialStateProperty.all(
+                shape: WidgetStateProperty.all(
                   RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -167,7 +183,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
             ),
             textButtonTheme: TextButtonThemeData(
               style: ButtonStyle(
-                foregroundColor: MaterialStateProperty.all(
+                foregroundColor: WidgetStateProperty.all(
                   const Color.fromARGB(255, 255, 255, 255),
                 ),
               ),
@@ -211,15 +227,24 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     });
   }
 
-  void _saveAlarm() {
-    // Validaciones
-    // if (_titleController.text.trim().isEmpty) {
-    //   ScaffoldMessenger.of(context).showSnackBar(
-    //     const SnackBar(content: Text('Por favor, ingresa un título')),
-    //   );
-    //   return;
-    // }
+  Future<void> _selectGame() async {
+    final gameConfig = await GameService.selectGameForAlarm(context);
+    if (gameConfig != null) {
+      setState(() {
+        _gameConfig = gameConfig;
+        _requireGame = true;
+      });
+    }
+  }
 
+  void _removeGame() {
+    setState(() {
+      _gameConfig = null;
+      _requireGame = false;
+    });
+  }
+
+  void _saveAlarm() {
     if (_repetitionType == 'custom' && _selectedDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Por favor, selecciona al menos un día')),
@@ -236,10 +261,35 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       'repeatDays': _selectedDays,
       'maxSnoozes': _maxSnoozes,
       'snoozeDuration': _snoozeDuration,
-      'alarm': widget.alarm, // Para saber si es edición
+      'requireGame': _requireGame,
+      'gameConfig': _gameConfig,
+      'syncToCloud': _syncToCloud,
+      'alarm': widget.alarm,
     };
 
     Navigator.pop(context, result);
+  }
+
+    String _getGameName(GameType gameType) {
+    switch (gameType) {
+      case GameType.memorice:
+        return 'Memorice';
+      case GameType.equations:
+        return 'Ecuaciones';
+      case GameType.sequence:
+        return 'Secuencia';
+    }
+  }
+
+  String _getGameDescription(GameConfig config) {
+    switch (config.gameType) {
+      case GameType.memorice:
+        return 'Dificultad: ${config.livesLabel} • ${config.parameter} parejas • ${config.repetitions} rondas';
+      case GameType.equations:
+        return 'Dificultad: ${config.livesLabel} • ${config.parameter} ecuaciones • ${config.repetitions} rondas';
+      case GameType.sequence:
+        return 'Dificultad: ${config.livesLabel} • Secuencia de ${config.parameter} • ${config.repetitions} rondas';
+    }
   }
 
   @override
@@ -433,9 +483,126 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 });
               },
             ),
+
+            const SizedBox(height: 20),
+
+            // Configuración de Juegos
+            const Text(
+              'Juego para Apagar Alarma',
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+
+            // Switch para habilitar/deshabilitar juego
+            SwitchListTile(
+              title: const Text(
+                'Requerir juego para apagar',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                _requireGame
+                    ? 'Deberás completar un juego para apagar la alarma'
+                    : 'La alarma se puede apagar normalmente',
+                style: TextStyle(color: Colors.grey[400]),
+              ),
+              value: _requireGame,
+              activeColor: Colors.green,
+              onChanged: (value) {
+                setState(() {
+                  _requireGame = value;
+                  if (!value) {
+                    _gameConfig = null;
+                  }
+                });
+              },
+            ),
+
+            // Configuración del juego seleccionado
+            if (_requireGame) ...[
+              const SizedBox(height: 16),
+              Card(
+                color: Colors.grey[900],
+                child: ListTile(
+                  leading: Icon(
+                    _gameConfig != null
+                        ? _getGameIcon(_gameConfig!.gameType)
+                        : Icons.videogame_asset,
+                    color: Colors.green,
+                  ),
+                  title: Text(
+                    _gameConfig != null
+                        ? _getGameName(_gameConfig!.gameType)
+                        : 'Seleccionar juego',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: _gameConfig != null
+                      ? Text(
+                          _getGameDescription(_gameConfig!),
+                          style: TextStyle(color: Colors.grey[400]),
+                        )
+                      : const Text(
+                          'Toca para elegir un juego',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                  trailing: _gameConfig != null
+                      ? IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: _removeGame,
+                        )
+                      : const Icon(
+                          Icons.arrow_forward_ios,
+                          color: Colors.white,
+                        ),
+                  onTap: _selectGame,
+                ),
+              ),
+            ],
+
+            // Card de sincronización en la nube
+            if (_cloudSyncEnabled && FirebaseAuth.instance.currentUser != null) ...[
+              const SizedBox(height: 20),
+              const Text(
+                'Sincronización en la Nube',
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                color: Colors.grey[900],
+                child: SwitchListTile(
+                  title: const Text(
+                    'Guardar en Firebase',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Text(
+                    _syncToCloud
+                        ? 'Esta alarma se sincronizará con la nube'
+                        : 'Esta alarma solo se guardará localmente',
+                    style: TextStyle(color: Colors.grey[400]),
+                  ),
+                  value: _syncToCloud,
+                  activeColor: Colors.green,
+                  onChanged: (value) {
+                    setState(() {
+                      _syncToCloud = value;
+                    });
+                  },
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  IconData _getGameIcon(GameType gameType) {
+    switch (gameType) {
+      case GameType.memorice:
+        return Icons.memory;
+      case GameType.equations:
+        return Icons.calculate;
+      case GameType.sequence:
+        return Icons.lightbulb;
+    }
   }
 }

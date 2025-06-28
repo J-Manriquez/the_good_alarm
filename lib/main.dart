@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
-// No es necesario importar 'package:flutter/services.dart' aquí si MethodChannel se maneja en las pantallas individuales.
-// No es necesario importar 'dart:async' ni 'dart:convert' aquí.
-// No es necesario importar 'package:shared_preferences/shared_preferences.dart' aquí.
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'home_page.dart';
+import 'alarm_screen.dart';
+import 'settings_screen.dart';
+import 'screens/login_screen.dart';
+import 'services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import 'home_page.dart'; // Importar la nueva pantalla HomePage
-import 'alarm_screen.dart'; // Importar la nueva pantalla AlarmScreen
-import 'settings_screen.dart'; // Importar la nueva pantalla SettingsScreen
-
-// Mover la constante platform a los archivos donde se usa (HomePage y AlarmScreen)
-// const platform = MethodChannel('com.example.the_good_alarm/alarm');
-
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MainApp());
 }
 
@@ -27,13 +26,40 @@ class MainApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      initialRoute: '/',
+      initialRoute: '/home',
       routes: {
-        '/': (context) => const HomePage(),
+        '/home': (context) => const HomePage(),
+        '/login': (context) => const LoginScreen(),
         '/alarm': (context) => AlarmScreen(
-          arguments: ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?,
+          arguments:
+              ModalRoute.of(context)?.settings.arguments
+                  as Map<String, dynamic>?,
         ),
-        '/settings': (context) => const SettingsScreen(), // Nueva ruta
+        '/settings': (context) => const SettingsScreen(),
+      },
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasData) {
+          return const HomePage();
+        } else {
+          return const LoginScreen();
+        }
       },
     );
   }

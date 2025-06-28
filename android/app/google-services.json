@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "267477029887",
+    "project_id": "thegoodalarm",
+    "storage_bucket": "thegoodalarm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:267477029887:android:1a98a7817f416e08e74dca",
+        "android_client_info": {
+          "package_name": "com.example.the_good_alarm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcP9higp7zEvvvbtQWwOhgZxbMspB9rd8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
