@@ -3,14 +3,12 @@ class UserModel {
   final String name;
   final String email;
   final DateTime creationDate;
-  final bool isActive;
 
   UserModel({
     required this.id,
     required this.name,
     required this.email,
     required this.creationDate,
-    this.isActive = false,
   });
 
   // Convertir a Map para Firestore
@@ -20,7 +18,6 @@ class UserModel {
       'name': name,
       'email': email,
       'creationDate': creationDate.toIso8601String(),
-      'isActive': isActive,
     };
   }
 
@@ -31,7 +28,6 @@ class UserModel {
       name: map['name'] ?? '',
       email: map['email'] ?? '',
       creationDate: DateTime.parse(map['creationDate']),
-      isActive: map['isActive'] ?? false,
     );
   }
 
@@ -41,14 +37,12 @@ class UserModel {
     String? name,
     String? email,
     DateTime? creationDate,
-    bool? isActive,
   }) {
     return UserModel(
       id: id ?? this.id,
       name: name ?? this.name,
       email: email ?? this.email,
       creationDate: creationDate ?? this.creationDate,
-      isActive: isActive ?? this.isActive,
     );
   }
 }

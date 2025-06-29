@@ -17,6 +17,7 @@ class Alarm {
   bool requireGame;
   GameConfig? gameConfig;
   bool syncToCloud;
+  List<Map<String, dynamic>>? activeOnlyIn;
 
   Alarm({
     required this.id,
@@ -34,6 +35,7 @@ class Alarm {
     this.requireGame = false,
     this.gameConfig,
     this.syncToCloud = true,
+    this.activeOnlyIn,
   });
 
   bool isRepeating() {
@@ -56,6 +58,7 @@ class Alarm {
     'requireGame': requireGame,
     'gameConfig': gameConfig?.toJson(),
     'syncToCloud': syncToCloud,
+    'activeOnlyIn': activeOnlyIn,
   };
 
   factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
@@ -78,5 +81,8 @@ class Alarm {
         ? GameConfig.fromJson(json['gameConfig']) 
         : null,
     syncToCloud: json['syncToCloud'] as bool? ?? true,
+    activeOnlyIn: json['activeOnlyIn'] != null
+        ? List<Map<String, dynamic>>.from(json['activeOnlyIn'])
+        : null,
   );
 }

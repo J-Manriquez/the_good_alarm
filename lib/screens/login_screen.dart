@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../home_page.dart';
 import 'register_screen.dart';
+import '../widgets/device_name_modal.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,6 +39,16 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (mounted) {
+          // Verificar si se necesita mostrar el modal de nombre de dispositivo
+          final shouldShow = await shouldShowDeviceNameModal();
+          if (shouldShow) {
+            // Mostrar modal antes de navegar a HomePage
+            await showDeviceNameModal(
+              context,
+              canDismiss: false,
+            );
+          }
+          
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (context) => const HomePage()),
           );

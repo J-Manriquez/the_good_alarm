@@ -37,7 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultSnoozeDuration = 5;
   int _defaultMaxSnoozes = 3;
   bool _cloudSyncEnabled = false;
-  
+
   final AuthService _authService = AuthService();
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
   User? _currentUser;
@@ -71,7 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
     final maxSnoozes = prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
     final cloudSync = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
-    
+
     // Verificar estado de autenticación
     _currentUser = FirebaseAuth.instance.currentUser;
 
@@ -118,13 +118,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveCloudSyncOption(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsScreen.cloudSyncKey, value);
-    
+
     if (mounted) {
       setState(() {
         _cloudSyncEnabled = value;
       });
     }
-    
+
     // Notificar a HomePage sobre el cambio de configuración
     try {
       // Buscar la instancia de HomePage en el stack de navegación
@@ -138,7 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       print('Error al notificar cambio de sincronización: $e');
     }
-    
+
     // Si se activa el guardado en la nube, sincronizar todas las alarmas
     if (value && _currentUser != null) {
       await _syncAllAlarmsToCloud();
@@ -148,41 +148,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _syncAllAlarmsToCloud() async {
     try {
       if (_currentUser == null) return;
-      
+
       // Obtener el ID de la colección del usuario
       final userData = await _authService.getUserData(_currentUser!.uid);
       if (userData == null) return;
-      
-      final userCollectionId = '${userData.name}_${userData.creationDate.millisecondsSinceEpoch}';
-      
+
+      final userCollectionId =
+          '${userData.name}_${userData.creationDate.millisecondsSinceEpoch}';
+
       // Actualizar todas las alarmas para que se sincronicen por defecto
       final prefs = await SharedPreferences.getInstance();
       final alarmsString = prefs.getStringList('alarms_list');
       if (alarmsString != null) {
-        final alarms = alarmsString.map((s) => Alarm.fromJson(jsonDecode(s))).toList();
-        
+        final alarms = alarmsString
+            .map((s) => Alarm.fromJson(jsonDecode(s)))
+            .toList();
+
         // Actualizar alarmas para sincronización
-        final updatedAlarms = alarms.map((alarm) => Alarm(
-          id: alarm.id,
-          time: alarm.time,
-          title: alarm.title,
-          message: alarm.message,
-          isActive: alarm.isActive,
-          repeatDays: alarm.repeatDays,
-          snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-          maxSnoozes: alarm.maxSnoozes,
-          snoozeCount: alarm.snoozeCount,
-          requireGame: alarm.requireGame,
-          gameConfig: alarm.gameConfig,
-          syncToCloud: true, // Activar sincronización por defecto
-        )).toList();
-        
+        final updatedAlarms = alarms
+            .map(
+              (alarm) => Alarm(
+                id: alarm.id,
+                time: alarm.time,
+                title: alarm.title,
+                message: alarm.message,
+                isActive: alarm.isActive,
+                repeatDays: alarm.repeatDays,
+                snoozeDurationMinutes: alarm.snoozeDurationMinutes,
+                maxSnoozes: alarm.maxSnoozes,
+                snoozeCount: alarm.snoozeCount,
+                requireGame: alarm.requireGame,
+                gameConfig: alarm.gameConfig,
+                syncToCloud: true, // Activar sincronización por defecto
+              ),
+            )
+            .toList();
+
         // Guardar alarmas actualizadas localmente
-        final updatedAlarmsString = updatedAlarms.map((alarm) => jsonEncode(alarm.toJson())).toList();
+        final updatedAlarmsString = updatedAlarms
+            .map((alarm) => jsonEncode(alarm.toJson()))
+            .toList();
         await prefs.setStringList('alarms_list', updatedAlarmsString);
-        
+
         // Sincronizar con Firebase
-        await _alarmFirebaseService.syncAllAlarms(updatedAlarms, userCollectionId);
+        await _alarmFirebaseService.syncAllAlarms(
+          updatedAlarms,
+          userCollectionId,
+        );
       }
     } catch (e) {
       print('Error al sincronizar alarmas: $e');
@@ -433,6 +445,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  // funcion para cerrar sesion con AuthService
+  Future<void> signOut() async {
+    await AuthService().signOut();
+    Navigator.pushReplacementNamed(context, '/home');
+  }
+
   // Helper to get tooltip for slider division
   String _getTooltipForSliderValue(double value) {
     int index = value.toInt();
@@ -613,122 +631,180 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                // Card para guardado en la nube
-                Card(
-                  elevation: 2.0,
-                  margin: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Guardado en la Nube',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _currentUser != null
-                              ? 'Sincroniza tus alarmas con Firebase'
-                              : 'Inicia sesión para habilitar esta función',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SwitchListTile(
-                          title: Text(
-                            'Activar guardado en la nube',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          subtitle: Text(
-                            _currentUser != null
-                                ? 'Las alarmas se guardarán automáticamente en Firebase'
-                                : 'Requiere iniciar sesión',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey[600],
+                // Card para autenticación
+                if (_currentUser == null) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    elevation: 2.0,
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.of(context).pushNamed('/login');
+                      },
+                      borderRadius: BorderRadius.circular(8.0),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.login,
+                              color: Colors.blue[600],
+                              size: 28,
                             ),
-                          ),
-                          value: _cloudSyncEnabled && _currentUser != null,
-                          activeColor: Colors.green,
-                          inactiveThumbColor: Colors.grey,
-                          onChanged: _currentUser != null
-                              ? (bool value) {
-                                  _saveCloudSyncOption(value);
-                                }
-                              : null,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        if (_currentUser == null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pushNamed('/login');
-                              },
-                              icon: const Icon(Icons.login),
-                              label: const Text('Iniciar Sesión'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Iniciar Sesión',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Accede a tu cuenta para sincronizar tus alarmas',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: Colors.grey[600]),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                      ],
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              color: Colors.grey[400],
+                              size: 16,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                // Card para autenticación
-                Card(
-                  elevation: 2.0,
-                  margin: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.of(context).pushNamed('/login');
-                    },
-                    borderRadius: BorderRadius.circular(8.0),
+                ],
+                // Card para guardado en la nube
+                if (_currentUser != null) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    elevation: 2.0,
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.login,
-                            color: Colors.blue[600],
-                            size: 28,
+                          Text(
+                            'Guardado en la Nube',
+                            style: Theme.of(context).textTheme.titleLarge,
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Iniciar Sesión',
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Accede a tu cuenta para sincronizar tus alarmas',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(height: 8),
+                          Text(
+                            _currentUser != null
+                                ? 'Sincroniza tus alarmas con Firebase'
+                                : 'Inicia sesión para habilitar esta función',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.grey[600]),
+                          ),
+                          const SizedBox(height: 16),
+                          SwitchListTile(
+                            title: Text(
+                              'Activar guardado en la nube',
+                              style: Theme.of(context).textTheme.titleMedium,
                             ),
+                            subtitle: Text(
+                              _currentUser != null
+                                  ? 'Las alarmas se guardarán automáticamente en Firebase'
+                                  : 'Requiere iniciar sesión',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: Colors.grey[600]),
+                            ),
+                            value: _cloudSyncEnabled && _currentUser != null,
+                            activeColor: Colors.green,
+                            inactiveThumbColor: Colors.grey,
+                            onChanged: _currentUser != null
+                                ? (bool value) {
+                                    _saveCloudSyncOption(value);
+                                  }
+                                : null,
+                            contentPadding: EdgeInsets.zero,
                           ),
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            color: Colors.grey[400],
-                            size: 16,
-                          ),
+                          // if (_currentUser == null)
+                          //   Padding(
+                          //     padding: const EdgeInsets.only(top: 8.0),
+                          //     child: ElevatedButton.icon(
+                          //       onPressed: () {
+                          //         Navigator.of(context).pushNamed('/login');
+                          //       },
+                          //       icon: const Icon(Icons.login),
+                          //       label: const Text('Iniciar Sesión'),
+                          //       style: ElevatedButton.styleFrom(
+                          //         backgroundColor: Colors.blue,
+                          //         foregroundColor: Colors.white,
+                          //       ),
+                          //     ),
+                          //   ),
                         ],
                       ),
                     ),
                   ),
-                ),
+                ],
+                // Card para cerrar sesión
+                if (_currentUser != null) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    elevation: 2.0,
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: InkWell(
+                      onTap: () {
+                        signOut();
+                      },
+                      borderRadius: BorderRadius.circular(8.0),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.logout,
+                              color: Colors.red[600],
+                              size: 28,
+                            ), // Icono de cerrar sesión
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Cerrar Sesión', // Texto para cerrar sesión
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Cierra tu sesión actual', // Descripción para cerrar sesión
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: Colors.grey[600]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              color: Colors.grey[400],
+                              size: 16,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 // Add more settings here in separate Cards if needed
               ],
             ),

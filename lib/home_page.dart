@@ -8,6 +8,8 @@ import 'package:the_good_alarm/modelo_alarm.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/alarm_firebase_service.dart';
 import 'services/auth_service.dart';
+import 'services/sistema_firebase_service.dart';
+import 'widgets/device_name_modal.dart';
 
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
 import 'settings_screen.dart'; // Importar SettingsScreen
@@ -52,6 +54,8 @@ class _HomePageState extends State<HomePage> {
   // Servicios de Firebase
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
   final AuthService _authService = AuthService();
+  final SistemaFirebaseService _sistemaFirebaseService =
+      SistemaFirebaseService();
   User? _currentUser;
   StreamSubscription<List<Alarm>>? _firebaseAlarmsSubscription;
   bool _cloudSyncEnabled = false;
@@ -81,22 +85,28 @@ class _HomePageState extends State<HomePage> {
     _currentGroupingOption = AlarmGroupingOption.values[groupingIndex];
     _showNextAlarmSection =
         prefs.getBool(_showNextAlarmKey) ?? true; // Cargar preferencia
-    
+
     // Cargar configuración de sincronización en la nube
     _cloudSyncEnabled = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
     _currentUser = FirebaseAuth.instance.currentUser;
-    
+
     await _loadAlarms(); // Cargar alarmas después de la configuración
-    
+
     // Inicializar sincronización con Firebase si está habilitada
     if (_cloudSyncEnabled && _currentUser != null) {
       await _initializeFirebaseSync();
     }
-    
+
     // Inicializar el estado de expansión para los grupos si es necesario
     if (_currentGroupingOption != AlarmGroupingOption.none) {
       _initializeGroupStates();
     }
+
+    // Verificar si se necesita mostrar el modal de nombre de dispositivo
+    if (_currentUser != null) {
+      _checkDeviceNameModal();
+    }
+
     if (mounted) setState(() {});
     _startOrUpdateCountdown();
   }
@@ -128,6 +138,44 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // Verificar si se necesita mostrar el modal de nombre de dispositivo
+  Future<void> _checkDeviceNameModal() async {
+    if (!mounted) return;
+
+    final shouldShow = await shouldShowDeviceNameModal();
+    if (shouldShow && mounted) {
+      // Mostrar modal sin posibilidad de cerrarlo hasta ingresar el nombre
+      await showDeviceNameModal(
+        context,
+        canDismiss: false,
+        onDeviceNameSet: () {
+          // Actualizar el estado de sincronización si es necesario
+          if (_cloudSyncEnabled && _currentUser != null) {
+            _initializeFirebaseSync();
+          }
+        },
+      );
+    }
+  }
+
+  Future<void> _showDeviceNameModal() async {
+    if (!mounted) return;
+
+    await showDeviceNameModal(
+      context,
+      canDismiss: true,
+      onDeviceNameSet: () {
+        // Mostrar mensaje de confirmación
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nombre del dispositivo actualizado'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      },
+    );
+  }
+
   // Manejar actualizaciones de alarmas desde Firebase
   Future<void> _handleFirebaseAlarmsUpdate(List<Alarm> firebaseAlarms) async {
     if (!_cloudSyncEnabled || _currentUser == null) return;
@@ -135,7 +183,9 @@ class _HomePageState extends State<HomePage> {
     try {
       // Crear mapas para comparación eficiente
       final localAlarmsMap = {for (var alarm in _alarms) alarm.id: alarm};
-      final firebaseAlarmsMap = {for (var alarm in firebaseAlarms) alarm.id: alarm};
+      final firebaseAlarmsMap = {
+        for (var alarm in firebaseAlarms) alarm.id: alarm,
+      };
 
       bool hasChanges = false;
 
@@ -156,7 +206,9 @@ class _HomePageState extends State<HomePage> {
             if (firebaseAlarm.isActive) {
               await _setNativeAlarm(firebaseAlarm);
             } else {
-              await platform.invokeMethod('cancelAlarm', {'alarmId': firebaseAlarm.id});
+              await platform.invokeMethod('cancelAlarm', {
+                'alarmId': firebaseAlarm.id,
+              });
             }
             hasChanges = true;
           }
@@ -166,7 +218,8 @@ class _HomePageState extends State<HomePage> {
       // Eliminar alarmas que ya no están en Firebase
       final alarmsToRemove = <Alarm>[];
       for (final localAlarm in _alarms) {
-        if (localAlarm.syncToCloud && !firebaseAlarmsMap.containsKey(localAlarm.id)) {
+        if (localAlarm.syncToCloud &&
+            !firebaseAlarmsMap.containsKey(localAlarm.id)) {
           alarmsToRemove.add(localAlarm);
         }
       }
@@ -174,7 +227,9 @@ class _HomePageState extends State<HomePage> {
       for (final alarmToRemove in alarmsToRemove) {
         _alarms.remove(alarmToRemove);
         if (alarmToRemove.isActive) {
-          await platform.invokeMethod('cancelAlarm', {'alarmId': alarmToRemove.id});
+          await platform.invokeMethod('cancelAlarm', {
+            'alarmId': alarmToRemove.id,
+          });
         }
         hasChanges = true;
       }
@@ -194,9 +249,11 @@ class _HomePageState extends State<HomePage> {
         localAlarm.title != firebaseAlarm.title ||
         localAlarm.message != firebaseAlarm.message ||
         localAlarm.isActive != firebaseAlarm.isActive ||
-        localAlarm.repeatDays.toString() != firebaseAlarm.repeatDays.toString() ||
+        localAlarm.repeatDays.toString() !=
+            firebaseAlarm.repeatDays.toString() ||
         localAlarm.maxSnoozes != firebaseAlarm.maxSnoozes ||
-        localAlarm.snoozeDurationMinutes != firebaseAlarm.snoozeDurationMinutes ||
+        localAlarm.snoozeDurationMinutes !=
+            firebaseAlarm.snoozeDurationMinutes ||
         localAlarm.requireGame != firebaseAlarm.requireGame;
   }
 
@@ -206,7 +263,10 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final alarmsToSync = _alarms.where((alarm) => alarm.syncToCloud).toList();
-      await _alarmFirebaseService.syncAllAlarms(alarmsToSync, _currentUser!.uid);
+      await _alarmFirebaseService.syncAllAlarms(
+        alarmsToSync,
+        _currentUser!.uid,
+      );
     } catch (e) {
       print('Error al sincronizar alarmas locales: $e');
     }
@@ -216,7 +276,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> updateCloudSyncStatus(bool enabled) async {
     _cloudSyncEnabled = enabled;
     _currentUser = FirebaseAuth.instance.currentUser;
-    
+
     if (enabled && _currentUser != null) {
       await _initializeFirebaseSync();
     } else {
@@ -228,21 +288,20 @@ class _HomePageState extends State<HomePage> {
   // Método para manejar cambios de autenticación
   Future<void> handleAuthStateChange() async {
     final newUser = FirebaseAuth.instance.currentUser;
-    
+
     if (newUser != _currentUser) {
       // Cancelar suscripción anterior
       _firebaseAlarmsSubscription?.cancel();
       _firebaseAlarmsSubscription = null;
-      
+
       _currentUser = newUser;
-      
+
       // Reinicializar sincronización si está habilitada y hay usuario
       if (_cloudSyncEnabled && _currentUser != null) {
         await _initializeFirebaseSync();
       }
     }
   }
-
 
   // NUEVO: Obtener alarmas pospuestas
   List<Alarm> _getSnoozedAlarms() {
@@ -590,16 +649,21 @@ class _HomePageState extends State<HomePage> {
           _alarms[index].snoozeCount = 0; // Reset snooze count
         });
         await _saveAlarms();
-        
+
         // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
+        if (_cloudSyncEnabled &&
+            _currentUser != null &&
+            _alarms[index].syncToCloud) {
           try {
-            await _alarmFirebaseService.updateAlarmToCloud(_alarms[index], _currentUser!.uid);
+            await _alarmFirebaseService.updateAlarmToCloud(
+              _alarms[index],
+              _currentUser!.uid,
+            );
           } catch (e) {
             print('Error al sincronizar alarma detenida con Firebase: $e');
           }
         }
-        
+
         print('Non-repeating alarm deactivated and saved');
       } else {
         // Si la alarma es repetitiva, solo desactivar si no hay snoozes activos
@@ -615,11 +679,16 @@ class _HomePageState extends State<HomePage> {
             _alarms[index].snoozeCount = 0; // Reset snooze count
           });
           await _saveAlarms();
-          
+
           // Sincronizar con Firebase si está habilitado
-          if (_cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
+          if (_cloudSyncEnabled &&
+              _currentUser != null &&
+              _alarms[index].syncToCloud) {
             try {
-              await _alarmFirebaseService.updateAlarmToCloud(_alarms[index], _currentUser!.uid);
+              await _alarmFirebaseService.updateAlarmToCloud(
+                _alarms[index],
+                _currentUser!.uid,
+              );
             } catch (e) {
               print('Error al sincronizar reset de snooze con Firebase: $e');
             }
@@ -690,16 +759,23 @@ class _HomePageState extends State<HomePage> {
         });
 
         await _saveAlarms();
-        
+
         // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled && _currentUser != null && updatedAlarm.syncToCloud) {
+        if (_cloudSyncEnabled &&
+            _currentUser != null &&
+            updatedAlarm.syncToCloud) {
           try {
-            await _alarmFirebaseService.updateAlarmToCloud(updatedAlarm, _currentUser!.uid);
+            await _alarmFirebaseService.updateAlarmToCloud(
+              updatedAlarm,
+              _currentUser!.uid,
+            );
           } catch (e) {
-            print('Error al sincronizar alarma desactivada por máximo snooze con Firebase: $e');
+            print(
+              'Error al sincronizar alarma desactivada por máximo snooze con Firebase: $e',
+            );
           }
         }
-        
+
         _startOrUpdateCountdown();
         return;
       }
@@ -727,16 +803,21 @@ class _HomePageState extends State<HomePage> {
       });
 
       await _saveAlarms();
-      
+
       // Sincronizar con Firebase si está habilitado
-      if (_cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
+      if (_cloudSyncEnabled &&
+          _currentUser != null &&
+          _alarms[index].syncToCloud) {
         try {
-          await _alarmFirebaseService.updateAlarmToCloud(_alarms[index], _currentUser!.uid);
+          await _alarmFirebaseService.updateAlarmToCloud(
+            _alarms[index],
+            _currentUser!.uid,
+          );
         } catch (e) {
           print('Error al sincronizar alarma pospuesta con Firebase: $e');
         }
       }
-      
+
       _startOrUpdateCountdown();
       print(
         'Alarm snoozed and saved, new snooze count: ${_alarms[index].snoozeCount}',
@@ -875,16 +956,19 @@ class _HomePageState extends State<HomePage> {
         await _setNativeAlarm(alarm);
         _alarms.add(alarm);
         await _saveAlarms();
-        
+
         // Sincronizar con Firebase si está habilitado
         if (_cloudSyncEnabled && _currentUser != null && alarm.syncToCloud) {
           try {
-            await _alarmFirebaseService.saveAlarmToCloud(alarm, _currentUser!.uid);
+            await _alarmFirebaseService.saveAlarmToCloud(
+              alarm,
+              _currentUser!.uid,
+            );
           } catch (e) {
             print('Error al sincronizar alarma con Firebase: $e');
           }
         }
-        
+
         _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Alarma configurada y activa')),
@@ -942,6 +1026,11 @@ class _HomePageState extends State<HomePage> {
       final snoozeDuration = result['snoozeDuration'] ?? 5;
       final requireGame = result['requireGame'] ?? false;
       final gameConfig = result['gameConfig'] as GameConfig?;
+      final syncToCloud = result['syncToCloud'] ?? true;
+
+      // Verificar si syncToCloud cambió de true a false para eliminar de Firebase
+      final previousSyncToCloud = alarm.syncToCloud;
+      final shouldDeleteFromFirebase = previousSyncToCloud && !syncToCloud;
 
       // Configurar los valores de repetición
       bool isDaily = repetitionType == 'daily';
@@ -980,14 +1069,33 @@ class _HomePageState extends State<HomePage> {
             snoozeDurationMinutes: snoozeDuration,
             requireGame: requireGame,
             gameConfig: gameConfig,
-            syncToCloud: alarm.syncToCloud,
+            syncToCloud: syncToCloud,
           );
           _saveAlarms();
-          
-          // Sincronizar con Firebase si está habilitado
-          if (_cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
+
+          // Eliminar de Firebase si se desactivó la sincronización
+          if (_cloudSyncEnabled &&
+              _currentUser != null &&
+              shouldDeleteFromFirebase) {
             try {
-              await _alarmFirebaseService.updateAlarmToCloud(_alarms[index], _currentUser!.uid);
+              await _alarmFirebaseService.deleteAlarmToCloud(
+                alarm.id,
+                _currentUser!.uid,
+              );
+            } catch (e) {
+              print('Error al eliminar alarma de Firebase: $e');
+            }
+          }
+
+          // Sincronizar con Firebase si está habilitado y la sincronización está activa
+          if (_cloudSyncEnabled &&
+              _currentUser != null &&
+              _alarms[index].syncToCloud) {
+            try {
+              await _alarmFirebaseService.updateAlarmToCloud(
+                _alarms[index],
+                _currentUser!.uid,
+              );
             } catch (e) {
               print('Error al sincronizar alarma editada con Firebase: $e');
             }
@@ -1063,16 +1171,22 @@ class _HomePageState extends State<HomePage> {
         }
 
         await _saveAlarms(); // Guardar y refrescar UI
-        
+
         // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
+        if (_cloudSyncEnabled &&
+            _currentUser != null &&
+            _alarms[index].syncToCloud) {
           try {
-            await _alarmFirebaseService.toggleAlarmStatus(alarm.id, isActive, _currentUser!.uid);
+            await _alarmFirebaseService.toggleAlarmStatus(
+              alarm.id,
+              isActive,
+              _currentUser!.uid,
+            );
           } catch (e) {
             print('Error al sincronizar estado de alarma con Firebase: $e');
           }
         }
-        
+
         _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1108,16 +1222,19 @@ class _HomePageState extends State<HomePage> {
         if (alarm.isActive) {
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
         }
-        
+
         // Eliminar de Firebase si está sincronizada
         if (_cloudSyncEnabled && _currentUser != null && alarm.syncToCloud) {
           try {
-            await _alarmFirebaseService.deleteAlarmToCloud(alarm.id, _currentUser!.uid);
+            await _alarmFirebaseService.deleteAlarmToCloud(
+              alarm.id,
+              _currentUser!.uid,
+            );
           } catch (e) {
             print('Error al eliminar alarma de Firebase: $e');
           }
         }
-        
+
         _alarms.removeAt(index);
         await _saveAlarms(); // Esto llamará a setState y re-inicializará grupos
         ScaffoldMessenger.of(
@@ -1415,8 +1532,6 @@ class _HomePageState extends State<HomePage> {
       return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
   }
-
-
 
   Widget _buildNextAlarmSection() {
     final nextAlarm = _getNextActiveAlarm();
@@ -1969,12 +2084,58 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white, size: 30),
-            onPressed: () async {
-              await Navigator.pushNamed(context, '/settings');
-              _loadSettingsAndAlarms();
-            },
+          Theme(
+            data: Theme.of(context).copyWith(
+              popupMenuTheme: PopupMenuThemeData(
+                shape: RoundedRectangleBorder(
+                  side: BorderSide(color: Colors.white, width: 2.0),
+                  borderRadius: BorderRadius.circular(
+                    4.0,
+                  ), // Optional: for rounded corners
+                ),
+              ),
+            ),
+            child: PopupMenuButton<String>(
+              color: Colors.black,
+              icon: const Icon(Icons.more_vert, color: Colors.white, size: 30),
+              onSelected: (String value) async {
+                switch (value) {
+                  case 'settings':
+                    await Navigator.pushNamed(context, '/settings');
+                    _loadSettingsAndAlarms();
+                    break;
+                  // case 'device_name':
+                  //   await _showDeviceNameModal();
+                  //   break;
+                }
+              },
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text(
+                        'Configuración',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // const PopupMenuItem<String>(
+                //   value: 'device_name',
+                //   child: Row(
+                //     children: [
+                //       Icon(Icons.phone_android, color: Colors.black),
+                //       SizedBox(width: 8),
+                //       Text('Cambiar nombre del dispositivo'),
+                //     ],
+                //   ),
+                // ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1982,20 +2143,22 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              color: hasActiveAlarms ? Colors.green : Colors.black,
-              child: Text(
-                hasActiveAlarms
-                    ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
-                    : 'No hay alarmas activas',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: const Color.fromARGB(255, 255, 255, 255),
+            if (hasActiveAlarms) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                color: hasActiveAlarms ? Colors.green : Colors.black,
+                child: Text(
+                  hasActiveAlarms
+                      ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
+                      : 'No hay alarmas activas',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: const Color.fromARGB(255, 255, 255, 255),
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
               ),
-            ),
+            ],
 
             // Contenedor para alarma sonando
             _buildRingingAlarmContainer(),
@@ -2040,96 +2203,104 @@ class _HomePageState extends State<HomePage> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    ..._getSnoozedAlarms()
-                        .map(
-                          (alarm) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.orange.shade300),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                    ..._getSnoozedAlarms().map(
+                      (alarm) => Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.shade300),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
                                     children: [
-                                      Row(
-                                        children: [
-                                          Text(
-                                            alarm.title,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            'Faltan: ${_formatDuration(_calculateTimeUntilSnoozedAlarm(alarm))}',
-                                            style: TextStyle(
-                                              color: Colors.orange.shade700,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
                                       Text(
-                                        'Sonará a las: ${DateFormat('HH:mm').format(_calculateSnoozedAlarmTime(alarm))}',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade600,
+                                        alarm.title,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
                                         ),
                                       ),
+                                      const SizedBox(width: 8),
                                       Text(
-                                        'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
+                                        'Faltan: ${_formatDuration(_calculateTimeUntilSnoozedAlarm(alarm))}',
                                         style: TextStyle(
                                           color: Colors.orange.shade700,
+                                          fontWeight: FontWeight.bold,
                                           fontSize: 12,
                                         ),
                                       ),
                                     ],
                                   ),
-                                ),
-                                IconButton(
-                                  onPressed: () async {
-                                    // Desactivar alarma pospuesta
-                                    await _toggleAlarmState(alarm.id, false);
-                                    // Resetear contador de snooze
-                                    setState(() {
-                                      final index = _alarms.indexWhere(
-                                        (a) => a.id == alarm.id,
-                                      );
-                                      if (index != -1) {
-                                        _alarms[index].snoozeCount = 0;
-                                      }
-                                    });
-                                    await _saveAlarms();
-                                    
-                                    // Sincronizar con Firebase si está habilitado
-                                    final index = _alarms.indexWhere((a) => a.id == alarm.id);
-                                    if (index != -1 && _cloudSyncEnabled && _currentUser != null && _alarms[index].syncToCloud) {
-                                      try {
-                                        await _alarmFirebaseService.updateAlarmToCloud(_alarms[index], _currentUser!.uid);
-                                      } catch (e) {
-                                        print('Error al sincronizar reset de snooze con Firebase: $e');
-                                      }
-                                    }
-                                  },
-                                  icon: Icon(
-                                    Icons.cancel,
-                                    color: Colors.red.shade600,
+                                  Text(
+                                    'Sonará a las: ${DateFormat('HH:mm').format(_calculateSnoozedAlarmTime(alarm))}',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                    ),
                                   ),
-                                  tooltip: 'Desactivar alarma pospuesta',
-                                ),
-                              ],
+                                  Text(
+                                    'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
+                                    style: TextStyle(
+                                      color: Colors.orange.shade700,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        )
-                        ,
+                            IconButton(
+                              onPressed: () async {
+                                // Desactivar alarma pospuesta
+                                await _toggleAlarmState(alarm.id, false);
+                                // Resetear contador de snooze
+                                setState(() {
+                                  final index = _alarms.indexWhere(
+                                    (a) => a.id == alarm.id,
+                                  );
+                                  if (index != -1) {
+                                    _alarms[index].snoozeCount = 0;
+                                  }
+                                });
+                                await _saveAlarms();
+
+                                // Sincronizar con Firebase si está habilitado
+                                final index = _alarms.indexWhere(
+                                  (a) => a.id == alarm.id,
+                                );
+                                if (index != -1 &&
+                                    _cloudSyncEnabled &&
+                                    _currentUser != null &&
+                                    _alarms[index].syncToCloud) {
+                                  try {
+                                    await _alarmFirebaseService
+                                        .updateAlarmToCloud(
+                                          _alarms[index],
+                                          _currentUser!.uid,
+                                        );
+                                  } catch (e) {
+                                    print(
+                                      'Error al sincronizar reset de snooze con Firebase: $e',
+                                    );
+                                  }
+                                }
+                              },
+                              icon: Icon(
+                                Icons.cancel,
+                                color: Colors.red.shade600,
+                              ),
+                              tooltip: 'Desactivar alarma pospuesta',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),

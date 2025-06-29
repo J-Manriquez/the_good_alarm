@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
 import '../home_page.dart';
+import '../widgets/device_name_modal.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -52,6 +53,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           );
 
+          // Mostrar modal de nombre de dispositivo antes de navegar
+          await showDeviceNameModal(
+            context,
+            canDismiss: false,
+          );
+          
           // Navegar a la página principal
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (context) => const HomePage()),

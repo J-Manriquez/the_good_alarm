@@ -36,7 +36,6 @@ class AuthService {
           name: name,
           email: email,
           creationDate: now,
-          isActive: false,
         );
 
         // Crear colección del usuario en Firestore
