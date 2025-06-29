@@ -17,7 +17,9 @@ import 'alarm_edit_screen.dart';
 import 'package:intl/intl.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final bool shouldSyncLocalAlarms;
+  
+  const HomePage({super.key, this.shouldSyncLocalAlarms = false});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -95,6 +97,11 @@ class _HomePageState extends State<HomePage> {
     // Inicializar sincronización con Firebase si está habilitada
     if (_cloudSyncEnabled && _currentUser != null) {
       await _initializeFirebaseSync();
+      
+      // Sincronizar alarmas locales existentes si es necesario
+      if (widget.shouldSyncLocalAlarms) {
+        await syncAllLocalAlarmsOnLogin();
+      }
     }
 
     // Inicializar el estado de expansión para los grupos si es necesario
@@ -269,6 +276,31 @@ class _HomePageState extends State<HomePage> {
       );
     } catch (e) {
       print('Error al sincronizar alarmas locales: $e');
+    }
+  }
+
+  // Sincronizar todas las alarmas locales existentes al iniciar sesión
+  Future<void> syncAllLocalAlarmsOnLogin() async {
+    if (_currentUser == null) return;
+
+    try {
+      // Marcar todas las alarmas locales para sincronización
+      for (int i = 0; i < _alarms.length; i++) {
+        _alarms[i] = _alarms[i].copyWith(syncToCloud: true);
+      }
+      
+      // Guardar cambios localmente
+      await _saveAlarms();
+      
+      // Sincronizar con Firebase
+      await _alarmFirebaseService.syncAllAlarms(
+        _alarms,
+        _currentUser!.uid,
+      );
+      
+      print('Todas las alarmas locales sincronizadas con Firebase');
+    } catch (e) {
+      print('Error al sincronizar todas las alarmas locales: $e');
     }
   }
 

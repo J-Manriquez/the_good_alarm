@@ -76,6 +76,27 @@ class SistemaFirebaseService {
     }
   }
 
+  // Actualizar el estado de un dispositivo por deviceId
+  Future<void> updateDeviceActiveState(String userId, String deviceId, bool isActive) async {
+    try {
+      final sistema = await getSistema(userId);
+      if (sistema != null) {
+        final updatedUsuarios = sistema.usuarios.map((user) {
+          if (user['deviceId'] == deviceId) {
+            return {...user, 'isActive': isActive};
+          }
+          return user;
+        }).toList();
+        
+        final updatedSistema = sistema.copyWith(usuarios: updatedUsuarios);
+        await setSistema(userId, updatedSistema);
+      }
+    } catch (e) {
+      print('Error al actualizar estado del dispositivo: $e');
+      throw e;
+    }
+  }
+
   // Eliminar un dispositivo del sistema
   Future<void> removeDevice(String userId, String deviceName) async {
     try {

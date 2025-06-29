@@ -61,7 +61,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           
           // Navegar a la página principal
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const HomePage()),
+            MaterialPageRoute(builder: (context) {
+              return const HomePage(shouldSyncLocalAlarms: true);
+            }),
           );
         }
       } catch (e) {

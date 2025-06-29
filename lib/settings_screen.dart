@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'home_page.dart'; // To access Alarm model and potentially _formatDuration
 import 'services/auth_service.dart';
 import 'services/alarm_firebase_service.dart';
+import 'services/sistema_firebase_service.dart';
+import 'models/sistema_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 enum AlarmGroupingOption {
@@ -40,7 +42,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   final AuthService _authService = AuthService();
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
+  final SistemaFirebaseService _sistemaFirebaseService = SistemaFirebaseService();
   User? _currentUser;
+  SistemaModel? _sistemaModel;
 
   // Countdown timer variables (similar to HomePage)
   Timer? _countdownTimer;
@@ -74,6 +78,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // Verificar estado de autenticación
     _currentUser = FirebaseAuth.instance.currentUser;
+    
+    // Cargar datos del sistema si hay usuario autenticado
+    if (_currentUser != null) {
+      await _loadSistemaData();
+    }
 
     // Load alarms to calculate next alarm countdown
     final alarmsString = prefs.getStringList(_alarmsKey);
@@ -92,6 +101,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
+  }
+
+  Future<void> _loadSistemaData() async {
+    if (_currentUser == null) return;
+    
+    try {
+      _sistemaModel = await _sistemaFirebaseService.getSistema(_currentUser!.uid);
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print('Error al cargar datos del sistema: $e');
+    }
+  }
+
+  Future<void> _updateDeviceActiveState(String deviceName, bool isActive) async {
+    if (_currentUser == null || _sistemaModel == null) return;
+    
+    try {
+      await _sistemaFirebaseService.updateDeviceStatus(
+        _currentUser!.uid,
+        deviceName,
+        isActive,
+      );
+      
+      // Actualizar el modelo local
+      final updatedUsuarios = _sistemaModel!.usuarios.map((user) {
+        if (user['usuario'] == deviceName) {
+          return {...user, 'isActive': isActive};
+        }
+        return user;
+      }).toList();
+      
+      _sistemaModel = _sistemaModel!.copyWith(usuarios: updatedUsuarios);
+      
+      if (mounted) {
+        setState(() {});
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isActive 
+                ? 'Dispositivo activado correctamente'
+                : 'Dispositivo desactivado correctamente',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error al actualizar estado del dispositivo: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error al actualizar el estado del dispositivo'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // Agregar estos métodos
@@ -746,6 +813,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           //       ),
                           //     ),
                           //   ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Card para gestión de dispositivos
+                  const SizedBox(height: 16),
+                  Card(
+                    elevation: 2.0,
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Gestión de Dispositivos',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Controla el estado de activación de tus dispositivos conectados',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.grey[600]),
+                          ),
+                          const SizedBox(height: 16),
+                          if (_sistemaModel != null && _sistemaModel!.usuarios.isNotEmpty) ...
+                            _sistemaModel!.usuarios.map((user) {
+                              final deviceName = user['usuario'] as String? ?? 'Dispositivo sin nombre';
+                              final isActive = user['isActive'] as bool? ?? true;
+                              
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8.0),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.grey.shade300),
+                                  borderRadius: BorderRadius.circular(8.0),
+                                ),
+                                child: ListTile(
+                                  leading: Icon(
+                                    Icons.phone_android,
+                                    color: isActive ? Colors.green : Colors.grey,
+                                  ),
+                                  title: Text(
+                                    deviceName,
+                                    style: const TextStyle(fontWeight: FontWeight.w500),
+                                  ),
+                                  subtitle: Text(
+                                    isActive ? 'Activo' : 'Inactivo',
+                                    style: TextStyle(
+                                      color: isActive ? Colors.green : Colors.grey,
+                                    ),
+                                  ),
+                                  trailing: Switch(
+                                    value: isActive,
+                                    activeColor: Colors.green,
+                                    onChanged: (bool value) {
+                                      _updateDeviceActiveState(deviceName, value);
+                                    },
+                                  ),
+                                ),
+                              );
+                            }).toList()
+                          else
+                            Container(
+                              padding: const EdgeInsets.all(16.0),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8.0),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'No hay dispositivos conectados a esta cuenta',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),

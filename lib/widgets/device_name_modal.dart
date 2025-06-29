@@ -31,7 +31,7 @@ class _DeviceNameModalState extends State<DeviceNameModal> {
 
   Future<void> _saveDeviceName() async {
     final deviceName = _deviceNameController.text.trim();
-    
+
     if (deviceName.isEmpty) {
       setState(() {
         _errorMessage = 'El nombre del dispositivo es obligatorio';
@@ -79,22 +79,38 @@ class _DeviceNameModalState extends State<DeviceNameModal> {
     }
   }
 
-  @override
+   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async => widget.canDismiss,
       child: AlertDialog(
+        // Fondo del modal negro
+        backgroundColor: Colors.black,
+        // **Añadir el borde verde aquí usando la propiedad shape**
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16.0), // Puedes ajustar el radio si lo deseas
+          side: const BorderSide(
+            color: Colors.green, // Color del borde verde
+            width: 2.0, // Ancho del borde
+          ),
+        ),
         title: const Text(
           'Nombre del Dispositivo',
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.green, // Título en verde
+          ),
         ),
         content: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min, // Esto asegura que el modal se ajuste al contenido
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Para sincronizar tus alarmas, necesitamos identificar este dispositivo. Ingresa un nombre único para este dispositivo.',
-              style: TextStyle(fontSize: 14),
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.white, // Texto del cuerpo en blanco
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -104,7 +120,22 @@ class _DeviceNameModalState extends State<DeviceNameModal> {
                 hintText: 'Ej: Mi Teléfono, Tablet Casa, etc.',
                 border: const OutlineInputBorder(),
                 errorText: _errorMessage,
+                labelStyle: const TextStyle(color: Colors.white70), // Etiqueta del input en blanco
+                hintStyle: const TextStyle(color: Colors.white54), // Texto de ayuda en blanco
+                enabledBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white), // Borde normal en blanco
+                ),
+                focusedBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.green), // Borde enfocado en verde
+                ),
+                errorBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.red),
+                ),
+                focusedErrorBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.red),
+                ),
               ),
+              style: const TextStyle(color: Colors.white), // Color del texto de entrada en blanco
               maxLength: 30,
               textCapitalization: TextCapitalization.words,
               enabled: !_isLoading,
@@ -113,7 +144,10 @@ class _DeviceNameModalState extends State<DeviceNameModal> {
             if (_isLoading)
               const Padding(
                 padding: EdgeInsets.only(top: 8.0),
-                child: LinearProgressIndicator(),
+                child: LinearProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.green), // Animación de carga en verde
+                  backgroundColor: Colors.white30, // Fondo de la barra de carga
+                ),
               ),
           ],
         ),
@@ -121,15 +155,25 @@ class _DeviceNameModalState extends State<DeviceNameModal> {
           if (widget.canDismiss)
             TextButton(
               onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-              child: const Text('Cancelar'),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(color: Colors.white), // Texto del botón Cancelar en blanco
+              ),
             ),
           ElevatedButton(
             onPressed: _isLoading ? null : _saveDeviceName,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green, // Fondo del botón Guardar en verde
+              foregroundColor: Colors.black, // Texto del botón Guardar en negro para contraste
+            ),
             child: _isLoading
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.black), // Animación del botón en negro
+                    ),
                   )
                 : const Text('Guardar'),
           ),

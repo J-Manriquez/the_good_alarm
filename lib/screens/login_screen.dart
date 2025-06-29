@@ -50,7 +50,9 @@ class _LoginScreenState extends State<LoginScreen> {
           }
           
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const HomePage()),
+            MaterialPageRoute(builder: (context) {
+              return const HomePage(shouldSyncLocalAlarms: true);
+            }),
           );
         }
       } catch (e) {

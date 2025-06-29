@@ -85,4 +85,43 @@ class Alarm {
         ? List<Map<String, dynamic>>.from(json['activeOnlyIn'])
         : null,
   );
+  
+  // Crear una copia de la alarma con propiedades modificadas
+  Alarm copyWith({
+    int? id,
+    DateTime? time,
+    String? title,
+    String? message,
+    bool? isActive,
+    List<int>? repeatDays,
+    bool? isDaily,
+    bool? isWeekly,
+    bool? isWeekend,
+    int? snoozeCount,
+    int? maxSnoozes,
+    int? snoozeDurationMinutes,
+    bool? requireGame,
+    GameConfig? gameConfig,
+    bool? syncToCloud,
+    List<Map<String, dynamic>>? activeOnlyIn,
+  }) {
+    return Alarm(
+      id: id ?? this.id,
+      time: time ?? this.time,
+      title: title ?? this.title,
+      message: message ?? this.message,
+      isActive: isActive ?? this.isActive,
+      repeatDays: repeatDays ?? List<int>.from(this.repeatDays),
+      isDaily: isDaily ?? this.isDaily,
+      isWeekly: isWeekly ?? this.isWeekly,
+      isWeekend: isWeekend ?? this.isWeekend,
+      snoozeCount: snoozeCount ?? this.snoozeCount,
+      maxSnoozes: maxSnoozes ?? this.maxSnoozes,
+      snoozeDurationMinutes: snoozeDurationMinutes ?? this.snoozeDurationMinutes,
+      requireGame: requireGame ?? this.requireGame,
+      gameConfig: gameConfig ?? this.gameConfig,
+      syncToCloud: syncToCloud ?? this.syncToCloud,
+      activeOnlyIn: activeOnlyIn ?? this.activeOnlyIn,
+    );
+  }
 }
