@@ -15,19 +15,19 @@ class AlarmFirebaseService {
 
   // Obtener referencia a la colección de alarmas del usuario
   CollectionReference? _getAlarmsCollection(String userId) {
-    return _firestore.collection(userId).doc('datos_usuario').collection('alarmas');
+    return _firestore.collection('usuarios').doc(userId).collection('alarmas');
   }
 
   // Guardar una alarma en Firebase
-  Future<void> saveAlarm(Alarm alarm, String userCollectionId) async {
+  Future<void> saveAlarmToCloud(Alarm alarm, String userId) async {
     try {
       if (!alarm.syncToCloud) return;
-      
+
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+.collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       await alarmsCollection.doc(alarm.id.toString()).set(alarm.toJson());
     } catch (e) {
       print('Error al guardar alarma en Firebase: $e');
@@ -36,19 +36,19 @@ class AlarmFirebaseService {
   }
 
   // Actualizar una alarma en Firebase
-  Future<void> updateAlarm(Alarm alarm, String userCollectionId) async {
+  Future<void> updateAlarmToCloud(Alarm alarm, String userId) async {
     try {
       if (!alarm.syncToCloud) {
         // Si la alarma ya no debe sincronizarse, eliminarla de Firebase
-        await deleteAlarm(alarm.id, userCollectionId);
+        await deleteAlarmToCloud(alarm.id, userId);
         return;
       }
-      
+
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       await alarmsCollection.doc(alarm.id.toString()).update(alarm.toJson());
     } catch (e) {
       print('Error al actualizar alarma en Firebase: $e');
@@ -57,13 +57,13 @@ class AlarmFirebaseService {
   }
 
   // Eliminar una alarma de Firebase
-  Future<void> deleteAlarm(int alarmId, String userCollectionId) async {
+  Future<void> deleteAlarmToCloud(int alarmId, String userId) async {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+.collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       await alarmsCollection.doc(alarmId.toString()).delete();
     } catch (e) {
       print('Error al eliminar alarma de Firebase: $e');
@@ -72,13 +72,17 @@ class AlarmFirebaseService {
   }
 
   // Cambiar estado activo/inactivo de una alarma
-  Future<void> toggleAlarmStatus(int alarmId, bool isActive, String userCollectionId) async {
+  Future<void> toggleAlarmStatus(
+    int alarmId,
+    bool isActive,
+    String userId,
+  ) async {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       await alarmsCollection.doc(alarmId.toString()).update({
         'isActive': isActive,
       });
@@ -89,15 +93,15 @@ class AlarmFirebaseService {
   }
 
   // Obtener todas las alarmas del usuario desde Firebase
-  Future<List<Alarm>> getUserAlarms(String userCollectionId) async {
+  Future<List<Alarm>> getUserAlarms(String userId) async {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       final querySnapshot = await alarmsCollection.get();
-      
+
       return querySnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return Alarm.fromJson(data);
@@ -109,13 +113,13 @@ class AlarmFirebaseService {
   }
 
   // Stream para escuchar cambios en las alarmas
-  Stream<List<Alarm>> getAlarmsStream(String userCollectionId) {
+  Stream<List<Alarm>> getAlarmsStream(String userId) {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       return alarmsCollection.snapshots().map((snapshot) {
         return snapshot.docs.map((doc) {
           final data = doc.data() as Map<String, dynamic>;
@@ -129,21 +133,24 @@ class AlarmFirebaseService {
   }
 
   // Sincronizar todas las alarmas locales con Firebase
-  Future<void> syncAllAlarms(List<Alarm> localAlarms, String userCollectionId) async {
+  Future<void> syncAllAlarms(
+    List<Alarm> localAlarms,
+    String userId,
+  ) async {
     try {
       final batch = _firestore.batch();
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       for (final alarm in localAlarms) {
         if (alarm.syncToCloud) {
           final docRef = alarmsCollection.doc(alarm.id.toString());
           batch.set(docRef, alarm.toJson());
         }
       }
-      
+
       await batch.commit();
     } catch (e) {
       print('Error al sincronizar alarmas: $e');
@@ -152,13 +159,13 @@ class AlarmFirebaseService {
   }
 
   // Verificar si una alarma existe en Firebase
-  Future<bool> alarmExists(int alarmId, String userCollectionId) async {
+  Future<bool> alarmExists(int alarmId, String userId) async {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       final doc = await alarmsCollection.doc(alarmId.toString()).get();
       return doc.exists;
     } catch (e) {
@@ -168,20 +175,20 @@ class AlarmFirebaseService {
   }
 
   // Limpiar todas las alarmas de Firebase (útil para testing)
-  Future<void> clearAllAlarms(String userCollectionId) async {
+  Future<void> clearAllAlarms(String userId) async {
     try {
       final alarmsCollection = _firestore
-          .collection(userCollectionId)
-          .doc('datos_usuario')
+          .collection('usuarios')
+          .doc(userId)
           .collection('alarmas');
-      
+
       final querySnapshot = await alarmsCollection.get();
       final batch = _firestore.batch();
-      
+
       for (final doc in querySnapshot.docs) {
         batch.delete(doc.reference);
       }
-      
+
       await batch.commit();
     } catch (e) {
       print('Error al limpiar alarmas de Firebase: $e');

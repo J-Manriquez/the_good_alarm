@@ -125,6 +125,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
     
+    // Notificar a HomePage sobre el cambio de configuración
+    try {
+      // Buscar la instancia de HomePage en el stack de navegación
+      final navigator = Navigator.of(context);
+      final route = ModalRoute.of(context);
+      if (route != null) {
+        // Usar un callback o estado global para notificar el cambio
+        // Por ahora, el usuario tendrá que reiniciar la app o volver a home
+        // para que los cambios tomen efecto
+      }
+    } catch (e) {
+      print('Error al notificar cambio de sincronización: $e');
+    }
+    
     // Si se activa el guardado en la nube, sincronizar todas las alarmas
     if (value && _currentUser != null) {
       await _syncAllAlarmsToCloud();

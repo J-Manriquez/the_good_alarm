@@ -28,11 +28,11 @@ class AuthService {
       if (userCredential.user != null) {
         // Crear ID único usando nombre + fecha
         DateTime now = DateTime.now();
-        String userId = '${name.toLowerCase().replaceAll(' ', '_')}_${now.millisecondsSinceEpoch}';
+        // String userId = '${name.toLowerCase().replaceAll(' ', '_')}_${now.millisecondsSinceEpoch}';
 
         // Crear modelo de usuario
         UserModel userModel = UserModel(
-          id: userId,
+          id: userCredential.user!.uid,
           name: name,
           email: email,
           creationDate: now,
@@ -40,7 +40,7 @@ class AuthService {
         );
 
         // Crear colección del usuario en Firestore
-        await _createUserCollection(userId, userModel);
+        await _createUserCollection(userCredential.user!.uid, userModel);
 
         return userModel;
       }
