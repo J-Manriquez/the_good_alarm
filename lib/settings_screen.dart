@@ -108,6 +108,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     
     try {
       _sistemaModel = await _sistemaFirebaseService.getSistema(_currentUser!.uid);
+      
+      // Inicializar el estado de sincronización de alarmas si no existe
+      final prefs = await SharedPreferences.getInstance();
+      if (!prefs.containsKey('alarm_sync_enabled')) {
+        // Buscar el dispositivo actual y usar su estado como valor inicial
+        final currentDeviceName = prefs.getString('device_name') ?? 'Dispositivo';
+        final currentDevice = _sistemaModel?.usuarios.firstWhere(
+          (user) => user['usuario'] == currentDeviceName,
+          orElse: () => {'isActive': false},
+        );
+        final isCurrentDeviceActive = currentDevice?['isActive'] ?? false;
+        await prefs.setBool('alarm_sync_enabled', isCurrentDeviceActive);
+      }
+      
       if (mounted) {
         setState(() {});
       }
@@ -116,50 +130,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _updateDeviceActiveState(String deviceName, bool isActive) async {
-    if (_currentUser == null || _sistemaModel == null) return;
-    
-    try {
-      await _sistemaFirebaseService.updateDeviceStatus(
-        _currentUser!.uid,
-        deviceName,
-        isActive,
-      );
-      
-      // Actualizar el modelo local
-      final updatedUsuarios = _sistemaModel!.usuarios.map((user) {
-        if (user['usuario'] == deviceName) {
-          return {...user, 'isActive': isActive};
-        }
-        return user;
-      }).toList();
-      
-      _sistemaModel = _sistemaModel!.copyWith(usuarios: updatedUsuarios);
-      
-      if (mounted) {
-        setState(() {});
-      }
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isActive 
-                ? 'Dispositivo activado correctamente'
-                : 'Dispositivo desactivado correctamente',
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      print('Error al actualizar estado del dispositivo: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error al actualizar el estado del dispositivo'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+  // Función _updateDeviceActiveState eliminada - ya no se usa
 
   // Agregar estos métodos
   Future<void> _saveSnoozeDuration(int duration) async {
@@ -183,32 +154,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveCloudSyncOption(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(SettingsScreen.cloudSyncKey, value);
-
-    if (mounted) {
-      setState(() {
-        _cloudSyncEnabled = value;
-      });
-    }
-
-    // Notificar a HomePage sobre el cambio de configuración
+    if (_currentUser == null) return;
+    
     try {
-      // Buscar la instancia de HomePage en el stack de navegación
-      final navigator = Navigator.of(context);
-      final route = ModalRoute.of(context);
-      if (route != null) {
-        // Usar un callback o estado global para notificar el cambio
-        // Por ahora, el usuario tendrá que reiniciar la app o volver a home
-        // para que los cambios tomen efecto
-      }
-    } catch (e) {
-      print('Error al notificar cambio de sincronización: $e');
-    }
+      // Actualizar localmente
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(SettingsScreen.cloudSyncKey, value);
+      
+      // Actualizar en Firebase para el dispositivo actual
+      final currentDeviceName = prefs.getString('device_name') ?? 'Dispositivo';
+      await _sistemaFirebaseService.updateDeviceCloudSync(
+        _currentUser!.uid,
+        currentDeviceName,
+        value,
+      );
 
-    // Si se activa el guardado en la nube, sincronizar todas las alarmas
-    if (value && _currentUser != null) {
-      await _syncAllAlarmsToCloud();
+      if (mounted) {
+        setState(() {
+          _cloudSyncEnabled = value;
+        });
+      }
+
+      // Notificar a HomePage sobre el cambio de configuración
+      await prefs.setBool('alarm_sync_enabled', value);
+
+      // Si se activa el guardado en la nube, sincronizar todas las alarmas
+      if (value) {
+        await _syncAllAlarmsToCloud();
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value 
+                ? 'Sincronización de alarmas activada'
+                : 'Sincronización de alarmas desactivada',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error al actualizar sincronización: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error al actualizar la sincronización'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -752,72 +744,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ],
-                // Card para guardado en la nube
+                // Card para gestión de dispositivos eliminada la card de guardado en la nube
                 if (_currentUser != null) ...[
                   const SizedBox(height: 16),
-                  Card(
-                    elevation: 2.0,
-                    margin: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Guardado en la Nube',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _currentUser != null
-                                ? 'Sincroniza tus alarmas con Firebase'
-                                : 'Inicia sesión para habilitar esta función',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: Colors.grey[600]),
-                          ),
-                          const SizedBox(height: 16),
-                          SwitchListTile(
-                            title: Text(
-                              'Activar guardado en la nube',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            subtitle: Text(
-                              _currentUser != null
-                                  ? 'Las alarmas se guardarán automáticamente en Firebase'
-                                  : 'Requiere iniciar sesión',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: Colors.grey[600]),
-                            ),
-                            value: _cloudSyncEnabled && _currentUser != null,
-                            activeColor: Colors.green,
-                            inactiveThumbColor: Colors.grey,
-                            onChanged: _currentUser != null
-                                ? (bool value) {
-                                    _saveCloudSyncOption(value);
-                                  }
-                                : null,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                          // if (_currentUser == null)
-                          //   Padding(
-                          //     padding: const EdgeInsets.only(top: 8.0),
-                          //     child: ElevatedButton.icon(
-                          //       onPressed: () {
-                          //         Navigator.of(context).pushNamed('/login');
-                          //       },
-                          //       icon: const Icon(Icons.login),
-                          //       label: const Text('Iniciar Sesión'),
-                          //       style: ElevatedButton.styleFrom(
-                          //         backgroundColor: Colors.blue,
-                          //         foregroundColor: Colors.white,
-                          //       ),
-                          //     ),
-                          //   ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Card para gestión de dispositivos
+                  // Card(
+                  //   elevation: 2.0,
+                  //   margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  //   child: Padding(
+                  //     padding: const EdgeInsets.all(16.0),
+                  //     child: Column(
+                  //       crossAxisAlignment: CrossAxisAlignment.start,
+                  //       children: [
+                  //         Text(
+                  //           'Guardado en la Nube',
+                  //           style: Theme.of(context).textTheme.titleLarge,
+                  //         ),
+                  //         const SizedBox(height: 8),
+                  //         Text(
+                  //           _currentUser != null
+                  //               ? 'Sincroniza tus alarmas con Firebase'
+                  //               : 'Inicia sesión para habilitar esta función',
+                  //           style: Theme.of(context).textTheme.bodyMedium
+                  //               ?.copyWith(color: Colors.grey[600]),
+                  //         ),
+                  //         const SizedBox(height: 16),
+                  //         SwitchListTile(
+                  //           title: Text(
+                  //             'Activar guardado en la nube',
+                  //             style: Theme.of(context).textTheme.titleMedium,
+                  //           ),
+                  //           subtitle: Text(
+                  //             _currentUser != null
+                  //                 ? 'Las alarmas se guardarán automáticamente en Firebase'
+                  //                 : 'Requiere iniciar sesión',
+                  //             style: Theme.of(context).textTheme.bodySmall
+                  //                 ?.copyWith(color: Colors.grey[600]),
+                  //           ),
+                  //           value: _cloudSyncEnabled && _currentUser != null,
+                  //           activeColor: Colors.green,
+                  //           inactiveThumbColor: Colors.grey,
+                  //           onChanged: _currentUser != null
+                  //               ? (bool value) {
+                  //                   _saveCloudSyncOption(value);
+                  //                 }
+                  //               : null,
+                  //           contentPadding: EdgeInsets.zero,
+                  //         ),
+                  //         // if (_currentUser == null)
+                  //         //   Padding(
+                  //         //     padding: const EdgeInsets.only(top: 8.0),
+                  //         //     child: ElevatedButton.icon(
+                  //         //       onPressed: () {
+                  //         //         Navigator.of(context).pushNamed('/login');
+                  //         //       },
+                  //         //       icon: const Icon(Icons.login),
+                  //         //       label: const Text('Iniciar Sesión'),
+                  //         //       style: ElevatedButton.styleFrom(
+                  //         //         backgroundColor: Colors.blue,
+                  //         //         foregroundColor: Colors.white,
+                  //         //       ),
+                  //         //     ),
+                  //         //   ),
+                  //       ],
+                  //     ),
+                  //   ),
+                  // ),
+                  // // Card para gestión de dispositivos
                   const SizedBox(height: 16),
                   Card(
                     elevation: 2.0,
@@ -828,12 +820,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Gestión de Dispositivos',
+                            'Sincronización entre Dispositivos',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Controla el estado de activación de tus dispositivos conectados',
+                            'Controla la sincronización de alarmas entre tus dispositivos conectados',
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(color: Colors.grey[600]),
                           ),
@@ -842,37 +834,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _sistemaModel!.usuarios.map((user) {
                               final deviceName = user['usuario'] as String? ?? 'Dispositivo sin nombre';
                               final isActive = user['isActive'] as bool? ?? true;
+                              final cloudSyncEnabled = user['_cloudSyncEnabled'] as bool? ?? false;
                               
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 8.0),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey.shade300),
-                                  borderRadius: BorderRadius.circular(8.0),
-                                ),
-                                child: ListTile(
-                                  leading: Icon(
-                                    Icons.phone_android,
-                                    color: isActive ? Colors.green : Colors.grey,
-                                  ),
-                                  title: Text(
-                                    deviceName,
-                                    style: const TextStyle(fontWeight: FontWeight.w500),
-                                  ),
-                                  subtitle: Text(
-                                    isActive ? 'Activo' : 'Inactivo',
-                                    style: TextStyle(
-                                      color: isActive ? Colors.green : Colors.grey,
+                              return FutureBuilder<String?>(
+                                future: SharedPreferences.getInstance().then((prefs) => prefs.getString('device_name')),
+                                builder: (context, snapshot) {
+                                  final currentDeviceName = snapshot.data ?? 'Dispositivo';
+                                  final isCurrentDevice = deviceName == currentDeviceName;
+                                  
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 8.0),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey.shade300),
+                                      borderRadius: BorderRadius.circular(8.0),
                                     ),
-                                  ),
-                                  trailing: Switch(
-                                    value: isActive,
-                                    activeColor: Colors.green,
-                                    onChanged: (bool value) {
-                                      _updateDeviceActiveState(deviceName, value);
-                                    },
-                                  ),
-                                ),
-                              );
+                                    child: ListTile(
+                                      leading: Icon(
+                                        Icons.phone_android,
+                                        color: (isCurrentDevice ? cloudSyncEnabled : isActive) ? Colors.green : Colors.grey,
+                                      ),
+                                      title: Text(
+                                        deviceName + (isCurrentDevice ? ' (Este dispositivo)' : ''),
+                                        style: const TextStyle(fontWeight: FontWeight.w500),
+                                      ),
+                                      subtitle: Text(
+                                        (isCurrentDevice ? cloudSyncEnabled : isActive) 
+                                            ? 'Sincronización activada' 
+                                            : 'Sincronización desactivada',
+                                        style: TextStyle(
+                                          color: (isCurrentDevice ? cloudSyncEnabled : isActive) ? Colors.green : Colors.grey,
+                                        ),
+                                      ),
+                                      trailing: Switch(
+                                        value: _cloudSyncEnabled && _currentUser != null,
+                                        activeColor: Colors.green,
+                                        onChanged: isCurrentDevice ? (bool value) {
+                                          _saveCloudSyncOption(value);
+                                        } : null, // Solo el dispositivo actual puede cambiar
+                                       ),
+                                     ),
+                                   );
+                                 },
+                               );
                             }).toList()
                           else
                             Container(

@@ -94,9 +94,12 @@ class _HomePageState extends State<HomePage> {
 
     await _loadAlarms(); // Cargar alarmas después de la configuración
 
-    // Inicializar sincronización con Firebase si está habilitada
-    if (_cloudSyncEnabled && _currentUser != null) {
-      await _initializeFirebaseSync();
+    // Inicializar escucha de dispositivos activos (siempre activada si hay usuario)
+    if (_currentUser != null) {
+      await _initializeDeviceStatusListener();
+      
+      // Verificar si se necesita mostrar el modal de nombre de dispositivo
+      _checkDeviceNameModal();
       
       // Sincronizar alarmas locales existentes si es necesario
       if (widget.shouldSyncLocalAlarms) {
@@ -104,14 +107,20 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
+    // Leer el estado de sincronización de alarmas desde SharedPreferences
+    final alarmSyncEnabled = prefs.getBool('alarm_sync_enabled') ?? false;
+    
+    // Inicializar sincronización de alarmas con Firebase si está habilitada
+    if (_cloudSyncEnabled && _currentUser != null && alarmSyncEnabled) {
+      await _initializeFirebaseSync();
+    }
+    
+    // Configurar listener para cambios en el estado de sincronización
+    _setupSyncStateListener();
+
     // Inicializar el estado de expansión para los grupos si es necesario
     if (_currentGroupingOption != AlarmGroupingOption.none) {
       _initializeGroupStates();
-    }
-
-    // Verificar si se necesita mostrar el modal de nombre de dispositivo
-    if (_currentUser != null) {
-      _checkDeviceNameModal();
     }
 
     if (mounted) setState(() {});
@@ -304,17 +313,65 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // NUEVO: Inicializar escucha de dispositivos activos (siempre activada)
+  Future<void> _initializeDeviceStatusListener() async {
+    if (_currentUser == null) return;
+    
+    try {
+      // Asegurar que el dispositivo esté registrado
+      await _ensureDeviceRegistered();
+      print('Escucha de dispositivos activos inicializada');
+    } catch (e) {
+      print('Error al inicializar escucha de dispositivos: $e');
+    }
+  }
+
+  // NUEVO: Asegurar que el dispositivo esté registrado
+  Future<void> _ensureDeviceRegistered() async {
+    if (_currentUser == null) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final deviceName = prefs.getString('device_name');
+      
+      if (deviceName != null && deviceName.isNotEmpty) {
+        // Registrar o actualizar el dispositivo en Firebase
+        await _sistemaFirebaseService.updateDeviceStatus(
+          _currentUser!.uid,
+          deviceName,
+          true, // Marcar como activo al iniciar sesión
+        );
+        print('Dispositivo registrado como activo: $deviceName');
+      }
+    } catch (e) {
+      print('Error al registrar dispositivo: $e');
+    }
+  }
+
   // Método público para activar/desactivar sincronización desde settings
   Future<void> updateCloudSyncStatus(bool enabled) async {
     _cloudSyncEnabled = enabled;
     _currentUser = FirebaseAuth.instance.currentUser;
 
     if (enabled && _currentUser != null) {
-      await _initializeFirebaseSync();
+      // Verificar también el estado de sincronización de alarmas
+      final prefs = await SharedPreferences.getInstance();
+      final alarmSyncEnabled = prefs.getBool('alarm_sync_enabled') ?? false;
+      
+      if (alarmSyncEnabled) {
+        // Solo inicializar sincronización de alarmas si también está habilitada
+        await _initializeFirebaseSync();
+        print('Sincronización de alarmas activada');
+      }
     } else {
+      // Solo cancelar sincronización de alarmas, mantener escucha de dispositivos
       _firebaseAlarmsSubscription?.cancel();
       _firebaseAlarmsSubscription = null;
+      print('Sincronización de alarmas desactivada');
     }
+    
+    // La escucha de dispositivos activos permanece siempre activada
+    // mientras haya un usuario autenticado
   }
 
   // Método para manejar cambios de autenticación
@@ -328,11 +385,44 @@ class _HomePageState extends State<HomePage> {
 
       _currentUser = newUser;
 
-      // Reinicializar sincronización si está habilitada y hay usuario
+      // Inicializar escucha de dispositivos si hay usuario
+      if (_currentUser != null) {
+        await _initializeDeviceStatusListener();
+      }
+
+      // Reinicializar sincronización de alarmas si está habilitada y hay usuario
       if (_cloudSyncEnabled && _currentUser != null) {
         await _initializeFirebaseSync();
       }
     }
+  }
+
+  // Configurar listener para cambios en el estado de sincronización
+  void _setupSyncStateListener() {
+    // Crear un timer que verifique periódicamente el estado de sincronización
+    Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      final prefs = await SharedPreferences.getInstance();
+      final alarmSyncEnabled = prefs.getBool('alarm_sync_enabled') ?? false;
+      
+      // Verificar si el estado ha cambiado
+      final isCurrentlySyncing = _firebaseAlarmsSubscription != null;
+      
+      if (alarmSyncEnabled && !isCurrentlySyncing && _cloudSyncEnabled && _currentUser != null) {
+        // Activar sincronización
+        await _initializeFirebaseSync();
+        print('Sincronización de alarmas activada automáticamente');
+      } else if (!alarmSyncEnabled && isCurrentlySyncing) {
+        // Desactivar sincronización
+        _firebaseAlarmsSubscription?.cancel();
+        _firebaseAlarmsSubscription = null;
+        print('Sincronización de alarmas desactivada automáticamente');
+      }
+    });
   }
 
   // NUEVO: Obtener alarmas pospuestas

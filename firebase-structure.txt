@@ -1,0 +1,56 @@
+# Estructura de Almacenamiento en Firebase para The Good Alarm
+
+firestore/
+    │
+    ├── usuarios/ (Collection)
+    │    │
+    │    ├── {userId}/ (Document - ID del usuario autenticado)
+    │    │    │
+    │    │    ├── alarmas/ (Subcollection - Alarmas del usuario)
+    │    │    │    │
+    │    │    │    ├── {alarmId}/ (Document - ID de la alarma)
+    │    │    │    │    ├── id: Number
+    │    │    │    │    ├── time: String (ISO 8601)
+    │    │    │    │    ├── title: String
+    │    │    │    │    ├── message: String
+    │    │    │    │    ├── isActive: Boolean
+    │    │    │    │    ├── repeatDays: Array<Number>
+    │    │    │    │    ├── isDaily: Boolean
+    │    │    │    │    ├── isWeekly: Boolean
+    │    │    │    │    ├── isWeekend: Boolean
+    │    │    │    │    ├── snoozeCount: Number
+    │    │    │    │    ├── maxSnoozes: Number
+    │    │    │    │    ├── snoozeDurationMinutes: Number
+    │    │    │    │    ├── requireGame: Boolean
+    │    │    │    │    ├── gameConfig: Map<String, dynamic> (nullable)
+    │    │    │    │    │    ├── gameType: String (Enum: memorice, equations, sequence)
+    │    │    │    │    │    ├── lives: Number
+    │    │    │    │    │    ├── parameter: Number
+    │    │    │    │    │    ├── repetitions: Number
+    │    │    │    │    │    ├── inputType: String (Enum: manual, multipleChoice)
+    │    │    │    │    │    ├── operationType: String (Enum: addSubtract, addSubtractMultiplyDivide, multiplyDivide)
+    │    │    │    │    │    └── subEquations: Number
+    │    │    │    │    ├── syncToCloud: Boolean
+    │    │    │    │    └── activeOnlyIn: Array<Map<String, dynamic>> (nullable)
+    │    │    │
+    │    │    └── usuario-sistema/ (Subcollection - Datos del sistema y usuario)
+    │    │         │
+    │    │         ├── datos-usuario/ (Document - Información del usuario)
+    │    │         │    ├── id: String
+    │    │         │    ├── name: String
+    │    │         │    ├── email: String
+    │    │         │    └── creationDate: String (ISO 8601)
+    │    │         │
+    │    │         └── sistema/ (Document - Configuración del sistema)
+    │    │              └── usuarios: Array<Map<String, dynamic>>
+    │    │                   ├── usuario: String (Nombre del dispositivo)
+    │    │                   ├── isActive: Boolean
+    │    │                   └── _cloudSyncEnabled: Boolean
+    │
+    └── authentication/ (Firebase Authentication)
+         └── users
+              ├── {userId}
+              │    ├── email
+              │    ├── password (hash)
+              │    └── creationTime
+              └── ...

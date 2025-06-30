@@ -33,11 +33,12 @@ class SistemaModel {
     return usuarios.any((device) => device['usuario'] == deviceName);
   }
 
-  void addDevice(String deviceName, bool isActive) {
+  void addDevice(String deviceName, bool isActive, {bool cloudSyncEnabled = false}) {
     if (!hasDevice(deviceName)) {
       usuarios.add({
         'usuario': deviceName,
         'isActive': isActive,
+        '_cloudSyncEnabled': cloudSyncEnabled,
       });
     }
   }
@@ -46,6 +47,13 @@ class SistemaModel {
     final index = usuarios.indexWhere((device) => device['usuario'] == deviceName);
     if (index != -1) {
       usuarios[index]['isActive'] = isActive;
+    }
+  }
+
+  void updateDeviceCloudSync(String deviceName, bool cloudSyncEnabled) {
+    final index = usuarios.indexWhere((device) => device['usuario'] == deviceName);
+    if (index != -1) {
+      usuarios[index]['_cloudSyncEnabled'] = cloudSyncEnabled;
     }
   }
 

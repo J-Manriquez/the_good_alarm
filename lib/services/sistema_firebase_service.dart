@@ -40,11 +40,11 @@ class SistemaFirebaseService {
   }
 
   // Añadir un dispositivo al sistema
-  Future<void> addDevice(String userId, String deviceName, bool isActive) async {
+  Future<void> addDevice(String userId, String deviceName, bool isActive, {bool cloudSyncEnabled = false}) async {
     try {
       final sistema = await getSistema(userId);
       if (sistema != null) {
-        sistema.addDevice(deviceName, isActive);
+        sistema.addDevice(deviceName, isActive, cloudSyncEnabled: cloudSyncEnabled);
         await setSistema(userId, sistema);
       } else {
         // Crear nuevo documento sistema
@@ -52,6 +52,7 @@ class SistemaFirebaseService {
           {
             'usuario': deviceName,
             'isActive': isActive,
+            '_cloudSyncEnabled': cloudSyncEnabled,
           }
         ]);
         await setSistema(userId, newSistema);
@@ -72,6 +73,20 @@ class SistemaFirebaseService {
       }
     } catch (e) {
       print('Error al actualizar estado del dispositivo: $e');
+      throw e;
+    }
+  }
+
+  // Actualizar el estado de cloudSync de un dispositivo
+  Future<void> updateDeviceCloudSync(String userId, String deviceName, bool cloudSyncEnabled) async {
+    try {
+      final sistema = await getSistema(userId);
+      if (sistema != null) {
+        sistema.updateDeviceCloudSync(deviceName, cloudSyncEnabled);
+        await setSistema(userId, sistema);
+      }
+    } catch (e) {
+      print('Error al actualizar cloudSync del dispositivo: $e');
       throw e;
     }
   }
