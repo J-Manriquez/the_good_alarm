@@ -205,7 +205,11 @@ class MainActivity : FlutterActivity() {
                     val alarmId = call.argument<Int>("alarmId") ?: 0
                     Log.d("MainActivity", "Stopping alarm: $alarmId")
                     AlarmReceiver.stopAlarmSound()
+                    AlarmReceiver.stopVibration(this)
+                    
+                    // Cancelar la alarma y todas las notificaciones asociadas
                     cancelAlarm(alarmId)
+                    
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmId))
                     result.success(true)
                 }
@@ -215,7 +219,7 @@ class MainActivity : FlutterActivity() {
                     val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
                     val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
                     
-                    // AGREGAR LOGS DETALLADOS
+                    // Logs detallados
                     Log.d("MainActivity", "Received snooze parameters:")
                     Log.d("MainActivity", "  - alarmId: $alarmId")
                     Log.d("MainActivity", "  - maxSnoozes: $maxSnoozes")
@@ -225,7 +229,13 @@ class MainActivity : FlutterActivity() {
                     
                     if (alarmId != null) {
                         AlarmReceiver.stopAlarmSound()
+                        AlarmReceiver.stopVibration(this)
+                        
+                        // Cancelar la alarma y todas las notificaciones asociadas
                         cancelAlarm(alarmId)
+                        
+                        // Cancel all notifications for this alarm
+                        cancelAllNotificationsForAlarm(alarmId)
                         
                         val calendar = Calendar.getInstance()
                         Log.d("MainActivity", "Current time before adding snooze: ${calendar.time}")
@@ -288,8 +298,28 @@ class MainActivity : FlutterActivity() {
                 "vibrate" -> {
                     val pattern = call.argument<List<Long>>("pattern")?.toLongArray() 
                         ?: longArrayOf(0, 500, 500, 500)
+                    Log.d("MainActivity", "Vibrate method called from Flutter with pattern: ${pattern.contentToString()}")
                     vibrate(pattern)
                     result.success(true)
+                }
+                "testVibration" -> {
+                    Log.d("MainActivity", "Test vibration method called from Flutter")
+                    // Patrón de prueba: vibrar 3 veces con pausas
+                    val testPattern = longArrayOf(0, 500, 200, 500, 200, 500)
+                    vibrate(testPattern)
+                    result.success(true)
+                }
+                "checkVibratorCapability" -> {
+                    val hasVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                        vibratorManager?.defaultVibrator?.hasVibrator() == true
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                        vibrator?.hasVibrator() == true
+                    }
+                    Log.d("MainActivity", "Device vibrator capability: $hasVibrator")
+                    result.success(hasVibrator)
                 }
                 "restoreAlarmsAfterBoot" -> {
                     val alarmsJson = call.argument<String>("alarmsData")
@@ -350,7 +380,14 @@ class MainActivity : FlutterActivity() {
                 if (alarmIdFromIntent != -1) {
                     Log.d("MainActivity", "Stopping alarm from notification: $alarmIdFromIntent")
                     AlarmReceiver.stopAlarmSound()
+                    AlarmReceiver.stopVibration(this)
+                    
+                    // Cancelar la alarma y todas las notificaciones asociadas
                     cancelAlarm(alarmIdFromIntent)
+                    
+                    // Cancel all notifications for this alarm
+                    cancelAllNotificationsForAlarm(alarmIdFromIntent)
+                    
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallyStopped")
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmIdFromIntent))
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
@@ -361,7 +398,11 @@ class MainActivity : FlutterActivity() {
                 if (alarmIdFromIntent != -1) {
                     Log.d("MainActivity", "Snoozing alarm from notification: $alarmIdFromIntent")
                     AlarmReceiver.stopAlarmSound()
+                    AlarmReceiver.stopVibration(this)
                     cancelAlarm(alarmIdFromIntent)
+                    
+                    // Cancel all notifications for this alarm
+                    cancelAllNotificationsForAlarm(alarmIdFromIntent)
                     
                     val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
                     val calendar = Calendar.getInstance()
@@ -502,10 +543,68 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun cancelAllNotificationsForAlarm(alarmId: Int) {
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            // Cancel notifications using direct and related IDs
+            val notificationIds = listOf(
+                alarmId,
+                alarmId + 1000,
+                alarmId + 2000,
+                alarmId + 3000,
+                alarmId + 10000,
+                alarmId + 20000
+            )
+            
+            notificationIds.forEach { notificationId ->
+                try {
+                    notificationManager.cancel(notificationId)
+                    Log.d("MainActivity", "Cancelled notification with ID: $notificationId")
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error cancelling notification $notificationId: ${e.message}")
+                }
+            }
+            
+            // Check SharedPreferences for saved notification IDs
+            val prefs = getSharedPreferences("alarm_notifications", Context.MODE_PRIVATE)
+            val savedNotificationId = prefs.getInt("notification_$alarmId", -1)
+            if (savedNotificationId != -1) {
+                notificationManager.cancel(savedNotificationId)
+                Log.d("MainActivity", "Cancelled saved notification with ID: $savedNotificationId")
+                prefs.edit().remove("notification_$alarmId").apply()
+            }
+            
+            // On Android M+, iterate through active notifications to cancel any matching the alarmId
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    val activeNotifications = notificationManager.activeNotifications
+                    activeNotifications.forEach { notification ->
+                        if (notification.id == alarmId || 
+                            notification.id == alarmId + 1000 ||
+                            notification.id == alarmId + 2000 ||
+                            notification.id == alarmId + 3000 ||
+                            notification.id == alarmId + 10000 ||
+                            notification.id == alarmId + 20000) {
+                            notificationManager.cancel(notification.id)
+                            Log.d("MainActivity", "Cancelled active notification with ID: ${notification.id}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error checking active notifications: ${e.message}")
+                }
+            }
+            
+            Log.d("MainActivity", "All notifications canceled for alarmId: $alarmId")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error canceling notifications for alarmId: $alarmId", e)
+        }
+    }
+
     private fun cancelAlarm(alarmId: Int) {
         try {
             val intent = Intent(this, AlarmReceiver::class.java).apply {
-                action = ALARM_ACTION  // Agregar esta línea
+                action = ALARM_ACTION
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
@@ -515,9 +614,13 @@ class MainActivity : FlutterActivity() {
             )
             alarmManager.cancel(pendingIntent)
             pendingIntent.cancel()
-            Log.d("MainActivity", "Alarm canceled successfully")
+
+            // Use the new centralized notification cancellation method
+            cancelAllNotificationsForAlarm(alarmId)
+
+            Log.d("MainActivity", "Alarm and all related notifications canceled successfully for alarmId: $alarmId")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error canceling alarm", e)
+            Log.e("MainActivity", "Error canceling alarm for alarmId: $alarmId", e)
         }
     }
 
@@ -769,23 +872,52 @@ class MainActivity : FlutterActivity() {
     
     private fun vibrate(pattern: LongArray) {
         try {
+            Log.d("MainActivity", "Starting vibration with pattern: ${pattern.contentToString()}")
+            
+            // Verificar si el dispositivo tiene vibrador
+            val hasVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vibratorManager?.defaultVibrator?.hasVibrator() == true
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                vibrator?.hasVibrator() == true
+            }
+            
+            if (!hasVibrator) {
+                Log.w("MainActivity", "Device does not have vibrator capability")
+                return
+            }
+            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
                 val vibrator = vibratorManager.defaultVibrator
-                val effect = VibrationEffect.createWaveform(pattern, 0)
+                val effect = VibrationEffect.createWaveform(pattern, -1) // -1 = no repeat
                 vibrator.vibrate(effect)
+                Log.d("MainActivity", "Vibration started with VibratorManager (API 31+)")
             } else {
                 val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = VibrationEffect.createWaveform(pattern, 0)
+                    val effect = VibrationEffect.createWaveform(pattern, -1) // -1 = no repeat
                     vibrator.vibrate(effect)
+                    Log.d("MainActivity", "Vibration started with VibrationEffect (API 26+)")
                 } else {
                     @Suppress("DEPRECATION")
-                    vibrator.vibrate(pattern, 0)
+                    vibrator.vibrate(pattern, -1) // -1 = no repeat
+                    Log.d("MainActivity", "Vibration started with deprecated method (API < 26)")
                 }
             }
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error vibrating", e)
+            Log.e("MainActivity", "Error vibrating: ${e.message}", e)
+            // Intentar vibración simple como fallback
+            try {
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                vibrator?.vibrate(1000) // Vibrar por 1 segundo como fallback
+                Log.d("MainActivity", "Fallback vibration started")
+            } catch (fallbackException: Exception) {
+                Log.e("MainActivity", "Fallback vibration also failed: ${fallbackException.message}")
+            }
         }
     }
     

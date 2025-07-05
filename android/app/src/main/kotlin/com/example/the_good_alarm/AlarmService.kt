@@ -23,8 +23,33 @@ class AlarmService : Service() {
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("AlarmService", "onStartCommand called")
+        
+        // Optional: Clean up orphaned notifications
+        cleanupOrphanedNotifications()
+        
         // Asegurar que el servicio se reinicie si es terminado
         return START_STICKY
+    }
+    
+    private fun cleanupOrphanedNotifications() {
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            // On Android M+, check for active alarm notifications
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val activeNotifications = notificationManager.activeNotifications
+                activeNotifications.forEach { notification ->
+                    // Log active alarm notifications (IDs that might be alarm-related)
+                    if (notification.id != NOTIFICATION_ID) {
+                        Log.d("AlarmService", "Found active alarm notification with ID: ${notification.id}")
+                        // Note: We're only logging here. Full cleanup logic could be implemented
+                        // if we had a way to determine which notifications are truly orphaned
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmService", "Error during notification cleanup: ${e.message}")
+        }
     }
     
     override fun onTaskRemoved(rootIntent: Intent?) {

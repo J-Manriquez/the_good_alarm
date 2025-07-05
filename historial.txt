@@ -1,0 +1,76 @@
+# Propuesta de Implementación del Historial de Alarmas
+He analizado todos los scripts del proyecto y he diseñado una estructura completa para implementar el historial de alarmas. Aquí está mi propuesta:
+
+## Datos Identificados para Capturar
+Basándome en el análisis del código, he identificado los siguientes datos relevantes:
+
+### Datos de la Alarma
+- Información básica : ID, título, mensaje, hora programada
+- Configuración : maxSnoozes, snoozeDurationMinutes, requireGame, gameConfig
+- Tipo de repetición : isDaily, isWeekly, isWeekend, repeatDays
+### Datos de Uso
+- Timestamp : Momento exacto en que sonó la alarma
+- Acción final : stopped (apagada), snoozed (pospuesta), dismissed (descartada)
+- Conteo de snoozes : Cuántas veces fue pospuesta antes de la acción final
+- Duración total : Tiempo desde que sonó hasta que se apagó definitivamente
+- Información del dispositivo : Nombre del dispositivo donde se activó
+- Contexto temporal : Día de la semana, si era programada o manual
+### Datos de Snooze
+- Timestamp de cada snooze : Momento exacto de cada posposición
+- Número de snooze : Secuencia (1, 2, 3...)
+- Duración configurada : Minutos de posposición
+- Próxima hora de alarma : Cuándo sonará después del snooze
+### Métricas de Juegos Ecuaciones
+- Errores totales, respuestas correctas
+- Tipo de operación, tipo de entrada
+- Ecuaciones completadas, tiempo promedio de respuesta Memorice
+- Pares totales, pares encontrados
+- Coincidencias incorrectas, eficiencia de memoria
+- Tiempo por intento Secuencia
+- Longitud de secuencia, errores de secuencia
+- Puntuación de reconocimiento de patrones
+- Tiempo de reacción
+## Estructura de Almacenamiento Implementada
+He actualizado el archivo `firebase-structure.txt` con la nueva estructura historial-alarmas/ que incluye:
+
+### Nivel Principal ({alarmId}/)
+- Resumen estadístico de la alarma
+- Contadores totales (usos, snoozes, intentos de juego)
+- Métricas agregadas (tiempo promedio de juego)
+- Control de versiones de configuración
+### Subcollecciones
+1. usos/ : Cada documento representa un uso individual de la alarma
+   
+   - Información completa del evento
+   - Configuración de la alarma en ese momento
+   - Referencias a snoozes y juegos de ese uso
+2. snoozeHistory/ : Historial detallado de cada posposición
+   
+   - Timestamp, duración, próxima alarma
+   - Secuencia numerada de snoozes
+3. gameHistory/ : Métricas detalladas de cada intento de juego
+   
+   - Configuración del juego, duración, éxito/fallo
+   - Métricas específicas por tipo de juego
+   - Datos de rendimiento (errores, aciertos, tiempo de respuesta)
+4. configuraciones-historicas/ : Versionado de cambios
+   
+   - Historial de modificaciones a la alarma
+   - Quién y cuándo se hicieron los cambios
+## Ventajas de esta Estructura
+1. Escalabilidad : Maneja alarmas repetitivas y únicas eficientemente
+2. Versionado : Preserva historial cuando se editan alarmas
+3. Análisis detallado : Permite generar estadísticas y patrones de uso
+4. Flexibilidad : Estructura modular que permite consultas específicas
+5. Rendimiento : Subcollecciones evitan documentos excesivamente grandes
+## Casos de Uso Cubiertos
+- ✅ Alarmas repetitivas con múltiples usos
+- ✅ Alarmas únicas usadas varias veces
+- ✅ Historial preservado al editar alarmas
+- ✅ Métricas de juegos por tipo y configuración
+- ✅ Análisis de patrones de snooze
+- ✅ Estadísticas de rendimiento por dispositivo
+Esta estructura está lista para ser implementada y proporcionará datos valiosos para análisis futuros del comportamiento del usuario con las alarmas.
+
+## Pasos de Implementación
+añade aqui los pasos realizados y los que faltan por implementar

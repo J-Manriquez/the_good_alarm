@@ -29,14 +29,80 @@ class AlarmReceiver : BroadcastReceiver() {
         fun stopAlarmSound() {
             try {
                 Log.d("AlarmReceiver", "Stopping alarm sound and vibration")
-                currentRingtone?.stop()
+                
+                // Detener el sonido
+                currentRingtone?.let { ringtone ->
+                    if (ringtone.isPlaying) {
+                        ringtone.stop()
+                        Log.d("AlarmReceiver", "Ringtone stopped successfully")
+                    } else {
+                        Log.d("AlarmReceiver", "Ringtone was not playing")
+                    }
+                }
                 currentRingtone = null
+                
+                // Detener la vibración
+                currentVibrator?.let { vibrator ->
+                    vibrator.cancel()
+                    Log.d("AlarmReceiver", "Vibration cancelled successfully")
+                }
+                currentVibrator = null
+                
+                Log.d("AlarmReceiver", "Alarm sound and vibration stopped completely")
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error stopping alarm sound and vibration: ${e.message}", e)
+            }
+        }
+        
+        fun stopVibration(context: Context) {
+            try {
+                Log.d("AlarmReceiver", "Stopping vibration with context fallback")
+                
+                // Intentar detener con el vibrador actual
                 currentVibrator?.cancel()
                 currentVibrator = null
-                Log.d("AlarmReceiver", "Alarm sound and vibration stopped")
+                
+                // Fallback: obtener vibrador del sistema y cancelar
+                val systemVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vibratorManager?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
+                systemVibrator?.cancel()
+                
+                Log.d("AlarmReceiver", "Vibration stopped with context fallback")
             } catch (e: Exception) {
-                Log.e("AlarmReceiver", "Error stopping alarm sound", e)
+                Log.e("AlarmReceiver", "Error stopping vibration with context: ${e.message}", e)
             }
+        }
+
+        fun cancelAllNotificationsForAlarm(context: Context, alarmId: Int) {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            // Cancel main notification and all related offset IDs
+            val notificationIds = listOf(
+                alarmId,
+                alarmId + 1000,
+                alarmId + 2000,
+                alarmId + 3000,
+                alarmId + 10000,
+                alarmId + 20000
+            )
+            
+            notificationIds.forEach { notificationId ->
+                try {
+                    notificationManager.cancel(notificationId)
+                    Log.d("AlarmReceiver", "Cancelled notification with ID: $notificationId")
+                } catch (e: Exception) {
+                    Log.e("AlarmReceiver", "Error cancelling notification $notificationId: ${e.message}")
+                }
+            }
+            
+            // Clear saved notification ID from SharedPreferences
+            val prefs = context.getSharedPreferences("alarm_notifications", Context.MODE_PRIVATE)
+            prefs.edit().remove("notification_$alarmId").apply()
         }
     }
 
@@ -54,8 +120,8 @@ class AlarmReceiver : BroadcastReceiver() {
             STOP_ACTION -> {
                 Log.d("AlarmReceiver", "Stop action received for alarmId: $alarmId")
                 stopAlarmSound()
-                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(alarmId) 
+                cancelAllNotificationsForAlarm(context, alarmId)
+                
                 val mainActivityIntent = Intent(context, MainActivity::class.java).apply {
                     action = "STOP_ALARM_FROM_NOTIFICATION"
                     putExtra("alarmId", alarmId)
@@ -67,12 +133,12 @@ class AlarmReceiver : BroadcastReceiver() {
             SNOOZE_ACTION -> {
                 Log.d("AlarmReceiver", "Snooze action received for alarmId: $alarmId")
                 stopAlarmSound()
-                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(alarmId)
+                cancelAllNotificationsForAlarm(context, alarmId)
+                
                 val mainActivityIntent = Intent(context, MainActivity::class.java).apply {
                     action = "SNOOZE_ALARM_FROM_NOTIFICATION"
                     putExtra("alarmId", alarmId)
-                    // AGREGAR PARÁMETROS DE POSPOSICIÓN
+                    // Parámetros de posposición
                     putExtra("maxSnoozes", intent.getIntExtra("maxSnoozes", 3))
                     putExtra("snoozeDurationMinutes", intent.getIntExtra("snoozeDurationMinutes", 5))
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -92,6 +158,10 @@ class AlarmReceiver : BroadcastReceiver() {
         val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
     
         Log.d("AlarmReceiver", "Alarm triggered - ID: $alarmId, Title: $title, MaxSnoozes: $maxSnoozes, SnoozeDuration: $snoozeDurationMinutes")
+        
+        // Save notification ID in SharedPreferences for later cleanup
+        val prefs = context.getSharedPreferences("alarm_notifications", Context.MODE_PRIVATE)
+        prefs.edit().putInt("notification_$alarmId", alarmId).apply()
         
         try {
             Log.d("AlarmReceiver", "handleAlarmTrigger: Starting alarm handling process")
@@ -124,6 +194,22 @@ class AlarmReceiver : BroadcastReceiver() {
 
             try {
                 Log.d("AlarmReceiver", "Setting up vibration")
+                
+                // Verificar si el dispositivo tiene vibrador
+                val hasVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vibratorManager?.defaultVibrator?.hasVibrator() == true
+                } else {
+                    @Suppress("DEPRECATION")
+                    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                    vibrator?.hasVibrator() == true
+                }
+                
+                if (!hasVibrator) {
+                    Log.w("AlarmReceiver", "Device does not have vibrator capability")
+                    return@try
+                }
+                
                 currentVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
                     vibratorManager.defaultVibrator
@@ -132,17 +218,37 @@ class AlarmReceiver : BroadcastReceiver() {
                     context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 }
                 
-                val vibrationPattern = longArrayOf(0, 500, 500, 500)
+                // Patrón de vibración más intenso y continuo: vibrar 1 segundo, pausa 0.5 segundos, repetir
+                val vibrationPattern = longArrayOf(0, 1000, 500, 1000, 500, 1000, 500)
+                
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = VibrationEffect.createWaveform(vibrationPattern, 0)
+                    // Crear efecto de vibración con repetición infinita (índice 1)
+                    val effect = VibrationEffect.createWaveform(vibrationPattern, 1)
                     currentVibrator?.vibrate(effect)
+                    Log.d("AlarmReceiver", "Vibration started with VibrationEffect (API 26+)")
                 } else {
                     @Suppress("DEPRECATION")
-                    currentVibrator?.vibrate(vibrationPattern, 0)
+                    // Para versiones anteriores, usar el método deprecated con repetición (índice 1)
+                    currentVibrator?.vibrate(vibrationPattern, 1)
+                    Log.d("AlarmReceiver", "Vibration started with deprecated method (API < 26)")
                 }
-                Log.d("AlarmReceiver", "Vibration started")
+                
+                // Verificar si la vibración realmente comenzó
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Log.d("AlarmReceiver", "Vibrator amplitude control: ${currentVibrator?.hasAmplitudeControl()}")
+                }
+                
             } catch (e: Exception) {
-                Log.e("AlarmReceiver", "Error starting vibration", e)
+                Log.e("AlarmReceiver", "Error starting vibration: ${e.message}", e)
+                // Intentar vibración simple como fallback
+                try {
+                    @Suppress("DEPRECATION")
+                    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                    vibrator?.vibrate(2000) // Vibrar por 2 segundos como fallback
+                    Log.d("AlarmReceiver", "Fallback vibration started")
+                } catch (fallbackException: Exception) {
+                    Log.e("AlarmReceiver", "Fallback vibration also failed: ${fallbackException.message}")
+                }
             }
 
             // Intent para abrir MainActivity
@@ -235,9 +341,18 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setVibrate(null)
 
             try {
+                // Show notification using alarmId directly as notificationId
+                val notification = notificationBuilder.build()
                 Log.d("AlarmReceiver", "Showing notification with ID: $alarmId")
-                notificationManager.notify(alarmId, notificationBuilder.build())
-                Log.d("AlarmReceiver", "Notification should be visible now")
+                notificationManager.notify(alarmId, notification)
+                Log.d("AlarmReceiver", "Notification shown with ID: $alarmId")
+                
+                // Registrar los IDs de notificación relacionados para depuración
+                Log.d("AlarmReceiver", "Related notification IDs that might be used:")
+                Log.d("AlarmReceiver", "  - Main notification ID: $alarmId")
+                Log.d("AlarmReceiver", "  - Launch intent ID: ${alarmId + 1000}")
+                Log.d("AlarmReceiver", "  - Stop intent ID: ${alarmId + 2000}")
+                Log.d("AlarmReceiver", "  - Snooze intent ID: ${alarmId + 3000}")
                 
                 Log.d("AlarmReceiver", "Also starting MainActivity directly as backup")
                 context.startActivity(launchIntent)
