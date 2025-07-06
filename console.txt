@@ -1,0 +1,190 @@
+Performing hot restart...                                               
+Restarted application in 2.087ms.
+I/ImeTracker( 4011): com.example.the_good_alarm:47fedb91: onRequestShow at ORIGIN_CLIENT_SHOW_SOFT_INPUT reason SHOW_SOFT_INPUT
+I/HandWritingStubImpl( 4011): refreshLastKeyboardType: 1
+I/HandWritingStubImpl( 4011): getCurrentKeyboardType: 1
+D/InputMethodManager( 4011): showSoftInput() view=io.flutter.embedding.android.FlutterView{24e0a57 VFED..... .F....ID 0,0-1080,2400 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+D/InsetsController( 4011): show(ime(), fromIme=true)
+I/ImeTracker( 4011): com.example.the_good_alarm:47fedb91: onShown
+I/ImeTracker( 4011): com.example.the_good_alarm:fffe4fe0: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT
+W/WindowOnBackDispatcher( 4011): sendCancelIfRunning: isInProgress=falsecallback=ImeCallback=ImeOnBackInvokedCallback@145063711 Callback=android.window.IOnBackInvokedCallback$Stub$Proxy@12ab207
+I/ImeTracker( 4011): com.example.the_good_alarm:908c71ed: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT_BY_INSETS_API
+I/ImeTracker( 4011): com.example.the_good_alarm:fffe4fe0: onHidden
+D/MainActivity( 4011): MethodChannel call: setAlarm
+D/MainActivity( 4011): Calculating alarm time - Current: Sat Jul 05 02:15:10 GMT-04:00 2025, Target hour: 2:16
+D/MainActivity( 4011): One-time alarm: scheduling for today
+D/MainActivity( 4011): Final calculated time: Sat Jul 05 02:16:00 GMT-04:00 2025
+D/MainActivity( 4011): Alarm set for: Sat Jul 05 02:16:00 GMT-04:00 2025   
+D/MainActivity( 4011): Alarm set for: Sat Jul 05 02:16:00 GMT-04:00 2025   
+W/WindowOnBackDispatcher( 4011): sendCancelIfRunning: isInProgress=falsecallback=io.flutter.embedding.android.FlutterActivity$1@62aaeda
+I/HandWritingStubImpl( 4011): refreshLastKeyboardType: 1
+I/HandWritingStubImpl( 4011): getCurrentKeyboardType: 1
+W/RemoteInputConnectionImpl( 4011): getTextAfterCursor on inactive InputConnection
+W/RemoteInputConnectionImpl( 4011): getTextAfterCursor on inactive InputConnection
+W/Looper  ( 4011): PerfMonitor doFrame : time=24ms vsyncFrame=10007855 latency=301ms procState=-1 historyMsgCount=1 (msgIndex=1 wall=301ms seq=673 late=13ms h=android.app.ActivityThread$H w=159)
+D/AlarmReceiver( 4011): onReceive called with action: com.example.the_good_alarm.ALARM_TRIGGERED
+D/AlarmReceiver( 4011): Default alarm trigger action
+D/AlarmReceiver( 4011): handleAlarmTrigger called
+D/AlarmReceiver( 4011): Alarm details - ID: 10909, Title: Alarma, Message: ¡Es hora de despertar!
+D/AlarmReceiver( 4011): Snooze settings - Max: 3, Duration: 5 minutes      
+D/AlarmReceiver( 4011): WakeLock acquired
+D/AlarmReceiver( 4011): Setting up alarm sound
+D/AlarmReceiver( 4011): Alarm URI: content://settings/system/alarm_alert   
+D/MediaPlayer( 4011): getCacheForType() cacheUri=content://0@settings/system/alarm_alert_cache  actualDefaultRingtoneUri = content://media/external_primary/audio/media/1000187070?title=Binks%20no%20Sake%20-%20One%20Piece%20(Marimba%20Ringtone)&canonical=1type = 4
+D/Ringtone( 4011): Successfully created local player
+D/AlarmReceiver( 4011): Starting alarm sound
+D/AlarmReceiver( 4011): Alarm sound started
+D/AlarmReceiver( 4011): Setting up vibration
+D/AlarmReceiver( 4011): VibratorManager hasVibrator: true
+D/AlarmReceiver( 4011): Device has vibrator, proceeding with vibration setup
+D/AlarmReceiver( 4011): Current vibrator obtained: true
+D/AlarmReceiver( 4011): Vibration pattern: [0, 1000, 500, 1000, 500, 1000, 500]
+D/AlarmReceiver( 4011): VibrationEffect created, starting vibration...     
+D/AlarmReceiver( 4011): Vibration started with VibrationEffect (API 26+)   
+D/AlarmReceiver( 4011): Vibrator amplitude control: true
+D/AlarmReceiver( 4011): Vibration setup completed. Current vibrator: true  
+D/AlarmReceiver( 4011): Creating launch intent for MainActivity
+D/AlarmReceiver( 4011): Launch intent extras: alarmId=10909, maxSnoozes=3, snoozeDuration=5, title=Alarma
+D/AlarmReceiver( 4011): Creating stop intent for notification action       
+D/AlarmReceiver( 4011): Creating snooze intent for notification action     
+D/AlarmReceiver( 4011): Got NotificationManager service
+D/AlarmReceiver( 4011): Creating notification channel
+D/AlarmReceiver( 4011): Notification channel created successfully
+D/AlarmReceiver( 4011): Building notification
+D/AlarmReceiver( 4011): Showing notification with ID: 10909
+D/AlarmReceiver( 4011): Notification shown with ID: 10909
+D/AlarmReceiver( 4011): Related notification IDs that might be used:       
+D/AlarmReceiver( 4011):   - Main notification ID: 10909
+D/AlarmReceiver( 4011):   - Launch intent ID: 11909
+D/AlarmReceiver( 4011):   - Stop intent ID: 12909
+D/AlarmReceiver( 4011):   - Snooze intent ID: 13909
+D/AlarmReceiver( 4011): Also starting MainActivity directly as backup      
+D/MainActivity( 4011): onNewIntent called with action: null
+D/MainActivity( 4011): handleAlarmIntent: action=null, alarmId=10909
+D/MainActivity( 4011): Checking if should show alarm screen - alarmId: 10909, screenRoute: /alarm, autoShow: true
+D/MainActivity( 4011): Alarm parameters: maxSnoozes=3, snoozeDuration=5, snoozeCount=0
+D/MainActivity( 4011): Intent extras: alarmId, maxSnoozes, screenRoute, title, snoozeCount, message, autoShowAlarm, snoozeDurationMinutes
+D/MainActivity( 4011): Setting window flags to show over lock screen       
+D/MainActivity( 4011): Window flags set successfully
+D/MainActivity( 4011): Scheduling delayed call to show alarm screen        
+I/ForceDarkHelperStubImpl( 4011): setViewRootImplForceDark: false for com.example.the_good_alarm.MainActivity@88cbfc6, reason: AppDarkModeEnable      
+D/AppScoutStateMachine( 4011): 4011-ScoutStateMachinecreated
+W/.the_good_alarm( 4011): type=1400 audit(0.0:446247): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13237 scontext=u:r:untrusted_app:s0:c60,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm       
+W/libc    ( 4011): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+E/OpenGLRenderer( 4011): Unable to match the desired swap behavior.        
+W/.the_good_alarm( 4011): type=1400 audit(0.0:446248): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13237 scontext=u:r:untrusted_app:s0:c60,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm       
+W/libc    ( 4011): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+E/qdgralloc( 4011): GetGpuPixelFormat: No map for format: 0x38
+E/AdrenoUtils( 4011): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
+E/AdrenoUtils( 4011): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!
+E/qdgralloc( 4011): GetGpuResourceSizeAndDimensions Graphics metadata init failed
+E/Gralloc4( 4011): isSupported(1, 1, 56, 1, ...) failed with 1
+E/GraphicBufferAllocator( 4011): Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
+E/AHardwareBuffer( 4011): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+E/qdgralloc( 4011): GetGpuPixelFormat: No map for format: 0x3b
+E/AdrenoUtils( 4011): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
+E/AdrenoUtils( 4011): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!
+E/qdgralloc( 4011): GetGpuResourceSizeAndDimensions Graphics metadata init failed
+E/Gralloc4( 4011): isSupported(1, 1, 59, 1, ...) failed with 1
+E/GraphicBufferAllocator( 4011): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1
+E/AHardwareBuffer( 4011): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+E/qdgralloc( 4011): GetGpuPixelFormat: No map for format: 0x38
+E/AdrenoUtils( 4011): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
+E/AdrenoUtils( 4011): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!
+E/qdgralloc( 4011): GetGpuResourceSizeAndDimensions Graphics metadata init failed
+E/Gralloc4( 4011): isSupported(1, 1, 56, 1, ...) failed with 1
+E/GraphicBufferAllocator( 4011): Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
+E/AHardwareBuffer( 4011): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+E/qdgralloc( 4011): GetGpuPixelFormat: No map for format: 0x3b
+E/AdrenoUtils( 4011): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
+E/AdrenoUtils( 4011): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!
+E/qdgralloc( 4011): GetGpuResourceSizeAndDimensions Graphics metadata init failed
+E/Gralloc4( 4011): isSupported(1, 1, 59, 1, ...) failed with 1
+E/GraphicBufferAllocator( 4011): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1
+E/AHardwareBuffer( 4011): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+D/VRI[MainActivity]( 4011): vri.reportNextDraw android.view.ViewRootImpl.performTraversals:4360 android.view.ViewRootImpl.doTraversal:2989 android.view.ViewRootImpl$TraversalRunnable.run:10304 android.view.Choreographer$CallbackRecord.run:1594 android.view.Choreographer$CallbackRecord.run:1603      
+D/SurfaceView( 4011): UPDATE Surface(name=SurfaceView[com.example.the_good_alarm/com.example.the_good_alarm.MainActivity]#42247)/@0x1514760, mIsProjectionMode = false
+D/VRI[MainActivity]( 4011): vri.Setup new sync=wmsSync-VRI[MainActivity]#12
+D/VRI[MainActivity]( 4011): vri.reportDrawFinished
+I/flutter (22264): Received notification: {id: 1751696160394, packageName: com.example.the_good_alarm, appName: The Good Alarm, title: Alarma, text: ¡Es hora de despertar!, time: 1751696160394}
+I/flutter (22264): Notificación filtrada, no se guarda en Firebase: com.example.the_good_alarm
+D/VRI[MainActivity]( 4011): vri.reportNextDraw android.view.ViewRootImpl.handleResized:2297 android.view.ViewRootImpl.-$$Nest$mhandleResized:0 android.view.ViewRootImpl$ViewRootHandler.handleMessageImpl:6693 android.view.ViewRootImpl$ViewRootHandler.handleMessage:6662 android.os.Handler.dispatchMessage:106
+D/VRI[MainActivity]( 4011): vri.reportNextDraw android.view.ViewRootImpl.handleResized:2297 android.view.ViewRootImpl.-$$Nest$mhandleResized:0 android.view.ViewRootImpl$ViewRootHandler.handleMessageImpl:6693 android.view.ViewRootImpl$ViewRootHandler.handleMessage:6662 android.os.Handler.dispatchMessage:106
+D/MainActivity( 4011): onNewIntent called with action: null
+D/MainActivity( 4011): handleAlarmIntent: action=null, alarmId=10909       
+D/MainActivity( 4011): Checking if should show alarm screen - alarmId: 10909, screenRoute: /alarm, autoShow: true
+D/MainActivity( 4011): Alarm parameters: maxSnoozes=3, snoozeDuration=5, snoozeCount=0
+D/MainActivity( 4011): Intent extras: alarmId, maxSnoozes, screenRoute, title, snoozeCount, message, autoShowAlarm, snoozeDurationMinutes
+D/MainActivity( 4011): Setting window flags to show over lock screen
+D/MainActivity( 4011): Window flags set successfully
+D/MainActivity( 4011): Scheduling delayed call to show alarm screen        
+I/HandWritingStubImpl( 4011): refreshLastKeyboardType: 1
+I/HandWritingStubImpl( 4011): getCurrentKeyboardType: 1
+D/VRI[MainActivity]( 4011): vri.Setup new sync=wmsSync-VRI[MainActivity]#14
+D/VRI[MainActivity]( 4011): vri.reportDrawFinished
+W/AidlConversionCppNdk( 4011): aidl2legacy_AudioChannelLayout_audio_channel_mask_t: no legacy output audio_channel_mask_t found for AudioChannelLayout{layoutMask: 16}
+D/MainActivity( 4011): Now showing alarm screen via Flutter
+D/MainActivity( 4011): Passing parameters: alarmId=10909, maxSnoozes=3, snoozeDuration=5, snoozeCount=0
+I/flutter ( 4011): === HANDLE NATIVE CALLS START ===
+I/flutter ( 4011): Method: showAlarmScreen
+I/flutter ( 4011): Arguments: {alarmId: 10909, title: Alarma, message: ¡Es hora de despertar!, maxSnoozes: 3, snoozeDurationMinutes: 5, snoozeCount: 0}
+I/flutter ( 4011): === ALARM SCREEN INIT DEBUG ===
+I/flutter ( 4011): AlarmId: 10909
+I/flutter ( 4011): MaxSnoozes: 3
+I/flutter ( 4011): SnoozeDurationMinutes: 5
+I/flutter ( 4011): SnoozeCount: 0
+I/flutter ( 4011): Arguments received: {alarmId: 10909, title: Alarma, message: ¡Es hora de despertar!, snoozeCount: 0, maxSnoozes: 3, snoozeDurationMinutes: 5, requireGame: false, gameConfig: null}
+I/flutter ( 4011): === ALARM SCREEN INIT DEBUG END ===
+I/flutter ( 4011): Can snooze: true (count: 0, max: 3)
+D/MainActivity( 4011): MethodChannel call: notifyAlarmRinging
+D/MainActivity( 4011): Alarm ringing notification received
+D/MainActivity( 4011): Now showing alarm screen via Flutter
+D/MainActivity( 4011): Passing parameters: alarmId=10909, maxSnoozes=3, snoozeDuration=5, snoozeCount=0
+I/flutter ( 4011): === HANDLE NATIVE CALLS START ===
+I/flutter ( 4011): Method: showAlarmScreen
+I/flutter ( 4011): Arguments: {alarmId: 10909, title: Alarma, message: ¡Es hora de despertar!, maxSnoozes: 3, snoozeDurationMinutes: 5, snoozeCount: 0}
+I/flutter ( 4011): === ALARM SCREEN INIT DEBUG ===
+I/flutter ( 4011): AlarmId: 10909
+I/flutter ( 4011): MaxSnoozes: 3
+I/flutter ( 4011): SnoozeDurationMinutes: 5
+I/flutter ( 4011): SnoozeCount: 0
+I/flutter ( 4011): Arguments received: {alarmId: 10909, title: Alarma, message: ¡Es hora de despertar!, snoozeCount: 0, maxSnoozes: 3, snoozeDurationMinutes: 5, requireGame: false, gameConfig: null}
+I/flutter ( 4011): === ALARM SCREEN INIT DEBUG END ===
+I/flutter ( 4011): Can snooze: true (count: 0, max: 3)
+D/MainActivity( 4011): MethodChannel call: notifyAlarmRinging
+D/MainActivity( 4011): Alarm ringing notification received
+D/AlarmReceiver( 4011): Checking vibration status after 1 second...
+D/AlarmReceiver( 4011): Current vibrator still active: true
+D/AlarmReceiver( 4011): Vibration should be active and running
+D/MainActivity( 4011): MethodChannel call: stopAlarm
+D/MainActivity( 4011): Stopping alarm: 10909
+D/AlarmReceiver( 4011): Stopping alarm sound
+V/MediaPlayer( 4011): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+V/MediaPlayer( 4011): cleanDrmObj: mDrmObj=null mDrmSessionId=null
+V/MediaPlayer( 4011): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+V/MediaPlayer( 4011): cleanDrmObj: mDrmObj=null mDrmSessionId=null
+D/AlarmReceiver( 4011): Alarm sound stopped
+D/AlarmReceiver( 4011): Current ringtone set to null
+D/AlarmReceiver( 4011): Stopping vibration
+D/AlarmReceiver( 4011): Vibration stopped
+D/AlarmReceiver( 4011): Current vibrator set to null
+D/MainActivity( 4011): Cancelled notification with ID: 10909
+D/MainActivity( 4011): Cancelled notification with ID: 11909
+D/MainActivity( 4011): Cancelled notification with ID: 12909
+D/MainActivity( 4011): Cancelled notification with ID: 13909
+D/MainActivity( 4011): Cancelled notification with ID: 20909
+D/MainActivity( 4011): Cancelled notification with ID: 30909
+D/MainActivity( 4011): All notifications canceled for alarmId: 10909       
+D/MainActivity( 4011): Alarm and all related notifications canceled successfully for alarmId: 10909
+I/flutter ( 4011): === HANDLE NATIVE CALLS START ===
+I/flutter ( 4011): Method: alarmManuallyStopped
+I/flutter ( 4011): Arguments: {alarmId: 10909}
+I/flutter ( 4011): Alarm manually stopped: 10909
+I/flutter ( 4011): === HANDLE ALARM STOPPED START ===
+I/flutter ( 4011): Processing stopped alarm ID: 10909
+I/flutter ( 4011): Found alarm: Alarma, isRepeating: false
+I/flutter ( 4011): Non-repeating alarm, deactivating...
+W/WindowOnBackDispatcher( 4011): sendCancelIfRunning: isInProgress=falsecallback=io.flutter.embedding.android.FlutterActivity$1@62aaeda
+I/flutter ( 4011): Non-repeating alarm deactivated and saved
+I/flutter ( 4011): === HANDLE ALARM STOPPED END ===
+I/flutter ( 4011): === HANDLE NATIVE CALLS END ===

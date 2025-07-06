@@ -302,13 +302,6 @@ class MainActivity : FlutterActivity() {
                     vibrate(pattern)
                     result.success(true)
                 }
-                "testVibration" -> {
-                    Log.d("MainActivity", "Test vibration method called from Flutter")
-                    // Patrón de prueba: vibrar 3 veces con pausas
-                    val testPattern = longArrayOf(0, 500, 200, 500, 200, 500)
-                    vibrate(testPattern)
-                    result.success(true)
-                }
                 "checkVibratorCapability" -> {
                     val hasVibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -928,16 +921,13 @@ class MainActivity : FlutterActivity() {
             val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
                 description = descriptionText
-                enableVibration(true)
+                // Deshabilitar vibración y sonido del canal para evitar duplicación
+                // La vibración y sonido se manejan directamente en AlarmReceiver
+                enableVibration(false)
                 enableLights(true)
                 setBypassDnd(true)
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-                
-                val audioAttributes = AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .build()
-                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), audioAttributes)
+                setSound(null, null)
             }
             
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
