@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
 import 'package:the_good_alarm/settings_screen.dart'; // Necesario para MethodChannel y PlatformException
 import 'games/alarm_game_wrapper.dart'; // Agregar esta importación
+import 'services/volume_service.dart';
+import 'widgets/volume_control_button.dart';
 
 class AlarmScreen extends StatefulWidget {
   final Map<String, dynamic>? arguments;
@@ -26,9 +28,20 @@ class _AlarmScreenState extends State<AlarmScreen> {
   bool requireGame = false;
   GameConfig? gameConfig;
 
+  // Variables para control de volumen
+  late VolumeService _volumeService;
+  int maxVolumePercent = 100;
+  int volumeRampUpDurationSeconds = 0;
+  int tempVolumeReductionPercent = 50;
+  int tempVolumeReductionDurationSeconds = 30;
+  bool _isVolumeReductionActive = false;
+
   @override
   void initState() {
     super.initState();
+    
+    // Inicializar VolumeService
+    _volumeService = VolumeService();
 
     if (widget.arguments != null) {
       alarmId = widget.arguments!['alarmId'] ?? 0;
@@ -39,6 +52,12 @@ class _AlarmScreenState extends State<AlarmScreen> {
       snoozeDurationMinutes = widget.arguments!['snoozeDurationMinutes'] ?? 5;
       requireGame = widget.arguments!['requireGame'] as bool? ?? false;
       gameConfig = widget.arguments!['gameConfig'] as GameConfig?;
+      
+      // Cargar configuraciones de volumen
+      maxVolumePercent = widget.arguments!['maxVolumePercent'] ?? 100;
+      volumeRampUpDurationSeconds = widget.arguments!['volumeRampUpDurationSeconds'] ?? 0;
+      tempVolumeReductionPercent = widget.arguments!['tempVolumeReductionPercent'] ?? 50;
+      tempVolumeReductionDurationSeconds = widget.arguments!['tempVolumeReductionDurationSeconds'] ?? 30;
 
       // AGREGAR LOGS DE DEPURACIÓN
       print('=== ALARM SCREEN INIT DEBUG ===');
@@ -46,10 +65,13 @@ class _AlarmScreenState extends State<AlarmScreen> {
       print('MaxSnoozes: $maxSnoozes');
       print('SnoozeDurationMinutes: $snoozeDurationMinutes');
       print('SnoozeCount: $snoozeCount');
+      print('Volume Config - Max: $maxVolumePercent%, RampUp: ${volumeRampUpDurationSeconds}s');
+      print('Volume Config - TempReduction: $tempVolumeReductionPercent%, Duration: ${tempVolumeReductionDurationSeconds}s');
       print('Arguments received: ${widget.arguments}');
       print('=== ALARM SCREEN INIT DEBUG END ===');
 
       _notifyAlarmRinging();
+      _startVolumeControl();
     }
   }
 
@@ -66,6 +88,34 @@ class _AlarmScreenState extends State<AlarmScreen> {
       });
     } catch (e) {
       print('Error notifying alarm ringing: $e');
+    }
+  }
+
+  // Método para iniciar el control de volumen
+  Future<void> _startVolumeControl() async {
+    try {
+      await _volumeService.startVolumeControl(
+        maxVolumePercent,
+        volumeRampUpDurationSeconds,
+      );
+    } catch (e) {
+      print('Error starting volume control: $e');
+    }
+  }
+
+  // Método para manejar la reducción temporal de volumen
+  void _onVolumeReductionToggle(bool isActive) {
+    setState(() {
+      _isVolumeReductionActive = isActive;
+    });
+    
+    if (isActive) {
+      _volumeService.setTemporaryVolumeReduction(
+        tempVolumeReductionPercent,
+        tempVolumeReductionDurationSeconds,
+      );
+    } else {
+      _volumeService.cancelTemporaryVolumeReduction();
     }
   }
 
@@ -106,6 +156,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
           builder: (context) => AlarmGameWrapper(
             alarmId: alarmId,
             gameConfig: gameConfig!,
+            tempVolumeReductionPercent: tempVolumeReductionPercent,
+            tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
             onGameCompleted: () {
               // El juego se completó, proceder a apagar la alarma
               _actuallyStopAlarm();
@@ -135,6 +187,13 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _actuallyStopAlarm() async {
+    // Detener el control de volumen
+    try {
+      await _volumeService.stopVolumeControl();
+    } catch (e) {
+      print('Error stopping volume control: $e');
+    }
+    
     if (alarmId != 0) {
       try {
         await platform.invokeMethod('stopAlarm', {'alarmId': alarmId});
@@ -175,6 +234,15 @@ class _AlarmScreenState extends State<AlarmScreen> {
       print('Error snoozing alarm: $e');
     }
     print('=== SNOOZE ALARM END ===');
+  }
+
+  @override
+  void dispose() {
+    // Detener el control de volumen al salir de la pantalla
+    _volumeService.stopVolumeControl().catchError((e) {
+      print('Error stopping volume control in dispose: $e');
+    });
+    super.dispose();
   }
 
   @override
@@ -329,6 +397,19 @@ class _AlarmScreenState extends State<AlarmScreen> {
                       ),
                     ),
                   ),
+                const SizedBox(height: 20),
+                // Botón de control de volumen
+                VolumeControlButton(
+                  tempVolumePercent: tempVolumeReductionPercent,
+                  durationSeconds: tempVolumeReductionDurationSeconds,
+                  onToggle: _onVolumeReductionToggle,
+                  isActive: _isVolumeReductionActive,
+                  onExpired: () {
+                    setState(() {
+                      _isVolumeReductionActive = false;
+                    });
+                  },
+                ),
                 const SizedBox(height: 20),
                 // Mostrar un mensaje si se ha alcanzado el máximo de snoozes
                 if (!canSnooze) ...[

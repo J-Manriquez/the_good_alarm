@@ -1,202 +1,105 @@
+lib/alarm_screen.dart:96:28: Error: The method 'startVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'startVolumeControl'.
+      await _volumeService.startVolumeControl(
+                           ^^^^^^^^^^^^^^^^^^
+lib/alarm_screen.dart:108:22: Error: The method 'setTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'setTemporaryVolumeReduction'.
+      _volumeService.setTemporaryVolumeReduction(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/alarm_screen.dart:113:22: Error: The method 'cancelTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'cancelTemporaryVolumeReduction'.
+      _volumeService.cancelTemporaryVolumeReduction();
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/alarm_screen.dart:187:28: Error: The method 'stopVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'stopVolumeControl'.
+      await _volumeService.stopVolumeControl();
+                           ^^^^^^^^^^^^^^^^^
+lib/alarm_screen.dart:237:20: Error: The method 'stopVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'stopVolumeControl'.
+    _volumeService.stopVolumeControl().catchError((e) {
+                   ^^^^^^^^^^^^^^^^^
+lib/alarm_screen.dart:400:19: Error: No named parameter with the name 'onToggle'.
+                  onToggle: _onVolumeReductionToggle,
+                  ^^^^^^^^
+lib/widgets/volume_control_button.dart:11:9: Context: Found this candidate, but the arguments don't match.
+  const VolumeControlButton({
+        ^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:135:20: Error: The method 'stopVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'stopVolumeControl'.
+    _volumeService.stopVolumeControl().catchError((e) {
+                   ^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:143:22: Error: The method 'setTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'setTemporaryVolumeReduction'.
+      _volumeService.setTemporaryVolumeReduction(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:148:22: Error: The method 'cancelTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'cancelTemporaryVolumeReduction'.
+      _volumeService.cancelTemporaryVolumeReduction();
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:178:15: Error: No named parameter with the name 'onToggle'.
+              onToggle: _onVolumeReductionToggle,
+              ^^^^^^^^
+lib/widgets/volume_control_button.dart:11:9: Context: Found this candidate, but the arguments don't match.
+  const VolumeControlButton({
+        ^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:221:20: Error: The method 'stopVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'stopVolumeControl'.
+    _volumeService.stopVolumeControl().catchError((e) {
+                   ^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:229:22: Error: The method 'setTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'setTemporaryVolumeReduction'.
+      _volumeService.setTemporaryVolumeReduction(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:234:22: Error: The method 'cancelTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'cancelTemporaryVolumeReduction'.
+      _volumeService.cancelTemporaryVolumeReduction();
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:267:15: Error: No named parameter with the name 'onToggle'.
+              onToggle: _onVolumeReductionToggle,
+              ^^^^^^^^
+lib/widgets/volume_control_button.dart:11:9: Context: Found this candidate, but the arguments don't match.
+  const VolumeControlButton({
+        ^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:310:20: Error: The method 'stopVolumeControl' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'stopVolumeControl'.
+    _volumeService.stopVolumeControl().catchError((e) {
+                   ^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:318:22: Error: The method 'setTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'setTemporaryVolumeReduction'.
+      _volumeService.setTemporaryVolumeReduction(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:323:22: Error: The method 'cancelTemporaryVolumeReduction' isn't defined for the class 'VolumeService'.
+ - 'VolumeService' is from 'package:the_good_alarm/services/volume_service.dart' ('lib/services/volume_service.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'cancelTemporaryVolumeReduction'.
+      _volumeService.cancelTemporaryVolumeReduction();
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+lib/games/alarm_game_wrapper.dart:353:15: Error: No named parameter with the name 'onToggle'.
+              onToggle: _onVolumeReductionToggle,
+              ^^^^^^^^
+lib/widgets/volume_control_button.dart:11:9: Context: Found this candidate, but the arguments don't match.
+  const VolumeControlButton({
+        ^^^^^^^^^^^^^^^^^^^
+Target kernel_snapshot_program failed: Exception
 
-D/MainActivity(25870): MethodChannel call: setAlarm
-D/MainActivity(25870): Alarm set for: Sun Jun 22 03:24:00 GMT-04:00 2025
-W/WindowOnBackDispatcher(25870): sendCancelIfRunning: isInProgress=falsecallback=io.flutter.embedding.android.FlutterActivity$1@e402f63
-W/Looper  (25870): PerfMonitor doFrame : time=323ms vsyncFrame=5400064 latency=2ms procState=-1
-I/Choreographer(25870): Skipped 38 frames!  The application may be doing too much work on its main thread.
-W/Looper  (25870): PerfMonitor doFrame : time=1ms vsyncFrame=5400065 latency=317ms procState=-1 historyMsgCount=1 (msgIndex=1 wall=323ms seq=646 late=2ms h=android.view.Choreographer$FrameHandler c=android.view.Choreographer$FrameDisplayEventReceiver)
-W/Looper  (25870): PerfMonitor looperActivity : package=com.example.the_good_alarm/.MainActivity time=6ms latency=316ms  procState=-1  historyMsgCount=2 (msgIndex=1 wall=323ms seq=646 late=2ms h=android.view.Choreographer$FrameHandler c=android.view.Choreographer$FrameDisplayEventReceiver)
-D/AlarmReceiver(25870): onReceive called with action: com.example.the_good_alarm.ALARM_TRIGGERED
-D/AlarmReceiver(25870): Alarm ID: 17292
-D/AlarmReceiver(25870): Handling alarm trigger for alarmId: 17292
-D/AlarmReceiver(25870): === ALARM TRIGGER START ===
-D/AlarmReceiver(25870): Alarm triggered - ID: 17292, Title: Alarma, MaxSnoozes: 1, SnoozeDuration: 3
-D/AlarmReceiver(25870): handleAlarmTrigger: Starting alarm handling process
-D/AlarmReceiver(25870): WakeLock acquired for 60 seconds
-D/AlarmReceiver(25870): Alarm details - ID: 17292, Title: Alarma, Message: ¡Es hora de despertar!
-D/AlarmReceiver(25870): Setting up ringtone
-D/MediaPlayer(25870): getCacheForType() cacheUri=content://0@settings/system/alarm_alert_cache  actualDefaultRingtoneUri = content://media/external_primary/audio/media/1000187070?title=Binks%20no%20Sake%20-%20One%20Piece%20(Marimba%20Ringtone)&canonical=1type = 4
-D/Ringtone(25870): Successfully created local player
-D/AlarmReceiver(25870): Ringtone started playing
-D/AlarmReceiver(25870): Setting up vibration
-D/AlarmReceiver(25870): Vibration started
-D/AlarmReceiver(25870): Creating launch intent for MainActivity
-D/AlarmReceiver(25870): Creating stop intent for notification action
-D/AlarmReceiver(25870): Creating snooze intent for notification action
-D/AlarmReceiver(25870): Got NotificationManager service
-D/AlarmReceiver(25870): Creating notification channel
-D/AlarmReceiver(25870): Notification channel created successfully
-D/AlarmReceiver(25870): Building notification
-D/AlarmReceiver(25870): Showing notification with ID: 17292
-W/EpFrameworkFactory(25870): activated: false jar exist: false
-D/AlarmReceiver(25870): Notification should be visible now
-D/AlarmReceiver(25870): Also starting MainActivity directly as backup
-I/ForceDarkHelperStubImpl(25870): setViewRootImplForceDark: false for com.example.the_good_alarm.MainActivity@b99d1fe, reason: AppDarkModeEnable
-D/AppScoutStateMachine(25870): 25870-ScoutStateMachinecreated
-D/MainActivity(25870): onNewIntent called with action: null
-D/MainActivity(25870): handleAlarmIntent: action=null, alarmId=17292
-D/MainActivity(25870): Checking if should show alarm screen - alarmId: 17292, screenRoute: /alarm, autoShow: true
-D/MainActivity(25870): Setting window flags to show over lock screen
-D/MainActivity(25870): Window flags set successfully
-D/MainActivity(25870): Scheduling delayed call to show alarm screen
-W/libc    (25870): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
-W/.the_good_alarm(25870): type=1400 audit(0.0:403867): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=2491 scontext=u:r:untrusted_app:s0:c23,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm
-E/OpenGLRenderer(25870): Unable to match the desired swap behavior.
-W/libc    (25870): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
-W/.the_good_alarm(25870): type=1400 audit(0.0:403868): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=2491 scontext=u:r:untrusted_app:s0:c23,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm
-E/qdgralloc(25870): GetGpuPixelFormat: No map for format: 0x38
-E/AdrenoUtils(25870): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
-E/AdrenoUtils(25870): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!       
-E/qdgralloc(25870): GetGpuResourceSizeAndDimensions Graphics metadata init failed
-E/Gralloc4(25870): isSupported(1, 1, 56, 1, ...) failed with 1
-E/GraphicBufferAllocator(25870): Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
-E/AHardwareBuffer(25870): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
-E/qdgralloc(25870): GetGpuPixelFormat: No map for format: 0x3b
-E/AdrenoUtils(25870): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
-E/AdrenoUtils(25870): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!       
-E/qdgralloc(25870): GetGpuResourceSizeAndDimensions Graphics metadata init failed
-E/Gralloc4(25870): isSupported(1, 1, 59, 1, ...) failed with 1
-E/GraphicBufferAllocator(25870): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1
-E/AHardwareBuffer(25870): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
-E/qdgralloc(25870): GetGpuPixelFormat: No map for format: 0x38
-E/AdrenoUtils(25870): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
-E/AdrenoUtils(25870): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!       
-E/qdgralloc(25870): GetGpuResourceSizeAndDimensions Graphics metadata init failed
-E/Gralloc4(25870): isSupported(1, 1, 56, 1, ...) failed with 1
-E/GraphicBufferAllocator(25870): Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
-E/AHardwareBuffer(25870): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
-E/qdgralloc(25870): GetGpuPixelFormat: No map for format: 0x3b
-E/AdrenoUtils(25870): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
-E/AdrenoUtils(25870): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!       
-E/qdgralloc(25870): GetGpuResourceSizeAndDimensions Graphics metadata init failed
-E/Gralloc4(25870): isSupported(1, 1, 59, 1, ...) failed with 1
-E/GraphicBufferAllocator(25870): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1
-E/AHardwareBuffer(25870): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
-D/VRI[MainActivity](25870): vri.reportNextDraw android.view.ViewRootImpl.performTraversals:4360 android.view.ViewRootImpl.doTraversal:2989 android.view.ViewRootImpl$TraversalRunnable.run:10304 android.view.Choreographer$CallbackRecord.run:1594 android.view.Choreographer$CallbackRecord.run:1603
-D/SurfaceView(25870): UPDATE Surface(name=SurfaceView[com.example.the_good_alarm/com.example.the_good_alarm.MainActivity]#25818)/@0x672982c, mIsProjectionMode = false
-D/VRI[MainActivity](25870): vri.Setup new sync=wmsSync-VRI[MainActivity]#8
-D/VRI[MainActivity](25870): vri.reportDrawFinished
-I/HandWritingStubImpl(25870): refreshLastKeyboardType: 1
-I/HandWritingStubImpl(25870): getCurrentKeyboardType: 1
-I/flutter (22650): Received notification: {id: 1750577040490, packageName: com.example.the_good_alarm, appName: The Good Alarm, title: Alarma, text: ¡Es hora de despertar!, time: 1750577040490}
-I/flutter (22650): Notificación filtrada, no se guarda en Firebase: com.example.the_good_alarm
-D/MainActivity(25870): Now showing alarm screen via Flutter
-I/flutter (25870): === HANDLE NATIVE CALLS START ===
-I/flutter (25870): Method: showAlarmScreen
-I/flutter (25870): Arguments: {alarmId: 17292, title: Alarma, message: ¡Es hora de despertar!}
-I/flutter (25870): === HANDLE NATIVE CALLS END ===
-I/flutter (25870): === LOAD SNOOZE SETTINGS START ===
-I/flutter (25870): Can snooze: true (count: 0, max: 1)
-I/flutter (25870): Loaded snooze duration: 5 minutes
-I/flutter (25870): === LOAD SNOOZE SETTINGS END ===
-D/MainActivity(25870): MethodChannel call: notifyAlarmRinging
-I/flutter (25870): Error notifying alarm ringing: MissingPluginException(No implementation found for method notifyAlarmRinging on channel com.example.the_good_alarm/alarm)
-I/flutter (25870): Can snooze: true (count: 0, max: 1)
-I/flutter (25870): === SNOOZE ALARM START ===
-I/flutter (25870): Snoozing alarm ID: 17292 for 5 minutes
-I/flutter (25870): Current snooze count: 0, max: 1
-D/MainActivity(25870): MethodChannel call: snoozeAlarm
-D/MainActivity(25870): === SNOOZE ALARM METHOD START ===
-D/MainActivity(25870): Snoozing alarm ID: 17292 for 5 minutes, max: 1
-D/AlarmReceiver(25870): Stopping alarm sound and vibration
-V/MediaPlayer(25870): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
-V/MediaPlayer(25870): cleanDrmObj: mDrmObj=null mDrmSessionId=null
-V/MediaPlayer(25870): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
-V/MediaPlayer(25870): cleanDrmObj: mDrmObj=null mDrmSessionId=null
-D/AlarmReceiver(25870): Alarm sound and vibration stopped
-D/MainActivity(25870): Alarm canceled successfully
-D/MainActivity(25870): New snooze time: Sun Jun 22 03:29:05 GMT-04:00 2025
-D/MainActivity(25870): Alarm set for: Sun Jun 22 03:29:05 GMT-04:00 2025
-I/flutter (25870): === HANDLE NATIVE CALLS START ===
-I/flutter (25870): Method: alarmManuallySnoozed
-I/flutter (25870): Arguments: {alarmId: 17292, newTimeInMillis: 1750577345024}
-D/MainActivity(25870): Alarm snoozed successfully
-D/MainActivity(25870): === SNOOZE ALARM METHOD END ===
-I/flutter (25870): Snooze command sent to native code
-I/flutter (25870): === SNOOZE ALARM END ===
-W/WindowOnBackDispatcher(25870): sendCancelIfRunning: isInProgress=falsecallback=io.flutter.embedding.android.FlutterActivity$1@e402f63
-I/flutter (25870): === HANDLE NATIVE CALLS END ===
-I/flutter (22650): Received notification: {id: 1750577264222, packageName: com.ipc360, appName: IPC360, title: Alarm, text: 【Cámara Living】 detectó movimiento., time: 1750577264222}
-I/flutter (22650): Notificación filtrada, no se guarda en Firebase: com.ipc360
-
-D/MainActivity(25870): Now showing alarm screen via Flutter
-I/flutter (25870): === HANDLE NATIVE CALLS START ===
-I/flutter (25870): Method: showAlarmScreen
-I/flutter (25870): Arguments: {alarmId: 17292, title: Alarma Pospuesta, message: ¡Es hora de despertar!}
-I/flutter (25870): === HANDLE NATIVE CALLS END ===
-I/flutter (25870): === LOAD SNOOZE SETTINGS START ===
-I/flutter (25870): Can snooze: false (count: 1, max: 1)
-I/flutter (25870): Loaded snooze duration: 5 minutes
-I/flutter (25870): === LOAD SNOOZE SETTINGS END ===
-D/MainActivity(25870): MethodChannel call: notifyAlarmRinging
-I/flutter (25870): Error notifying alarm ringing: MissingPluginException(No implementation found for method notifyAlarmRinging on channel com.example.the_good_alarm/alarm)
-I/flutter (25870): Can snooze: false (count: 1, max: 1)
-D/MainActivity(25870): MethodChannel call: stopAlarm
-D/MainActivity(25870): Stopping alarm: 17292
-D/AlarmReceiver(25870): Stopping alarm sound and vibration
-V/MediaPlayer(25870): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
-V/MediaPlayer(25870): cleanDrmObj: mDrmObj=null mDrmSessionId=null
-V/MediaPlayer(25870): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
-V/MediaPlayer(25870): cleanDrmObj: mDrmObj=null mDrmSessionId=null
-D/AlarmReceiver(25870): Alarm sound and vibration stopped
-D/MainActivity(25870): Alarm canceled successfully
-I/flutter (25870): === HANDLE NATIVE CALLS START ===
-I/flutter (25870): Method: alarmManuallyStopped
-I/flutter (25870): Arguments: {alarmId: 17292}
-I/flutter (25870): Alarm manually stopped: 17292
-I/flutter (25870): === HANDLE ALARM STOPPED START ===
-I/flutter (25870): Processing stopped alarm ID: 17292
-I/flutter (25870): Found alarm: Alarma, isRepeating: false
-I/flutter (25870): Non-repeating alarm, deactivating...
-W/WindowOnBackDispatcher(25870): sendCancelIfRunning: isInProgress=falsecallback=io.flutter.embedding.android.FlutterActivity$1@e402f63
-I/flutter (25870): Non-repeating alarm deactivated and saved
-I/flutter (25870): === HANDLE ALARM STOPPED END ===
-I/flutter (25870): === HANDLE NATIVE CALLS END ===
-
-
-nuevos errores
-
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:39:17 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:54:17 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:93:21 Unresolved reference 'NOTIFICATION_CHANNEL_ID'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:126:21 Unresolved reference 'currentRingtone'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:126:49 Unresolved reference 'currentRingtone'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:126:67 Unresolved reference 'isPlaying'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:127:21 Unresolved reference 'currentRingtone'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:131:21 Unresolved reference 'currentRingtone'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:142:17 Unresolved reference 'currentVibrator'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:153:21 Unresolved reference 'currentVibrator'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:156:21 Unresolved reference 'currentVibrator'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:179:10 Syntax error: Expecting 'catch' or 'finally'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:181:42 Unresolved reference 'launchIntent'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:215:25 Unresolved reference 'NOTIFICATION_CHANNEL_ID'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:234:75 Unresolved reference 'NOTIFICATION_CHANNEL_ID'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:235:18 Unresolved reference 'setSmallIcon'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:257:39 Unresolved reference 'launchIntent'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:11 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:17 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:18 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:19 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:21 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:30 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:32 Syntax error: Expecting member declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:262:32 Function declaration must have a name.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:263:67 Unresolved reference 'e'.  
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:267:5 Modifier 'companion' is not applicable inside 'file'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:267:21 Syntax error: Name expected.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/AlarmReceiver.kt:285:1 Syntax error: Expecting a top level declaration.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/MainActivity.kt:160:35 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/MainActivity.kt:180:39 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/MainActivity.kt:301:35 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/MainActivity.kt:312:35 Unresolved reference 'stopAlarmSound'.
-e: file:///E:/Documentos/Git/the_good_alarm/android/app/src/main/kotlin/com/example/the_good_alarm/MainActivity.kt:365:21 Unresolved reference 'Handler'.
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:compileDebugKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
+Execution failed for task ':app:compileFlutterBuildDebug'.
+> Process 'command 'C:\flutter\bin\flutter.bat'' finished with non-zero exit value 1
 
 * Try:
 > Run with --stacktrace option to get the stack trace.
@@ -204,6 +107,6 @@ Execution failed for task ':app:compileDebugKotlin'.
 > Run with --scan to get full insights.
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 40s
-Running Gradle task 'assembleDebug'...                             41,3s   
-Error: Gradle task assembleDebug failed with exit code 
+BUILD FAILED in 14s
+Running Gradle task 'assembleDebug'...                             15,4s   
+Error: Gradle task assembleDebug failed with exit code 1

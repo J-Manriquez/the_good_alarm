@@ -18,6 +18,12 @@ class Alarm {
   GameConfig? gameConfig;
   bool syncToCloud;
   List<Map<String, dynamic>>? activeOnlyIn;
+  
+  // Configuraciones de volumen
+  int maxVolumePercent;
+  int volumeRampUpDurationSeconds;
+  int tempVolumeReductionPercent;
+  int tempVolumeReductionDurationSeconds;
 
   Alarm({
     required this.id,
@@ -36,6 +42,10 @@ class Alarm {
     this.gameConfig,
     this.syncToCloud = true,
     this.activeOnlyIn,
+    this.maxVolumePercent = 100,
+    this.volumeRampUpDurationSeconds = 30,
+    this.tempVolumeReductionPercent = 30,
+    this.tempVolumeReductionDurationSeconds = 60,
   });
 
   bool isRepeating() {
@@ -59,6 +69,10 @@ class Alarm {
     'gameConfig': gameConfig?.toJson(),
     'syncToCloud': syncToCloud,
     'activeOnlyIn': activeOnlyIn,
+    'maxVolumePercent': maxVolumePercent,
+    'volumeRampUpDurationSeconds': volumeRampUpDurationSeconds,
+    'tempVolumeReductionPercent': tempVolumeReductionPercent,
+    'tempVolumeReductionDurationSeconds': tempVolumeReductionDurationSeconds,
   };
 
   factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
@@ -84,6 +98,10 @@ class Alarm {
     activeOnlyIn: json['activeOnlyIn'] != null
         ? List<Map<String, dynamic>>.from(json['activeOnlyIn'])
         : null,
+    maxVolumePercent: json['maxVolumePercent'] as int? ?? 100,
+    volumeRampUpDurationSeconds: json['volumeRampUpDurationSeconds'] as int? ?? 30,
+    tempVolumeReductionPercent: json['tempVolumeReductionPercent'] as int? ?? 30,
+    tempVolumeReductionDurationSeconds: json['tempVolumeReductionDurationSeconds'] as int? ?? 60,
   );
   
   // Crear una copia de la alarma con propiedades modificadas
@@ -104,6 +122,10 @@ class Alarm {
     GameConfig? gameConfig,
     bool? syncToCloud,
     List<Map<String, dynamic>>? activeOnlyIn,
+    int? maxVolumePercent,
+    int? volumeRampUpDurationSeconds,
+    int? tempVolumeReductionPercent,
+    int? tempVolumeReductionDurationSeconds,
   }) {
     return Alarm(
       id: id ?? this.id,
@@ -122,6 +144,10 @@ class Alarm {
       gameConfig: gameConfig ?? this.gameConfig,
       syncToCloud: syncToCloud ?? this.syncToCloud,
       activeOnlyIn: activeOnlyIn ?? this.activeOnlyIn,
+      maxVolumePercent: maxVolumePercent ?? this.maxVolumePercent,
+      volumeRampUpDurationSeconds: volumeRampUpDurationSeconds ?? this.volumeRampUpDurationSeconds,
+      tempVolumeReductionPercent: tempVolumeReductionPercent ?? this.tempVolumeReductionPercent,
+      tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds ?? this.tempVolumeReductionDurationSeconds,
     );
   }
 }

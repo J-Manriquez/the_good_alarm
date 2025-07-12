@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
@@ -59,6 +60,18 @@ class MainActivity : FlutterActivity() {
     private var methodChannel: MethodChannel? = null
     private var timeZoneReceiver: BroadcastReceiver? = null
     
+    // Volume control variables
+    private lateinit var audioManager: AudioManager
+    private var originalVolume: Int = 0
+    private var isVolumeControlActive: Boolean = false
+    private var volumeHandler: Handler? = null
+    private var volumeRunnable: Runnable? = null
+    private var tempReductionHandler: Handler? = null
+    private var tempReductionRunnable: Runnable? = null
+    private var isTempVolumeReduced: Boolean = false
+    private var volumeBeforeReduction: Int = 0
+    private var currentMaxVolumePercent: Int = 100
+    
     private fun checkDndPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -103,6 +116,7 @@ class MainActivity : FlutterActivity() {
         Log.d("MainActivity", "configureFlutterEngine called")
         
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
         checkDoNotDisturbPermission()
         checkOverlayPermission()
@@ -110,6 +124,54 @@ class MainActivity : FlutterActivity() {
         handleTimeZoneChange()
         
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        
+        // Setup volume control channel
+        val volumeChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "alarm_volume_control")
+        volumeChannel.setMethodCallHandler { call, result ->
+            Log.d("MainActivity", "VolumeChannel call: ${call.method}")
+            when (call.method) {
+                "startVolumeControl" -> {
+                    val maxVolumePercent = call.argument<Int>("maxVolumePercent") ?: 100
+                    val rampUpDurationSeconds = call.argument<Int>("rampUpDurationSeconds") ?: 0
+                    Log.d("MainActivity", "Starting volume control: maxVolume=$maxVolumePercent%, rampUp=${rampUpDurationSeconds}s")
+                    startVolumeControl(maxVolumePercent, rampUpDurationSeconds)
+                    result.success(true)
+                }
+                "stopVolumeControl" -> {
+                    Log.d("MainActivity", "Stopping volume control")
+                    stopVolumeControl()
+                    result.success(true)
+                }
+                "setTemporaryVolumeReduction" -> {
+                    val reductionPercent = call.argument<Int>("reductionPercent") ?: 50
+                    val durationSeconds = call.argument<Int>("durationSeconds") ?: 30
+                    Log.d("MainActivity", "Setting temporary volume reduction: $reductionPercent% for ${durationSeconds}s")
+                    setTemporaryVolumeReduction(reductionPercent, durationSeconds)
+                    result.success(true)
+                }
+                "getCurrentVolume" -> {
+                    val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                    val volumePercent = (currentVolume * 100) / maxVolume
+                    Log.d("MainActivity", "Current volume: $currentVolume/$maxVolume ($volumePercent%)")
+                    result.success(volumePercent)
+                }
+                "cancelTemporaryVolumeReduction" -> {
+                    Log.d("MainActivity", "Cancelling temporary volume reduction")
+                    cancelTemporaryVolumeReduction()
+                    result.success(true)
+                }
+                "setVolume" -> {
+                    val volumePercent = call.argument<Int>("volumePercent") ?: 100
+                    Log.d("MainActivity", "Setting volume to $volumePercent%")
+                    setVolume(volumePercent)
+                    result.success(true)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
         methodChannel?.setMethodCallHandler { call, result ->
             Log.d("MainActivity", "MethodChannel call: ${call.method}")
             when (call.method) {
@@ -125,6 +187,10 @@ class MainActivity : FlutterActivity() {
                     val isWeekend = call.argument<Boolean>("isWeekend") ?: false
                     val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
                     val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
+                    val maxVolumePercent = call.argument<Int>("maxVolumePercent") ?: 100
+                    val volumeRampUpDurationSeconds = call.argument<Int>("volumeRampUpDurationSeconds") ?: 30
+                    val tempVolumeReductionPercent = call.argument<Int>("tempVolumeReductionPercent") ?: 50
+                    val tempVolumeReductionDurationSeconds = call.argument<Int>("tempVolumeReductionDurationSeconds") ?: 60
                     
                     // Crear un objeto AlarmData con la hora y minuto recibidos
                     val alarm = AlarmData(
@@ -161,7 +227,11 @@ class MainActivity : FlutterActivity() {
                                         isWeekly = isWeekly,
                                         isWeekend = isWeekend,
                                         maxSnoozes = maxSnoozes,
-                                        snoozeDurationMinutes = snoozeDurationMinutes
+                                        snoozeDurationMinutes = snoozeDurationMinutes,
+                                        maxVolumePercent = maxVolumePercent,
+                                        volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
+                                        tempVolumeReductionPercent = tempVolumeReductionPercent,
+                                        tempVolumeReductionDurationSeconds = tempVolumeReductionDurationSeconds
                                     )
                                     Log.d("MainActivity", "Alarm set for: ${Date(nextTime)}")
                                     result.success(true)
@@ -183,7 +253,11 @@ class MainActivity : FlutterActivity() {
                                     isWeekly = isWeekly,
                                     isWeekend = isWeekend,
                                     maxSnoozes = maxSnoozes,
-                                    snoozeDurationMinutes = snoozeDurationMinutes
+                                    snoozeDurationMinutes = snoozeDurationMinutes,
+                                    maxVolumePercent = maxVolumePercent,
+                                    volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
+                                    tempVolumeReductionPercent = tempVolumeReductionPercent,
+                                    tempVolumeReductionDurationSeconds = tempVolumeReductionDurationSeconds
                                 )
                                 Log.d("MainActivity", "Alarm set for: ${Date(nextTime)}")
                                 result.success(true)
@@ -253,7 +327,11 @@ class MainActivity : FlutterActivity() {
                             isWeekly = false,
                             isWeekend = false,
                             maxSnoozes = maxSnoozes,
-                            snoozeDurationMinutes = snoozeDurationMinutes
+                            snoozeDurationMinutes = snoozeDurationMinutes,
+                            maxVolumePercent = 100,
+                            volumeRampUpDurationSeconds = 30,
+                            tempVolumeReductionPercent = 50,
+                            tempVolumeReductionDurationSeconds = 60
                         )
                         
                         Log.d("MainActivity", "Alarm rescheduled with correct parameters")
@@ -381,6 +459,10 @@ class MainActivity : FlutterActivity() {
                     // Cancel all notifications for this alarm
                     cancelAllNotificationsForAlarm(alarmIdFromIntent)
                     
+                    // Limpiar la marca de pantalla mostrada
+                    val alarmScreenKey = "alarm_screen_shown_$alarmIdFromIntent"
+                    getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                    
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallyStopped")
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmIdFromIntent))
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
@@ -397,6 +479,10 @@ class MainActivity : FlutterActivity() {
                     // Cancel all notifications for this alarm
                     cancelAllNotificationsForAlarm(alarmIdFromIntent)
                     
+                    // Limpiar la marca de pantalla mostrada
+                    val alarmScreenKey = "alarm_screen_shown_$alarmIdFromIntent"
+                    getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                    
                     val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
                     val calendar = Calendar.getInstance()
                     calendar.add(Calendar.MINUTE, snoozeDurationMinutes) // Usar la duración correcta
@@ -412,7 +498,11 @@ class MainActivity : FlutterActivity() {
                         isWeekly = false,
                         isWeekend = false,
                         maxSnoozes = intent.getIntExtra("maxSnoozes", 3),
-                        snoozeDurationMinutes = snoozeDurationMinutes
+                        snoozeDurationMinutes = snoozeDurationMinutes,
+                        maxVolumePercent = intent.getIntExtra("maxVolumePercent", 100),
+                        volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30),
+                        tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50),
+                        tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
                     )
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallySnoozed")
                     methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf("alarmId" to alarmIdFromIntent, "newTimeInMillis" to calendar.timeInMillis))
@@ -428,39 +518,59 @@ class MainActivity : FlutterActivity() {
                 val maxSnoozes = intent.getIntExtra("maxSnoozes", 3)
                 val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
                 val snoozeCount = intent.getIntExtra("snoozeCount", 0)
+                val maxVolumePercent = intent.getIntExtra("maxVolumePercent", 100)
+                val volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30)
+                val tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50)
+                val tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
 
                 Log.d("MainActivity", "Checking if should show alarm screen - alarmId: $alarmIdFromIntent, screenRoute: $screenRoute, autoShow: $autoShow")
                 Log.d("MainActivity", "Alarm parameters: maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, snoozeCount=$snoozeCount")
+                Log.d("MainActivity", "Volume parameters: maxVolume=$maxVolumePercent%, rampUp=${volumeRampUpDurationSeconds}s, tempReduction=$tempVolumeReductionPercent% for ${tempVolumeReductionDurationSeconds}s")
                 Log.d("MainActivity", "Intent extras: ${intent.extras?.keySet()?.joinToString()}") // AGREGAR ESTE LOG
                 
                 if (alarmIdFromIntent != -1 && screenRoute == "/alarm" && autoShow) {
-                    Log.d("MainActivity", "Setting window flags to show over lock screen")
-                    try {
-                        window.addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                        )
-                        Log.d("MainActivity", "Window flags set successfully")
-                    } catch (e: Exception) {
-                        Log.e("MainActivity", "Error setting window flags", e)
-                    }
+                    // Verificar si ya se mostró la pantalla para esta alarma
+                    val alarmScreenKey = "alarm_screen_shown_$alarmIdFromIntent"
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    val alreadyShown = prefs.getBoolean(alarmScreenKey, false)
                     
-                    Log.d("MainActivity", "Scheduling delayed call to show alarm screen")
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        Log.d("MainActivity", "Now showing alarm screen via Flutter")
-                        Log.d("MainActivity", "Passing parameters: alarmId=$alarmIdFromIntent, maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, snoozeCount=$snoozeCount") // AGREGAR ESTE LOG
-                        methodChannel?.invokeMethod("showAlarmScreen", mapOf(
-                            "alarmId" to alarmIdFromIntent,
-                            "title" to title,
-                            "message" to message,
-                            "maxSnoozes" to maxSnoozes,
-                            "snoozeDurationMinutes" to snoozeDurationMinutes,
-                            "snoozeCount" to snoozeCount
-                        ))
-                    }, 500)
-                    intent.removeExtra("autoShowAlarm") 
+                    if (!alreadyShown) {
+                        Log.d("MainActivity", "Setting window flags to show over lock screen")
+                        try {
+                            window.addFlags(
+                                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                            )
+                            Log.d("MainActivity", "Window flags set successfully")
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error setting window flags", e)
+                        }
+                        
+                        // Marcar que ya se mostró la pantalla
+                        prefs.edit().putBoolean(alarmScreenKey, true).apply()
+                        
+                        Log.d("MainActivity", "Scheduling delayed call to show alarm screen")
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            Log.d("MainActivity", "Now showing alarm screen via Flutter")
+                            Log.d("MainActivity", "Passing parameters: alarmId=$alarmIdFromIntent, maxSnoozes=$maxSnoozes, snoozeDuration=$snoozeDurationMinutes, snoozeCount=$snoozeCount")
+                            methodChannel?.invokeMethod("showAlarmScreen", mapOf(
+                                "alarmId" to alarmIdFromIntent,
+                                "title" to title,
+                                "message" to message,
+                                "maxSnoozes" to maxSnoozes,
+                                "snoozeDurationMinutes" to snoozeDurationMinutes,
+                                "snoozeCount" to snoozeCount,
+                                "maxVolumePercent" to maxVolumePercent,
+                                "volumeRampUpDurationSeconds" to volumeRampUpDurationSeconds,
+                                "tempVolumeReductionPercent" to tempVolumeReductionPercent,
+                                "tempVolumeReductionDurationSeconds" to tempVolumeReductionDurationSeconds
+                            ))
+                        }, 500)
+                    } else {
+                        Log.d("MainActivity", "Alarm screen already shown for alarm $alarmIdFromIntent, skipping")
+                    }
                 }
             }
         }
@@ -477,7 +587,11 @@ class MainActivity : FlutterActivity() {
         isWeekly: Boolean,
         isWeekend: Boolean,
         maxSnoozes: Int,
-        snoozeDurationMinutes: Int
+        snoozeDurationMinutes: Int,
+        maxVolumePercent: Int = 100,
+        volumeRampUpDurationSeconds: Int = 30,
+        tempVolumeReductionPercent: Int = 50,
+        tempVolumeReductionDurationSeconds: Int = 60
     ) {
         try {
             val intent = Intent(this, AlarmReceiver::class.java).apply {
@@ -492,6 +606,10 @@ class MainActivity : FlutterActivity() {
                 putExtra("isWeekend", isWeekend)
                 putExtra("maxSnoozes", maxSnoozes)
                 putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+                putExtra("maxVolumePercent", maxVolumePercent)
+                putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
+                putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
+                putExtra("tempVolumeReductionDurationSeconds", tempVolumeReductionDurationSeconds)
             }
 
             val pendingIntent = PendingIntent.getBroadcast(
@@ -857,7 +975,18 @@ class MainActivity : FlutterActivity() {
     private fun playSound(soundUri: Uri) {
         try {
             val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
+            // Configurar el ringtone para usar el stream de alarma
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                ringtone.audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            } else {
+                @Suppress("DEPRECATION")
+                ringtone.streamType = AudioManager.STREAM_ALARM
+            }
             ringtone.play()
+            Log.d("MainActivity", "Sound playing with ALARM stream")
         } catch (e: Exception) {
             Log.e("MainActivity", "Error playing sound", e)
         }
@@ -935,6 +1064,154 @@ class MainActivity : FlutterActivity() {
         }
     }
     
+    // Volume control methods
+    private fun startVolumeControl(maxVolumePercent: Int, rampUpDurationSeconds: Int) {
+        try {
+            if (!isVolumeControlActive) {
+                originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                isVolumeControlActive = true
+                Log.d("MainActivity", "Original volume saved: $originalVolume")
+            }
+            
+            // Almacenar el volumen máximo configurado para uso en reducción temporal
+            currentMaxVolumePercent = maxVolumePercent
+            
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            val targetVolume = (maxVolume * maxVolumePercent) / 100
+            
+            // Si hay reducción temporal activa, no iniciar el escalado
+            if (isTempVolumeReduced) {
+                Log.d("MainActivity", "Volume ramp-up skipped due to active temporary reduction")
+                return
+            }
+            
+            if (rampUpDurationSeconds > 0) {
+                // Gradual volume increase
+                val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                val volumeDifference = targetVolume - currentVolume
+                val steps = rampUpDurationSeconds * 2 // 2 steps per second
+                val volumeStep = volumeDifference.toFloat() / steps
+                
+                volumeHandler = Handler(Looper.getMainLooper())
+                var currentStep = 0
+                
+                volumeRunnable = object : Runnable {
+                    override fun run() {
+                        if (currentStep < steps && isVolumeControlActive) {
+                            val newVolume = (currentVolume + (volumeStep * currentStep)).toInt()
+                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, newVolume, 0)
+                            currentStep++
+                            volumeHandler?.postDelayed(this, 500) // 500ms intervals
+                        } else {
+                            // Ensure final volume is set
+                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
+                        }
+                    }
+                }
+                volumeHandler?.post(volumeRunnable!!)
+            } else {
+                // Immediate volume set
+                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
+            }
+            
+            Log.d("MainActivity", "Volume control started: target=$targetVolume/$maxVolume")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error starting volume control", e)
+        }
+    }
+    
+    private fun stopVolumeControl() {
+        try {
+            volumeHandler?.removeCallbacks(volumeRunnable!!)
+            volumeHandler = null
+            volumeRunnable = null
+            
+            // También cancelar cualquier reducción temporal activa
+            cancelTemporaryVolumeReduction()
+            
+            if (isVolumeControlActive) {
+                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
+                isVolumeControlActive = false
+                Log.d("MainActivity", "Volume restored to original: $originalVolume")
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error stopping volume control", e)
+        }
+    }
+    
+    private fun setTemporaryVolumeReduction(reductionPercent: Int, durationSeconds: Int) {
+        try {
+            // Cancelar cualquier reducción temporal anterior
+            cancelTemporaryVolumeReduction()
+            
+            // PRIORIDAD: Cancelar cualquier escalado de volumen en progreso
+            volumeHandler?.removeCallbacks(volumeRunnable!!)
+            Log.d("MainActivity", "Volume ramp-up cancelled due to temporary reduction activation")
+            
+            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            // Set volume TO the reduction percentage, not reduce BY the percentage
+            val reducedVolume = (maxVolume * reductionPercent) / 100
+            
+            // Guardar el volumen antes de la reducción (o el volumen objetivo si estaba escalando)
+            volumeBeforeReduction = if (isVolumeControlActive) {
+                // Si el control de volumen está activo, usar el volumen objetivo configurado
+                (maxVolume * currentMaxVolumePercent) / 100
+            } else {
+                currentVolume
+            }
+            isTempVolumeReduced = true
+            
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, reducedVolume, 0)
+            Log.d("MainActivity", "Volume temporarily set to $reducedVolume ($reductionPercent% of max) from $currentVolume, will restore to $volumeBeforeReduction")
+            
+            // Programar la restauración del volumen
+            tempReductionHandler = Handler(Looper.getMainLooper())
+            tempReductionRunnable = Runnable {
+                try {
+                    if (isTempVolumeReduced) {
+                        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, volumeBeforeReduction, 0)
+                        Log.d("MainActivity", "Volume restored to $volumeBeforeReduction after temporary reduction")
+                        isTempVolumeReduced = false
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error restoring volume after temporary reduction: ${e.message}")
+                }
+            }
+            tempReductionHandler?.postDelayed(tempReductionRunnable!!, (durationSeconds * 1000).toLong())
+            
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting temporary volume reduction", e)
+        }
+    }
+    
+    private fun cancelTemporaryVolumeReduction() {
+        try {
+            tempReductionHandler?.removeCallbacks(tempReductionRunnable!!)
+            tempReductionHandler = null
+            tempReductionRunnable = null
+            
+            if (isTempVolumeReduced && isVolumeControlActive) {
+                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, volumeBeforeReduction, 0)
+                Log.d("MainActivity", "Temporary volume reduction cancelled, volume restored to $volumeBeforeReduction")
+                isTempVolumeReduced = false
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error cancelling temporary volume reduction", e)
+        }
+    }
+    
+    private fun setVolume(volumePercent: Int) {
+        try {
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            val targetVolume = (maxVolume * volumePercent) / 100
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
+            Log.d("MainActivity", "Volume set to $targetVolume/$maxVolume ($volumePercent%)")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting volume", e)
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         try {
@@ -944,5 +1221,8 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.e("MainActivity", "Error unregistering time zone receiver", e)
         }
+        // Clean up volume control
+        stopVolumeControl()
+        Log.d("MainActivity", "MainActivity destroyed")
     }
 }

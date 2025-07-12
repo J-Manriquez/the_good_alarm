@@ -28,6 +28,12 @@ class SettingsScreen extends StatefulWidget {
   static const String snoozeDurationKey = 'snooze_duration_minutes';
   static const String maxSnoozesKey = 'max_snoozes';
   static const String cloudSyncKey = 'cloud_sync_enabled';
+  
+  // Nuevas claves para configuraciones de volumen
+  static const String defaultMaxVolumeKey = 'default_max_volume_percent';
+  static const String defaultVolumeRampUpKey = 'default_volume_ramp_up_seconds';
+  static const String defaultTempVolumeReductionKey = 'default_temp_volume_reduction_percent';
+  static const String defaultTempVolumeReductionDurationKey = 'default_temp_volume_reduction_duration_seconds';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -39,6 +45,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultSnoozeDuration = 5;
   int _defaultMaxSnoozes = 3;
   bool _cloudSyncEnabled = false;
+  
+  // Nuevas variables para configuraciones de volumen
+  int _defaultMaxVolumePercent = 100;
+  int _defaultVolumeRampUpDurationSeconds = 30;
+  int _defaultTempVolumeReductionPercent = 30;
+  int _defaultTempVolumeReductionDurationSeconds = 60;
 
   final AuthService _authService = AuthService();
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
@@ -75,6 +87,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
     final maxSnoozes = prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
     final cloudSync = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+    
+    // Cargar configuraciones de volumen
+    final maxVolumePercent = prefs.getInt(SettingsScreen.defaultMaxVolumeKey) ?? 100;
+    final volumeRampUpDuration = prefs.getInt(SettingsScreen.defaultVolumeRampUpKey) ?? 30;
+    final tempVolumeReduction = prefs.getInt(SettingsScreen.defaultTempVolumeReductionKey) ?? 30;
+    final tempVolumeReductionDuration = prefs.getInt(SettingsScreen.defaultTempVolumeReductionDurationKey) ?? 60;
 
     // Verificar estado de autenticación
     _currentUser = FirebaseAuth.instance.currentUser;
@@ -98,6 +116,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _defaultSnoozeDuration = snoozeDuration;
         _defaultMaxSnoozes = maxSnoozes;
         _cloudSyncEnabled = cloudSync;
+        _defaultMaxVolumePercent = maxVolumePercent;
+        _defaultVolumeRampUpDurationSeconds = volumeRampUpDuration;
+        _defaultTempVolumeReductionPercent = tempVolumeReduction;
+        _defaultTempVolumeReductionDurationSeconds = tempVolumeReductionDuration;
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
@@ -149,6 +171,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       setState(() {
         _defaultMaxSnoozes = maxSnoozes;
+      });
+    }
+  }
+
+  // Métodos para guardar configuraciones de volumen
+  Future<void> _saveDefaultMaxVolume(int maxVolume) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultMaxVolumeKey, maxVolume);
+    if (mounted) {
+      setState(() {
+        _defaultMaxVolumePercent = maxVolume;
+      });
+    }
+  }
+
+  Future<void> _saveDefaultVolumeRampUp(int rampUpDuration) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultVolumeRampUpKey, rampUpDuration);
+    if (mounted) {
+      setState(() {
+        _defaultVolumeRampUpDurationSeconds = rampUpDuration;
+      });
+    }
+  }
+
+  Future<void> _saveDefaultTempVolumeReduction(int tempReduction) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultTempVolumeReductionKey, tempReduction);
+    if (mounted) {
+      setState(() {
+        _defaultTempVolumeReductionPercent = tempReduction;
+      });
+    }
+  }
+
+  Future<void> _saveDefaultTempVolumeReductionDuration(int duration) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultTempVolumeReductionDurationKey, duration);
+    if (mounted) {
+      setState(() {
+        _defaultTempVolumeReductionDurationSeconds = duration;
       });
     }
   }
@@ -685,6 +748,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _saveMaxSnoozes(value.toInt());
                           },
                           activeColor: Colors.green,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Nueva Card para configuraciones de volumen
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Configuración de Volumen',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Configuraciones predeterminadas para el control de volumen de las alarmas',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Volumen máximo
+                        Text(
+                          'Volumen máximo: $_defaultMaxVolumePercent%',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultMaxVolumePercent.toDouble(),
+                          min: 10,
+                          max: 100,
+                          divisions: 18,
+                          label: '$_defaultMaxVolumePercent%',
+                          onChanged: (double value) {
+                            _saveDefaultMaxVolume(value.toInt());
+                          },
+                          activeColor: Colors.blue,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Duración de escalado de volumen
+                        Text(
+                          'Duración de escalado: $_defaultVolumeRampUpDurationSeconds segundos',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultVolumeRampUpDurationSeconds.toDouble(),
+                          min: 0,
+                          max: 120,
+                          divisions: 24,
+                          label: '$_defaultVolumeRampUpDurationSeconds s',
+                          onChanged: (double value) {
+                            _saveDefaultVolumeRampUp(value.toInt());
+                          },
+                          activeColor: Colors.blue,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Porcentaje de reducción temporal
+                        Text(
+                          'Reducción temporal: $_defaultTempVolumeReductionPercent%',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultTempVolumeReductionPercent.toDouble(),
+                          min: 10,
+                          max: 80,
+                          divisions: 14,
+                          label: '$_defaultTempVolumeReductionPercent%',
+                          onChanged: (double value) {
+                            _saveDefaultTempVolumeReduction(value.toInt());
+                          },
+                          activeColor: Colors.orange,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Duración de reducción temporal
+                        Text(
+                          'Duración de reducción: $_defaultTempVolumeReductionDurationSeconds segundos',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultTempVolumeReductionDurationSeconds.toDouble(),
+                          min: 15,
+                          max: 300,
+                          divisions: 19,
+                          label: '$_defaultTempVolumeReductionDurationSeconds s',
+                          onChanged: (double value) {
+                            _saveDefaultTempVolumeReductionDuration(value.toInt());
+                          },
+                          activeColor: Colors.orange,
                         ),
                       ],
                     ),

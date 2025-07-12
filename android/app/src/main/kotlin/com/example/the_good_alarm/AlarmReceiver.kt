@@ -159,9 +159,14 @@ class AlarmReceiver : BroadcastReceiver() {
             val message = intent.getStringExtra("message") ?: "Es hora de despertar"
             val maxSnoozes = intent.getIntExtra("maxSnoozes", 3)
             val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
+            val maxVolumePercent = intent.getIntExtra("maxVolumePercent", 100)
+            val volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30)
+            val tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50)
+            val tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
             
             Log.d("AlarmReceiver", "Alarm details - ID: $alarmId, Title: $title, Message: $message")
             Log.d("AlarmReceiver", "Snooze settings - Max: $maxSnoozes, Duration: $snoozeDurationMinutes minutes")
+            Log.d("AlarmReceiver", "Volume settings - Max: $maxVolumePercent%, RampUp: ${volumeRampUpDurationSeconds}s, TempReduction: $tempVolumeReductionPercent% for ${tempVolumeReductionDurationSeconds}s")
 
             // Adquirir WakeLock para mantener el dispositivo despierto
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -172,9 +177,54 @@ class AlarmReceiver : BroadcastReceiver() {
             wakeLock.acquire(10 * 60 * 1000L) // 10 minutos máximo
             Log.d("AlarmReceiver", "WakeLock acquired")
 
-            // Reproducir sonido de alarma
+            // Iniciar control de volumen antes de reproducir el sonido
             try {
-                Log.d("AlarmReceiver", "Setting up alarm sound")
+                Log.d("AlarmReceiver", "Starting volume control: maxVolume=$maxVolumePercent%, rampUp=${volumeRampUpDurationSeconds}s")
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                val originalVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_ALARM)
+                Log.d("AlarmReceiver", "Original volume saved: $originalVolume")
+                
+                // Calcular volumen objetivo
+                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM)
+                val targetVolume = (maxVolume * maxVolumePercent / 100).coerceAtMost(maxVolume)
+                Log.d("AlarmReceiver", "Volume control started: target=$targetVolume/$maxVolume")
+                
+                // Establecer volumen inicial bajo y comenzar escalado gradual
+                audioManager.setStreamVolume(android.media.AudioManager.STREAM_ALARM, 1, 0)
+                
+                // Programar escalado gradual de volumen
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                val totalSteps = targetVolume
+                val stepDuration = if (totalSteps > 1) {
+                    (volumeRampUpDurationSeconds * 1000L) / (totalSteps - 1)
+                } else {
+                    0L
+                }
+                
+                Log.d("AlarmReceiver", "Volume ramp configuration: duration=${volumeRampUpDurationSeconds}s, steps=$totalSteps, stepDuration=${stepDuration}ms")
+                
+                for (step in 1..targetVolume) {
+                    val delay = stepDuration * (step - 1)
+                    handler.postDelayed({
+                        try {
+                            audioManager.setStreamVolume(android.media.AudioManager.STREAM_ALARM, step, 0)
+                            Log.d("AlarmReceiver", "Volume step: $step/$targetVolume at ${delay}ms")
+                            
+                            if (step == targetVolume) {
+                                Log.d("AlarmReceiver", "Volume escalation completed in ${volumeRampUpDurationSeconds}s. Temporary reduction will be controlled by UI button.")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AlarmReceiver", "Error setting volume step $step: ${e.message}")
+                        }
+                    }, delay)
+                }
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error starting volume control: ${e.message}")
+            }
+
+            // Reproducir sonido de alarma con control de volumen
+            try {
+                Log.d("AlarmReceiver", "Setting up alarm sound with volume control")
                 val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                     ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                     ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -183,8 +233,19 @@ class AlarmReceiver : BroadcastReceiver() {
                 
                 currentRingtone = RingtoneManager.getRingtone(context, alarmUri)
                 currentRingtone?.let { ringtone ->
+                    // Configurar el ringtone para usar el stream de alarma
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        ringtone.audioAttributes = AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        ringtone.streamType = android.media.AudioManager.STREAM_ALARM
+                    }
+                    
                     if (!ringtone.isPlaying) {
-                        Log.d("AlarmReceiver", "Starting alarm sound")
+                        Log.d("AlarmReceiver", "Starting alarm sound with ALARM stream")
                         ringtone.play()
                         Log.d("AlarmReceiver", "Alarm sound started")
                     } else {
@@ -447,6 +508,10 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("maxSnoozes", maxSnoozes)
                 putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
                 putExtra("snoozeCount", 0)
+                putExtra("maxVolumePercent", maxVolumePercent)
+                putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
+                putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
+                putExtra("tempVolumeReductionDurationSeconds", tempVolumeReductionDurationSeconds)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             

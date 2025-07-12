@@ -29,6 +29,17 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
   GameConfig? _gameConfig;
   bool _syncToCloud = true;
   bool _cloudSyncEnabled = false;
+  
+  // Nuevas variables para configuraciones de volumen
+  int _maxVolumePercent = 100;
+  int _volumeRampUpDurationSeconds = 30;
+  int _tempVolumeReductionPercent = 30;
+  int _tempVolumeReductionDurationSeconds = 60;
+  
+  // Variables para controlar la expansión de las tarjetas
+  bool _isSnoozeExpanded = false;
+  bool _isVolumeExpanded = false;
+  bool _isGameExpanded = false;
 
   final List<String> _daysOfWeek = [
     'Lunes',
@@ -67,6 +78,10 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       _requireGame = widget.alarm!.requireGame;
       _gameConfig = widget.alarm!.gameConfig;
       _syncToCloud = widget.alarm!.syncToCloud;
+      _maxVolumePercent = widget.alarm!.maxVolumePercent;
+      _volumeRampUpDurationSeconds = widget.alarm!.volumeRampUpDurationSeconds;
+      _tempVolumeReductionPercent = widget.alarm!.tempVolumeReductionPercent;
+      _tempVolumeReductionDurationSeconds = widget.alarm!.tempVolumeReductionDurationSeconds;
 
       // Configurar repetición
       if (widget.alarm!.isDaily) {
@@ -98,6 +113,12 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
         _maxSnoozes = prefs.getInt('max_snoozes') ?? 3;
         _snoozeDuration = prefs.getInt('snooze_duration_minutes') ?? 5;
         _syncToCloud = cloudSyncEnabled; // Por defecto, sincronizar si está habilitado
+        
+        // Cargar configuraciones predeterminadas de volumen
+        _maxVolumePercent = prefs.getInt(SettingsScreen.defaultMaxVolumeKey) ?? 100;
+        _volumeRampUpDurationSeconds = prefs.getInt(SettingsScreen.defaultVolumeRampUpKey) ?? 30;
+        _tempVolumeReductionPercent = prefs.getInt(SettingsScreen.defaultTempVolumeReductionKey) ?? 30;
+        _tempVolumeReductionDurationSeconds = prefs.getInt(SettingsScreen.defaultTempVolumeReductionDurationKey) ?? 60;
       }
     });
   }
@@ -107,6 +128,51 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     _titleController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  // Método helper para crear tarjetas colapsables
+  Widget _buildCollapsibleCard({
+    required String title,
+    required bool isExpanded,
+    required VoidCallback onTap,
+    required List<Widget> children,
+  }) {
+    return Card(
+      color: Colors.black,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Colors.green, width: 2),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            title: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            trailing: Icon(
+              isExpanded ? Icons.expand_less : Icons.expand_more,
+              color: Colors.green,
+            ),
+            onTap: onTap,
+          ),
+          if (isExpanded) ...[
+            const Divider(color: Colors.green, height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: children,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Future<void> _selectTime() async {
@@ -265,6 +331,10 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       'gameConfig': _gameConfig,
       'syncToCloud': _syncToCloud,
       'alarm': widget.alarm,
+      'maxVolumePercent': _maxVolumePercent,
+      'volumeRampUpDurationSeconds': _volumeRampUpDurationSeconds,
+      'tempVolumeReductionPercent': _tempVolumeReductionPercent,
+      'tempVolumeReductionDurationSeconds': _tempVolumeReductionDurationSeconds,
     };
 
     Navigator.pop(context, result);
@@ -289,6 +359,17 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
         return 'Dificultad: ${config.livesLabel} • ${config.parameter} ecuaciones • ${config.repetitions} rondas';
       case GameType.sequence:
         return 'Dificultad: ${config.livesLabel} • Secuencia de ${config.parameter} • ${config.repetitions} rondas';
+    }
+  }
+
+  IconData _getGameIcon(GameType gameType) {
+    switch (gameType) {
+      case GameType.memorice:
+        return Icons.memory;
+      case GameType.equations:
+        return Icons.calculate;
+      case GameType.sequence:
+        return Icons.format_list_numbered;
     }
   }
 
@@ -437,126 +518,242 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
 
             const SizedBox(height: 20),
 
-            // Configuración de Snooze
-            const Text(
-              'Configuración de Snooze',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-
-            // Duración del snooze
-            Text(
-              'Duración: $_snoozeDuration minutos',
-              style: const TextStyle(color: Colors.white),
-            ),
-            Slider(
-              value: _snoozeDuration.toDouble(),
-              min: 1,
-              max: 30,
-              divisions: 29,
-              label: '$_snoozeDuration min',
-              activeColor: Colors.green,
-              onChanged: (value) {
+            // Tarjeta de Configuración de Snooze
+            _buildCollapsibleCard(
+              title: 'Configuración de Snooze',
+              isExpanded: _isSnoozeExpanded,
+              onTap: () {
                 setState(() {
-                  _snoozeDuration = value.toInt();
+                  _isSnoozeExpanded = !_isSnoozeExpanded;
                 });
               },
-            ),
-
-            const SizedBox(height: 16),
-
-            // Número máximo de snoozes
-            Text(
-              'Número máximo de snoozes: $_maxSnoozes',
-              style: const TextStyle(color: Colors.white),
-            ),
-            Slider(
-              value: _maxSnoozes.toDouble(),
-              min: 0,
-              max: 10,
-              divisions: 10,
-              label: _maxSnoozes.toString(),
-              activeColor: Colors.green,
-              onChanged: (value) {
-                setState(() {
-                  _maxSnoozes = value.toInt();
-                });
-              },
+              children: [
+                // Duración del snooze
+                Text(
+                  'Duración: $_snoozeDuration minutos',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Slider(
+                  value: _snoozeDuration.toDouble(),
+                  min: 1,
+                  max: 30,
+                  divisions: 29,
+                  label: '$_snoozeDuration min',
+                  activeColor: Colors.green,
+                  onChanged: (value) {
+                    setState(() {
+                      _snoozeDuration = value.toInt();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                // Número máximo de snoozes
+                Text(
+                  'Número máximo de snoozes: $_maxSnoozes',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Slider(
+                  value: _maxSnoozes.toDouble(),
+                  min: 0,
+                  max: 10,
+                  divisions: 10,
+                  label: _maxSnoozes.toString(),
+                  activeColor: Colors.green,
+                  onChanged: (value) {
+                    setState(() {
+                      _maxSnoozes = value.toInt();
+                    });
+                  },
+                ),
+              ],
             ),
 
             const SizedBox(height: 20),
 
-            // Configuración de Juegos
-            const Text(
-              'Juego para Apagar Alarma',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-
-            // Switch para habilitar/deshabilitar juego
-            SwitchListTile(
-              title: const Text(
-                'Requerir juego para apagar',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: Text(
-                _requireGame
-                    ? 'Deberás completar un juego para apagar la alarma'
-                    : 'La alarma se puede apagar normalmente',
-                style: TextStyle(color: Colors.grey[400]),
-              ),
-              value: _requireGame,
-              activeColor: Colors.green,
-              onChanged: (value) {
+            // Tarjeta de Configuración de Volumen
+            _buildCollapsibleCard(
+              title: 'Configuración de Volumen',
+              isExpanded: _isVolumeExpanded,
+              onTap: () {
                 setState(() {
-                  _requireGame = value;
-                  if (!value) {
-                    _gameConfig = null;
-                  }
+                  _isVolumeExpanded = !_isVolumeExpanded;
                 });
               },
+              children: [
+                Text(
+                  'Controla cómo se comporta el volumen de esta alarma',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                // Volumen máximo
+                Text(
+                  'Volumen máximo: $_maxVolumePercent%',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Slider(
+                  value: _maxVolumePercent.toDouble(),
+                  min: 10,
+                  max: 100,
+                  divisions: 18,
+                  label: '$_maxVolumePercent%',
+                  activeColor: Colors.blue,
+                  onChanged: (value) {
+                    setState(() {
+                      _maxVolumePercent = value.toInt();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                // Duración de escalado de volumen
+                Text(
+                  'Duración de escalado: $_volumeRampUpDurationSeconds segundos',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Text(
+                  _volumeRampUpDurationSeconds == 0 
+                      ? 'El volumen comenzará al máximo inmediatamente'
+                      : 'El volumen aumentará gradualmente hasta el máximo',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+                Slider(
+                  value: _volumeRampUpDurationSeconds.toDouble(),
+                  min: 0,
+                  max: 120,
+                  divisions: 24,
+                  label: '$_volumeRampUpDurationSeconds s',
+                  activeColor: Colors.blue,
+                  onChanged: (value) {
+                    setState(() {
+                      _volumeRampUpDurationSeconds = value.toInt();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                // Porcentaje de reducción temporal
+                Text(
+                  'Reducción temporal: $_tempVolumeReductionPercent%',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Text(
+                  'Volumen al presionar el botón de reducción temporal',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+                Slider(
+                  value: _tempVolumeReductionPercent.toDouble(),
+                  min: 10,
+                  max: 80,
+                  divisions: 14,
+                  label: '$_tempVolumeReductionPercent%',
+                  activeColor: Colors.orange,
+                  onChanged: (value) {
+                    setState(() {
+                      _tempVolumeReductionPercent = value.toInt();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                // Duración de reducción temporal
+                Text(
+                  'Duración de reducción: $_tempVolumeReductionDurationSeconds segundos',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Text(
+                  'Tiempo que durará la reducción de volumen',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+                Slider(
+                  value: _tempVolumeReductionDurationSeconds.toDouble(),
+                  min: 15,
+                  max: 300,
+                  divisions: 19,
+                  label: '$_tempVolumeReductionDurationSeconds s',
+                  activeColor: Colors.orange,
+                  onChanged: (value) {
+                    setState(() {
+                      _tempVolumeReductionDurationSeconds = value.toInt();
+                    });
+                  },
+                ),
+              ],
             ),
 
-            // Configuración del juego seleccionado
-            if (_requireGame) ...[
-              const SizedBox(height: 16),
-              Card(
-                color: Colors.grey[900],
-                child: ListTile(
-                  leading: Icon(
-                    _gameConfig != null
-                        ? _getGameIcon(_gameConfig!.gameType)
-                        : Icons.videogame_asset,
-                    color: Colors.green,
+            const SizedBox(height: 20),
+
+            // Tarjeta de Configuración de Juegos
+            _buildCollapsibleCard(
+              title: 'Juego para Apagar Alarma',
+              isExpanded: _isGameExpanded,
+              onTap: () {
+                setState(() {
+                  _isGameExpanded = !_isGameExpanded;
+                });
+              },
+              children: [
+                // Switch para habilitar/deshabilitar juego
+                SwitchListTile(
+                  title: const Text(
+                    'Requerir juego para apagar',
+                    style: TextStyle(color: Colors.white),
                   ),
-                  title: Text(
-                    _gameConfig != null
-                        ? _getGameName(_gameConfig!.gameType)
-                        : 'Seleccionar juego',
-                    style: const TextStyle(color: Colors.white),
+                  subtitle: Text(
+                    _requireGame
+                        ? 'Deberás completar un juego para apagar la alarma'
+                        : 'La alarma se puede apagar normalmente',
+                    style: TextStyle(color: Colors.grey[400]),
                   ),
-                  subtitle: _gameConfig != null
-                      ? Text(
-                          _getGameDescription(_gameConfig!),
-                          style: TextStyle(color: Colors.grey[400]),
-                        )
-                      : const Text(
-                          'Toca para elegir un juego',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                  trailing: _gameConfig != null
-                      ? IconButton(
-                          icon: const Icon(Icons.close, color: Colors.red),
-                          onPressed: _removeGame,
-                        )
-                      : const Icon(
-                          Icons.arrow_forward_ios,
-                          color: Colors.white,
-                        ),
-                  onTap: _selectGame,
+                  value: _requireGame,
+                  activeColor: Colors.green,
+                  onChanged: (value) {
+                    setState(() {
+                      _requireGame = value;
+                      if (!value) {
+                        _gameConfig = null;
+                      }
+                    });
+                  },
                 ),
-              ),
-            ],
+                // Configuración del juego seleccionado
+                if (_requireGame) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    color: Colors.grey[900],
+                    child: ListTile(
+                      leading: Icon(
+                        _gameConfig != null
+                            ? _getGameIcon(_gameConfig!.gameType)
+                            : Icons.videogame_asset,
+                        color: Colors.green,
+                      ),
+                      title: Text(
+                        _gameConfig != null
+                            ? _getGameName(_gameConfig!.gameType)
+                            : 'Seleccionar juego',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: _gameConfig != null
+                          ? Text(
+                              _getGameDescription(_gameConfig!),
+                              style: TextStyle(color: Colors.grey[400]),
+                            )
+                          : const Text(
+                              'Toca para elegir un juego',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                      trailing: _gameConfig != null
+                          ? IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: _removeGame,
+                            )
+                          : const Icon(
+                              Icons.arrow_forward_ios,
+                              color: Colors.white,
+                            ),
+                      onTap: _selectGame,
+                    ),
+                  ),
+                ],
+              ],
+            ),
 
             // Card de sincronización en la nube
             if (_cloudSyncEnabled && FirebaseAuth.instance.currentUser != null) ...[
@@ -595,14 +792,4 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     );
   }
 
-  IconData _getGameIcon(GameType gameType) {
-    switch (gameType) {
-      case GameType.memorice:
-        return Icons.memory;
-      case GameType.equations:
-        return Icons.calculate;
-      case GameType.sequence:
-        return Icons.lightbulb;
-    }
-  }
 }

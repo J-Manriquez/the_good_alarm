@@ -14,6 +14,7 @@ import 'widgets/device_name_modal.dart';
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
 import 'settings_screen.dart'; // Importar SettingsScreen
 import 'alarm_edit_screen.dart';
+import 'widgets/volume_control_button.dart'; // Importar VolumeControlButton
 import 'package:intl/intl.dart';
 
 class HomePage extends StatefulWidget {
@@ -52,6 +53,12 @@ class _HomePageState extends State<HomePage> {
   // NUEVO: Variables para controlar el estado de la aplicación
   final bool _isAppInForeground = true;
   final bool _hasUnhandledAlarm = false;
+
+  // Variables de configuración de volumen
+  int maxVolumePercent = 100;
+  int volumeRampUpDurationSeconds = 30;
+  int tempVolumeReductionPercent = 50;
+  int tempVolumeReductionDurationSeconds = 30;
 
   // Servicios de Firebase
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
@@ -602,6 +609,10 @@ class _HomePageState extends State<HomePage> {
         'snoozeCount': snoozeCount,
         'requireGame': alarm.requireGame, // Agregar
         'gameConfig': alarm.gameConfig, // Agregar
+        'maxVolumePercent': alarm.maxVolumePercent,
+        'volumeRampUpDurationSeconds': alarm.volumeRampUpDurationSeconds,
+        'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
+        'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
       },
     );
   }
@@ -661,12 +672,15 @@ class _HomePageState extends State<HomePage> {
                   'snoozeDurationMinutes': alarm.snoozeDurationMinutes,
                   'requireGame': alarm.requireGame, // Agregar
                   'gameConfig': alarm.gameConfig,
+                  'maxVolumePercent': alarm.maxVolumePercent,
+                  'volumeRampUpDurationSeconds': alarm.volumeRampUpDurationSeconds,
+                  'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
+                  'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
                 },
               ),
             ),
           );
         }
-        _handleShowAlarmScreen(call);
         break;
       // NUEVO: Manejar notificación de alarma sonando
       case 'notifyAlarmRinging':
@@ -987,6 +1001,10 @@ class _HomePageState extends State<HomePage> {
         'isWeekend': alarm.isWeekend,
         'maxSnoozes': alarm.maxSnoozes,
         'snoozeDurationMinutes': alarm.snoozeDurationMinutes,
+        'maxVolumePercent': alarm.maxVolumePercent,
+        'volumeRampUpDurationSeconds': alarm.volumeRampUpDurationSeconds,
+        'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
+        'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
       });
     } catch (e) {
       print('Error setting native alarm: $e');
@@ -1040,6 +1058,10 @@ class _HomePageState extends State<HomePage> {
       final requireGame = result['requireGame'] ?? false;
       final gameConfig = result['gameConfig'] as GameConfig?;
       final syncToCloud = result['syncToCloud'] ?? true;
+      final maxVolumePercent = result['maxVolumePercent'] ?? 100;
+      final volumeRampUpDurationSeconds = result['volumeRampUpDurationSeconds'] ?? 0;
+      final tempVolumeReductionPercent = result['tempVolumeReductionPercent'] ?? 50;
+      final tempVolumeReductionDurationSeconds = result['tempVolumeReductionDurationSeconds'] ?? 30;
 
       // Configurar los valores de repetición
       bool isDaily = repetitionType == 'daily';
@@ -1072,6 +1094,10 @@ class _HomePageState extends State<HomePage> {
         requireGame: requireGame,
         gameConfig: gameConfig,
         syncToCloud: syncToCloud,
+        maxVolumePercent: maxVolumePercent,
+        volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
+        tempVolumeReductionPercent: tempVolumeReductionPercent,
+        tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
       );
 
       try {
@@ -1149,6 +1175,10 @@ class _HomePageState extends State<HomePage> {
       final requireGame = result['requireGame'] ?? false;
       final gameConfig = result['gameConfig'] as GameConfig?;
       final syncToCloud = result['syncToCloud'] ?? true;
+      final maxVolumePercent = result['maxVolumePercent'] ?? 100;
+      final volumeRampUpDurationSeconds = result['volumeRampUpDurationSeconds'] ?? 0;
+      final tempVolumeReductionPercent = result['tempVolumeReductionPercent'] ?? 50;
+      final tempVolumeReductionDurationSeconds = result['tempVolumeReductionDurationSeconds'] ?? 30;
 
       // Verificar si syncToCloud cambió de true a false para eliminar de Firebase
       final previousSyncToCloud = alarm.syncToCloud;
@@ -1192,6 +1222,10 @@ class _HomePageState extends State<HomePage> {
             requireGame: requireGame,
             gameConfig: gameConfig,
             syncToCloud: syncToCloud,
+            maxVolumePercent: maxVolumePercent,
+            volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
+            tempVolumeReductionPercent: tempVolumeReductionPercent,
+            tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
           );
           _saveAlarms();
 
@@ -1279,6 +1313,10 @@ class _HomePageState extends State<HomePage> {
             requireGame: alarm.requireGame,
             gameConfig: alarm.gameConfig,
             syncToCloud: alarm.syncToCloud,
+            maxVolumePercent: alarm.maxVolumePercent,
+            volumeRampUpDurationSeconds: alarm.volumeRampUpDurationSeconds,
+            tempVolumeReductionPercent: alarm.tempVolumeReductionPercent,
+            tempVolumeReductionDurationSeconds: alarm.tempVolumeReductionDurationSeconds,
           );
 
           // Setear la alarma con el tiempo actualizado
@@ -1967,6 +2005,18 @@ class _HomePageState extends State<HomePage> {
     }
 
     final canSnooze = _ringingAlarmSnoozeCount < _ringingAlarmMaxSnoozes;
+    
+    // Encontrar la alarma actual para obtener configuraciones de volumen
+    final currentAlarm = _alarms.firstWhere(
+      (alarm) => alarm.id == _ringingAlarmId,
+      orElse: () => Alarm(
+        id: _ringingAlarmId!,
+        time: DateTime.now(),
+        title: _ringingAlarmTitle,
+        message: _ringingAlarmMessage,
+        isActive: true,
+      ),
+    );
 
     return GestureDetector(
       onTap: () {
@@ -1981,6 +2031,10 @@ class _HomePageState extends State<HomePage> {
                 'snoozeCount': _ringingAlarmSnoozeCount,
                 'maxSnoozes': _ringingAlarmMaxSnoozes,
                 'snoozeDurationMinutes': _ringingAlarmSnoozeDuration,
+                'maxVolumePercent': currentAlarm.maxVolumePercent,
+                'volumeRampUpDurationSeconds': currentAlarm.volumeRampUpDurationSeconds,
+                'tempVolumeReductionPercent': currentAlarm.tempVolumeReductionPercent,
+                'tempVolumeReductionDurationSeconds': currentAlarm.tempVolumeReductionDurationSeconds,
               },
             ),
           ),
@@ -2052,6 +2106,53 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
 
+            const SizedBox(height: 16),
+            
+            // Configuración de volumen
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Configuración de Volumen',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Volumen máximo: ${currentAlarm.maxVolumePercent}%',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                  Text(
+                    'Aumento gradual: ${currentAlarm.volumeRampUpDurationSeconds}s',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 8),
+                  VolumeControlButton(
+                    tempVolumePercent: currentAlarm.tempVolumeReductionPercent,
+                    durationSeconds: currentAlarm.tempVolumeReductionDurationSeconds,
+                    onToggle: (isActive) {
+                      // Manejar activación/desactivación de reducción temporal
+                      print('Volume reduction toggled: $isActive');
+                    },
+                    onExpired: () {
+                      // Manejar expiración de reducción temporal
+                      print('Volume reduction expired');
+                    },
+                  ),
+                ],
+              ),
+            ),
+            
             const SizedBox(height: 16),
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
