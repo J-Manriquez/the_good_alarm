@@ -7,11 +7,10 @@ class GamesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Minijuegos'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -24,21 +23,21 @@ class GamesScreen extends StatelessWidget {
               title: 'Memorice',
               description: 'Encuentra las parejas de cartas',
               icon: Icons.memory,
-              color: Colors.purple,
+              color: scheme.tertiary,
               gameType: GameType.memorice,
             ),
             _GameCard(
               title: 'Ecuaciones',
               description: 'Resuelve problemas matemáticos',
               icon: Icons.calculate,
-              color: Colors.green,
+              color: scheme.primary,
               gameType: GameType.equations,
             ),
             _GameCard(
               title: 'Secuencia',
               description: 'Sigue el patrón de luces',
               icon: Icons.lightbulb,
-              color: Colors.orange,
+              color: scheme.secondary,
               gameType: GameType.sequence,
             ),
           ],
@@ -65,6 +64,7 @@ class _GameCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 4,
       child: InkWell(
@@ -91,15 +91,15 @@ class _GameCard extends StatelessWidget {
               Icon(
                 icon,
                 size: 48,
-                color: Colors.white,
+                color: scheme.onPrimary,
               ),
               const SizedBox(height: 12),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: scheme.onPrimary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -108,9 +108,9 @@ class _GameCard extends StatelessWidget {
                 child: Text(
                   description,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Colors.white70,
+                    color: scheme.onPrimary.withOpacity(0.7),
                   ),
                 ),
               ),

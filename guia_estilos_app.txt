@@ -1,0 +1,224 @@
+Guía de estilos (referencia: pantalla “Nueva/Editar Alarma”)
+
+Origen de referencia:
+- lib/alarm_edit_screen.dart
+
+Objetivo:
+- Reproducir el mismo look & feel en otras pantallas (misma paleta, jerarquías, espaciados y componentes).
+
+
+1) Paleta de colores (valores usados)
+
+Base (modo oscuro):
+- Fondo principal (Scaffold/AppBar): negro
+  - Colors.black = #000000
+- Texto principal: blanco
+  - Colors.white = #FFFFFF
+- Regla de legibilidad: si el fondo es negro, el texto siempre debe ser blanco
+- Acento principal (acciones/selección): verde
+  - Colors.green (Material) ≈ #4CAF50
+
+Superficies (contenedores):
+- Superficie “card/input” oscura:
+  - Colors.grey[900] ≈ #212121
+- Superficie secundaria (chips no seleccionados):
+  - Colors.grey[800] ≈ #424242
+
+Texto secundario / ayudas:
+- Descripciones/subtítulos:
+  - Colors.grey[400] ≈ #BDBDBD
+- Hints en inputs:
+  - Colors.grey[600] ≈ #757575
+- Texto gris genérico:
+  - Colors.grey ≈ #9E9E9E
+
+Estados / acentos puntuales:
+- Cerrar / eliminar (icono X): rojo
+  - Colors.red ≈ #F44336
+- Sliders de volumen (máximo y ramp-up): azul
+  - Colors.blue ≈ #2196F3
+- Sliders de reducción temporal: naranja
+  - Colors.orange ≈ #FF9800
+
+Selector de hora (TimePicker):
+- Fondo del selector: negro (#000000)
+- Segmentos seleccionados (hora/minuto y AM/PM):
+  - Color.fromARGB(255, 208, 252, 210) = #D0FCD2
+- Segmentos no seleccionados:
+  - blanco (#FFFFFF)
+- Texto de hora/minuto y AM/PM (tanto seleccionado como no seleccionado):
+  - negro (#000000)
+- Manecilla del dial y acentos: verde (Colors.green)
+- Fondo del dial: grey.shade800 ≈ #424242
+
+
+2) Tipografía (jerarquía y tamaños)
+
+AppBar:
+- Título: blanco (sin tamaño explícito; se apoya en el estilo por defecto del AppBar, solo forzando color)
+- Acción “Guardar”:
+  - TextStyle(color: Colors.green, fontSize: 16)
+
+Labels de sección (p. ej. “Título”, “Mensaje”, “Repetición”, “Sincronización…”):
+- TextStyle(color: Colors.white, fontSize: 16)
+
+Títulos de tarjetas colapsables:
+- TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)
+
+Subtítulo destacado (hora seleccionada en la card “Hora”):
+- TextStyle(color: Colors.green, fontSize: 18)
+
+Textos de ayuda / descripción:
+- Descripción general en “Configuración de Volumen”:
+  - TextStyle(color: Colors.grey[400], fontSize: 14)
+- Ayudas cortas bajo sliders:
+  - TextStyle(color: Colors.grey[400], fontSize: 12)
+
+Inputs (TextField):
+- Texto ingresado: blanco (tamaño por defecto)
+- Hint: gris 600 (tamaño por defecto)
+
+TimePicker:
+- helpText:
+  - TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 22)
+- Botones:
+  - textStyle con fontSize: 20
+
+
+3) Espaciados y márgenes (layout)
+
+Contenedor principal:
+- body: SingleChildScrollView con padding uniforme
+  - EdgeInsets.all(16)
+
+Separaciones verticales estándar:
+- Entre secciones principales: SizedBox(height: 20)
+- Entre label y control (p. ej. label “Título” y su TextField): SizedBox(height: 8)
+- Dentro de áreas colapsables (separadores internos): SizedBox(height: 16)
+
+Chips (selección de días):
+- Wrap spacing horizontal:
+  - spacing: 8.0
+
+Contenido de tarjetas colapsables:
+- Padding interno:
+  - EdgeInsets.all(16)
+- Separador al expandir:
+  - Divider(color: Colors.green, height: 1)
+
+
+4) Componentes y estilos concretos
+
+4.1) Scaffold y AppBar
+- Scaffold:
+  - backgroundColor: Colors.black
+- AppBar:
+  - backgroundColor: Colors.black
+  - iconTheme: IconThemeData(color: Colors.white)
+  - actions: TextButton “Guardar” en verde (fontSize 16)
+
+4.2) Card “Hora” (ListTile)
+- Card:
+  - color: Colors.grey[900]
+- ListTile:
+  - leading: Icon(Icons.access_time, color: Colors.green)
+  - title: Text blanco
+  - subtitle: Text verde tamaño 18
+  - trailing: Icon(Icons.arrow_forward_ios, color: Colors.white)
+
+4.3) TextField (input estilo “oscuro lleno”)
+- TextField:
+  - style: TextStyle(color: Colors.white)
+- InputDecoration:
+  - filled: true
+  - fillColor: Colors.grey[900]
+  - hintStyle: TextStyle(color: Colors.grey[600])
+  - border:
+    - OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide.none
+      )
+
+4.4) RadioListTile (repetición)
+- title: texto blanco
+- activeColor: Colors.green
+
+4.5) FilterChip (días personalizados)
+- backgroundColor: Colors.grey[800]
+- selectedColor: Colors.green
+- labelStyle:
+  - seleccionado: negro
+  - no seleccionado: blanco
+
+4.6) Tarjetas colapsables (patrón principal)
+Estructura visual:
+- Card:
+  - color: Colors.black
+  - shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+      side: BorderSide(color: Colors.green, width: 2)
+    )
+- Header:
+  - ListTile con título blanco (bold, 16)
+  - trailing: icono expand en verde
+- Al expandir:
+  - Divider verde (height 1)
+  - Padding interno 16 con Column alineada a la izquierda
+
+4.7) SwitchListTile (toggles)
+- title: blanco
+- subtitle: gris 400
+- activeColor: Colors.green
+- Se usa:
+  - Dentro de card gris[900] (sincronización en la nube)
+  - Dentro de contenido colapsable (juego)
+
+4.8) Sliders
+Estética:
+- Se mantiene el slider por defecto (track/thumb de Material), cambiando principalmente el activeColor.
+
+Colores por contexto:
+- Snooze: activeColor = Colors.green
+- Volumen máximo y ramp-up: activeColor = Colors.blue
+- Reducción temporal y duración: activeColor = Colors.orange
+
+Texto asociado:
+- Etiquetas (valor actual): blanco
+- Ayudas/explicaciones: gris 400 (14 o 12 según el texto)
+
+4.9) Card de selección de juego (dentro del bloque de juego)
+- Card:
+  - color: Colors.grey[900]
+- ListTile:
+  - leading: icono verde
+  - title: blanco
+  - subtitle: gris[400] si hay config, o gris normal si no hay
+  - trailing:
+    - si hay config: IconButton “close” en rojo
+    - si no hay config: arrow_forward_ios en blanco
+
+4.10) Card “Temas” (pantalla Configuración)
+- Botonera de acciones en 2 filas (2 botones por fila), en este orden:
+  - Fila 1: “Crear” (FilledButton con fondo verde/primario), “Eliminar” (OutlinedButton en rojo)
+  - Fila 2: “Editar” (OutlinedButton), “Duplicar” (FilledButton con fondo verde/primario)
+
+
+5) Estilo del selector de hora (TimePicker) para mantener coherencia
+
+Al abrir el selector:
+- Usar ThemeData.dark() y ajustar timePickerTheme para forzar un estilo consistente con la app:
+  - backgroundColor: negro
+  - dialHandColor: verde
+  - dialBackgroundColor: gris oscuro
+  - entryModeIconColor: verde
+  - helpTextStyle: blanco, bold, 22
+
+Botones del TimePicker:
+- Confirmar:
+  - fondo verde, texto blanco, fontSize 20, radius 8
+- Cancelar:
+  - fondo blanco, texto negro, fontSize 20, radius 8
+
+Nota de consistencia visual:
+- El diseño prioriza alto contraste (negro/blanco) y un acento verde constante para elementos interactivos/seleccionados.
+

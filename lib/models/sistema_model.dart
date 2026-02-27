@@ -57,6 +57,23 @@ class SistemaModel {
     }
   }
 
+  String? activeThemeIdForDevice(String deviceName) {
+    final index = usuarios.indexWhere((device) => device['usuario'] == deviceName);
+    if (index == -1) return null;
+    final value = usuarios[index]['activeThemeId'];
+    if (value == null) return null;
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    return s;
+  }
+
+  void updateDeviceTheme(String deviceName, String themeId) {
+    final index = usuarios.indexWhere((device) => device['usuario'] == deviceName);
+    if (index != -1) {
+      usuarios[index]['activeThemeId'] = themeId;
+    }
+  }
+
   void removeDevice(String deviceName) {
     usuarios.removeWhere((device) => device['usuario'] == deviceName);
   }

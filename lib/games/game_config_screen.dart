@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
-import '../modelo_alarm.dart';
 import 'memorice_game_screen.dart';
 import 'equations_game_screen.dart';
 import 'sequence_game_screen.dart';
@@ -32,6 +31,17 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
   int subEquations = 1;
 
   final List<int> livesOptions = [0, 1, 3, 5];
+  
+  int get _maxParameter {
+    switch (widget.gameType) {
+      case GameType.memorice:
+        return 10;
+      case GameType.equations:
+        return 20;
+      case GameType.sequence:
+        return 20;
+    }
+  }
 
   String get gameTitle {
     switch (widget.gameType) {
@@ -70,25 +80,26 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
     }
   }
 
-  Color _getGameColor() {
+  Color _getGameColor(ColorScheme scheme) {
     switch (widget.gameType) {
       case GameType.memorice:
-        return Colors.purple;
+        return scheme.tertiary;
       case GameType.equations:
-        return Colors.green;
+        return scheme.primary;
       case GameType.sequence:
-        return Colors.orange;
+        return scheme.secondary;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final gameColor = _getGameColor(scheme);
     return Scaffold(
-      backgroundColor: widget.isAlarmMode ? Colors.black : Colors.white,
       appBar: AppBar(
         title: Text('Configurar $gameTitle'),
-        backgroundColor: _getGameColor(),
-        foregroundColor: Colors.white,
+        backgroundColor: gameColor,
+        foregroundColor: scheme.onPrimary,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -110,7 +121,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
             if (widget.gameType == GameType.equations) ...[
               // Tipo de entrada
               Card(
-                color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+                color: scheme.surface,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
@@ -120,9 +131,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         'Tipo de respuesta',
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(
-                              color: widget.isAlarmMode
-                                  ? Colors.white
-                                  : Colors.black,
+                              color: scheme.onSurface,
                             ),
                       ),
                       const SizedBox(height: 16),
@@ -130,14 +139,12 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         title: Text(
                           'Manual - Escribir respuesta',
                           style: TextStyle(
-                            color: widget.isAlarmMode
-                                ? Colors.white
-                                : Colors.black,
+                            color: scheme.onSurface,
                           ),
                         ),
                         value: EquationInputType.manual,
                         groupValue: inputType,
-                        activeColor: _getGameColor(),
+                        activeColor: gameColor,
                         onChanged: (value) {
                           setState(() {
                             inputType = value!;
@@ -148,14 +155,12 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         title: Text(
                           'Opción múltiple - 4 alternativas',
                           style: TextStyle(
-                            color: widget.isAlarmMode
-                                ? Colors.white
-                                : Colors.black,
+                            color: scheme.onSurface,
                           ),
                         ),
                         value: EquationInputType.multipleChoice,
                         groupValue: inputType,
-                        activeColor: _getGameColor(),
+                        activeColor: gameColor,
                         onChanged: (value) {
                           setState(() {
                             inputType = value!;
@@ -169,7 +174,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
               const SizedBox(height: 16),
               // Tipo de operaciones
               Card(
-                color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+                color: scheme.surface,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
@@ -179,9 +184,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         'Operaciones matemáticas',
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(
-                              color: widget.isAlarmMode
-                                  ? Colors.white
-                                  : Colors.black,
+                              color: scheme.onSurface,
                             ),
                       ),
                       const SizedBox(height: 16),
@@ -189,14 +192,12 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         title: Text(
                           'Solo suma y resta',
                           style: TextStyle(
-                            color: widget.isAlarmMode
-                                ? Colors.white
-                                : Colors.black,
+                            color: scheme.onSurface,
                           ),
                         ),
                         value: EquationOperationType.addSubtract,
                         groupValue: operationType,
-                        activeColor: _getGameColor(),
+                        activeColor: gameColor,
                         onChanged: (value) {
                           setState(() {
                             operationType = value!;
@@ -207,14 +208,12 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         title: Text(
                           'Suma, resta, multiplicación y división',
                           style: TextStyle(
-                            color: widget.isAlarmMode
-                                ? Colors.white
-                                : Colors.black,
+                            color: scheme.onSurface,
                           ),
                         ),
                         value: EquationOperationType.addSubtractMultiplyDivide,
                         groupValue: operationType,
-                        activeColor: _getGameColor(),
+                        activeColor: gameColor,
                         onChanged: (value) {
                           setState(() {
                             operationType = value!;
@@ -225,14 +224,12 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         title: Text(
                           'Solo multiplicación y división',
                           style: TextStyle(
-                            color: widget.isAlarmMode
-                                ? Colors.white
-                                : Colors.black,
+                            color: scheme.onSurface,
                           ),
                         ),
                         value: EquationOperationType.multiplyDivide,
                         groupValue: operationType,
-                        activeColor: _getGameColor(),
+                        activeColor: gameColor,
                         onChanged: (value) {
                           setState(() {
                             operationType = value!;
@@ -247,7 +244,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
               // Complejidad de ecuaciones
               // En la función _buildEquationSpecificSections(), modificar la sección de complejidad:
               Card(
-                color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+                color: scheme.surface,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
@@ -257,9 +254,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                         'Complejidad de ecuaciones',
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(
-                              color: widget.isAlarmMode
-                                  ? Colors.white
-                                  : Colors.black,
+                              color: scheme.onSurface,
                             ),
                       ),
                       const SizedBox(height: 16),
@@ -268,9 +263,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                           Text(
                             '1',
                             style: TextStyle(
-                              color: widget.isAlarmMode
-                                  ? Colors.white
-                                  : Colors.black,
+                              color: scheme.onSurface,
                             ),
                           ),
                           Expanded(
@@ -280,7 +273,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                               max: 3,
                               divisions: 2,
                               label: _getEquationComplexityLabel(),
-                              activeColor: _getGameColor(),
+                              activeColor: gameColor,
                               onChanged: (value) {
                                 setState(() {
                                   subEquations = value.round();
@@ -291,9 +284,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                           Text(
                             '3',
                             style: TextStyle(
-                              color: widget.isAlarmMode
-                                  ? Colors.white
-                                  : Colors.black,
+                              color: scheme.onSurface,
                             ),
                           ),
                         ],
@@ -303,9 +294,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                           'Operaciones por ecuación: $subEquations',
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(
-                                color: widget.isAlarmMode
-                                    ? Colors.white
-                                    : Colors.black,
+                                color: scheme.onSurface,
                               ),
                         ),
                       ),
@@ -327,8 +316,10 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
   }
 
   Widget _buildLivesSection() {
+    final scheme = Theme.of(context).colorScheme;
+    final gameColor = _getGameColor(scheme);
     return Card(
-      color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+      color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -337,7 +328,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
             Text(
               'Vidas',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: widget.isAlarmMode ? Colors.white : Colors.black,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
@@ -348,20 +339,18 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                       ? 'Infinitas'
                       : '$livesValue ${livesValue == 1 ? 'vida' : 'vidas'}',
                   style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
                 subtitle: Text(
                   _getLivesDescription(livesValue),
                   style: TextStyle(
-                    color: widget.isAlarmMode
-                        ? Colors.grey[400]
-                        : Colors.grey[600],
+                    color: scheme.onSurface.withOpacity(0.7),
                   ),
                 ),
                 value: livesValue,
                 groupValue: lives,
-                activeColor: _getGameColor(),
+                activeColor: gameColor,
                 onChanged: (value) {
                   setState(() {
                     lives = value!;
@@ -376,8 +365,10 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
   }
 
   Widget _buildParameterSection() {
+    final scheme = Theme.of(context).colorScheme;
+    final gameColor = _getGameColor(scheme);
     return Card(
-      color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+      color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -386,7 +377,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
             Text(
               parameterLabel,
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: widget.isAlarmMode ? Colors.white : Colors.black,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
@@ -395,17 +386,17 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                 Text(
                   '1',
                   style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
                 Expanded(
                   child: Slider(
                     value: parameter.toDouble(),
                     min: 1,
-                    max: 10,
-                    divisions: 9,
+                    max: _maxParameter.toDouble(),
+                    divisions: _maxParameter - 1,
                     label: parameter.toString(),
-                    activeColor: _getGameColor(),
+                    activeColor: gameColor,
                     onChanged: (value) {
                       setState(() {
                         parameter = value.round();
@@ -414,9 +405,9 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                   ),
                 ),
                 Text(
-                  '10',
+                  _maxParameter.toString(),
                   style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
               ],
@@ -425,7 +416,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
               child: Text(
                 'Valor seleccionado: $parameter',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: widget.isAlarmMode ? Colors.white : Colors.black,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
@@ -436,8 +427,10 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
   }
 
   Widget _buildRepetitionsSection() {
+    final scheme = Theme.of(context).colorScheme;
+    final gameColor = _getGameColor(scheme);
     return Card(
-      color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
+      color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -446,7 +439,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
             Text(
               'Repeticiones',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: widget.isAlarmMode ? Colors.white : Colors.black,
+                color: scheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
@@ -455,7 +448,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                 Text(
                   '1',
                   style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
                 Expanded(
@@ -465,7 +458,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                     max: 5,
                     divisions: 4,
                     label: repetitions.toString(),
-                    activeColor: _getGameColor(),
+                    activeColor: gameColor,
                     onChanged: (value) {
                       setState(() {
                         repetitions = value.round();
@@ -476,7 +469,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
                 Text(
                   '5',
                   style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
+                    color: scheme.onSurface,
                   ),
                 ),
               ],
@@ -485,7 +478,7 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
               child: Text(
                 'Repeticiones: $repetitions',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: widget.isAlarmMode ? Colors.white : Colors.black,
+                  color: scheme.onSurface,
                 ),
               ),
             ),
@@ -493,19 +486,6 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
         ),
       ),
     );
-  }
-
-  String _getEquationTypeDescription() {
-    switch (subEquations) {
-      case 1:
-        return 'Ecuaciones simples: una sola operación (ej: 5 + 3 = ?)';
-      case 2:
-        return 'Ecuaciones intermedias: dos operaciones (ej: 5 + 3 - 2 = ?)';
-      case 3:
-        return 'Ecuaciones complejas: tres operaciones (ej: 5 + 3 - 2 × 4 = ?)';
-      default:
-        return '';
-    }
   }
 
   String _getEquationComplexityLabel() {
@@ -521,201 +501,17 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
     }
   }
 
-  List<Widget> _buildEquationSpecificSections() {
-    return [
-      // Tipo de entrada
-      Card(
-        color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Tipo de respuesta',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: widget.isAlarmMode ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 16),
-              RadioListTile<EquationInputType>(
-                title: Text(
-                  'Manual - Escribir respuesta',
-                  style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-                value: EquationInputType.manual,
-                groupValue: inputType,
-                activeColor: _getGameColor(),
-                onChanged: (value) {
-                  setState(() {
-                    inputType = value!;
-                  });
-                },
-              ),
-              RadioListTile<EquationInputType>(
-                title: Text(
-                  'Opción múltiple - 4 alternativas',
-                  style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-                value: EquationInputType.multipleChoice,
-                groupValue: inputType,
-                activeColor: _getGameColor(),
-                onChanged: (value) {
-                  setState(() {
-                    inputType = value!;
-                  });
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-      const SizedBox(height: 16),
-
-      // Tipo de operaciones
-      Card(
-        color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Operaciones matemáticas',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: widget.isAlarmMode ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 16),
-              RadioListTile<EquationOperationType>(
-                title: Text(
-                  'Solo suma y resta',
-                  style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-                value: EquationOperationType.addSubtract,
-                groupValue: operationType,
-                activeColor: _getGameColor(),
-                onChanged: (value) {
-                  setState(() {
-                    operationType = value!;
-                  });
-                },
-              ),
-              RadioListTile<EquationOperationType>(
-                title: Text(
-                  'Suma, resta, multiplicación y división',
-                  style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-                value: EquationOperationType.addSubtractMultiplyDivide,
-                groupValue: operationType,
-                activeColor: _getGameColor(),
-                onChanged: (value) {
-                  setState(() {
-                    operationType = value!;
-                  });
-                },
-              ),
-              RadioListTile<EquationOperationType>(
-                title: Text(
-                  'Solo multiplicación y división',
-                  style: TextStyle(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-                value: EquationOperationType.multiplyDivide,
-                groupValue: operationType,
-                activeColor: _getGameColor(),
-                onChanged: (value) {
-                  setState(() {
-                    operationType = value!;
-                  });
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-      const SizedBox(height: 16),
-
-      // Complejidad de ecuaciones
-      // En la función _buildEquationSpecificSections(), modificar la sección de complejidad:
-      Card(
-        color: widget.isAlarmMode ? Colors.grey[900] : Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Complejidad de ecuaciones',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: widget.isAlarmMode ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    '1',
-                    style: TextStyle(
-                      color: widget.isAlarmMode ? Colors.white : Colors.black,
-                    ),
-                  ),
-                  Expanded(
-                    child: Slider(
-                      value: subEquations.toDouble(),
-                      min: 1,
-                      max: 3,
-                      divisions: 2,
-                      label: _getEquationComplexityLabel(),
-                      activeColor: _getGameColor(),
-                      onChanged: (value) {
-                        setState(() {
-                          subEquations = value.round();
-                        });
-                      },
-                    ),
-                  ),
-                  Text(
-                    '3',
-                    style: TextStyle(
-                      color: widget.isAlarmMode ? Colors.white : Colors.black,
-                    ),
-                  ),
-                ],
-              ),
-              Center(
-                child: Text(
-                  'Operaciones por ecuación: $subEquations',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: widget.isAlarmMode ? Colors.white : Colors.black,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ];
-  }
-
   Widget _buildActionButtons() {
+    final scheme = Theme.of(context).colorScheme;
+    final gameColor = _getGameColor(scheme);
     return Row(
       children: [
         Expanded(
           child: OutlinedButton(
             onPressed: () => Navigator.pop(context),
             style: OutlinedButton.styleFrom(
-              foregroundColor: _getGameColor(),
-              side: BorderSide(color: _getGameColor()),
+              foregroundColor: gameColor,
+              side: BorderSide(color: gameColor),
               padding: const EdgeInsets.symmetric(vertical: 16),
             ),
             child: const Text('Cancelar'),
@@ -726,8 +522,8 @@ class _GameConfigScreenState extends State<GameConfigScreen> {
           child: ElevatedButton(
             onPressed: _startGame,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _getGameColor(),
-              foregroundColor: Colors.white,
+              backgroundColor: gameColor,
+              foregroundColor: scheme.onPrimary,
               padding: const EdgeInsets.symmetric(vertical: 16),
             ),
             child: Text(widget.isAlarmMode ? 'Iniciar Juego' : 'Jugar'),

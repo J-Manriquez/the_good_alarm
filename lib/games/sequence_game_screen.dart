@@ -33,22 +33,11 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
   bool isShowingSequence = false;
   bool isUserTurn = false;
   bool showError = false;
+  Timer? _sequenceTimer;
 
   late AnimationController _glowController;
   late AnimationController _errorController;
   late Animation<double> _glowAnimation;
-
-  final List<Color> cardColors = [
-    Colors.red,
-    Colors.blue,
-    Colors.green,
-    Colors.yellow,
-    Colors.purple,
-    Colors.orange,
-    Colors.pink,
-    Colors.cyan,
-    Colors.lime,
-  ];
 
   @override
   void initState() {
@@ -64,13 +53,20 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     _glowAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
-    _initializeGame();
+    _initializeSession();
   }
 
-  void _initializeGame() {
+  void _initializeSession() {
     setState(() {
       remainingLives = widget.lives == 0 ? -1 : widget.lives; // -1 para infinitas
       totalErrors = 0;
+      currentRepetition = 1;
+    });
+    _startRepetition();
+  }
+
+  void _startRepetition() {
+    setState(() {
       currentStep = 0;
       userSequence.clear();
       isShowingSequence = false;
@@ -81,7 +77,40 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     _showSequence();
   }
 
+  void _restartSessionDueToLives() {
+    if (!mounted) return;
+    _sequenceTimer?.cancel();
+    setState(() {
+      remainingLives = widget.lives == 0 ? -1 : widget.lives;
+      totalErrors = 0;
+      currentRepetition = 1;
+      currentStep = 0;
+      userSequence.clear();
+      isShowingSequence = false;
+      isUserTurn = false;
+      showError = false;
+    });
+    _generateSequence();
+    _showSequence();
+  }
+
+  List<Color> _getCardColors(ColorScheme scheme) {
+    return <Color>[
+      scheme.primary,
+      scheme.secondary,
+      scheme.tertiary,
+      scheme.error,
+      scheme.primary.withOpacity(0.7),
+      scheme.secondary.withOpacity(0.7),
+      scheme.tertiary.withOpacity(0.7),
+      scheme.error.withOpacity(0.7),
+      scheme.onSurface.withOpacity(0.7),
+    ];
+  }
+
   void _generateSequence() {
+    final scheme = Theme.of(context).colorScheme;
+    final cardColors = _getCardColors(scheme);
     final random = Random();
     sequence = List.generate(
       widget.sequenceLength,
@@ -90,15 +119,17 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
   }
 
   void _showSequence() {
+    _sequenceTimer?.cancel();
     setState(() {
       isShowingSequence = true;
       isUserTurn = false;
       currentStep = 0;
     });
 
-    Timer.periodic(const Duration(milliseconds: 1000), (timer) {
+    _sequenceTimer = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
       if (currentStep >= sequence.length) {
         timer.cancel();
+        if (_sequenceTimer == timer) _sequenceTimer = null;
         setState(() {
           isShowingSequence = false;
           isUserTurn = true;
@@ -120,7 +151,9 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
   void _onCardTapped(int cardIndex) {
     if (!isUserTurn || isShowingSequence) return;
 
-    userSequence.add(cardIndex);
+    setState(() {
+      userSequence.add(cardIndex);
+    });
     int currentIndex = userSequence.length - 1;
 
     if (userSequence[currentIndex] != sequence[currentIndex]) {
@@ -140,7 +173,13 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
         });
 
         if (remainingLives == 0) {
-          _gameOver(false);
+          if (widget.isAlarmMode) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _restartSessionDueToLives();
+            });
+          } else {
+            _gameOver(false);
+          }
         } else {
           // Reiniciar secuencia
           setState(() {
@@ -171,37 +210,40 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Ronda Completada!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Has completado la ronda $currentRepetition de ${widget.repetitions}.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _nextRepetition();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            '¡Ronda Completada!',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          content: Text(
+            'Has completado la ronda $currentRepetition de ${widget.repetitions}.',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _nextRepetition();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Continuar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
-            child: const Text(
-              'Continuar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
@@ -209,7 +251,7 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     setState(() {
       currentRepetition++;
     });
-    _initializeGame();
+    _startRepetition();
   }
 
   void _gameOver(bool won) {
@@ -217,8 +259,9 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
       if (won && currentRepetition >= widget.repetitions) {
         widget.onGameFinished?.call(true);
       } else if (!won) {
-        // En modo alarma, mostrar opción de reiniciar cuando se pierden las vidas
-        _showRestartDialog();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _restartSessionDueToLives();
+        });
       }
       return;
     }
@@ -226,86 +269,56 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text(
-          won ? '¡Felicitaciones!' : '¡Juego Terminado!',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          won 
-            ? 'Has completado todas las repeticiones del juego.'
-            : 'Se acabaron las vidas. Errores totales: $totalErrors',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          OutlinedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white),
-            ),
-            child: const Text('Volver'),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            won ? '¡Felicitaciones!' : '¡Juego Terminado!',
+            style: TextStyle(color: scheme.onSurface),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Jugar de nuevo'),
+          content: Text(
+            won
+                ? 'Has completado todas las repeticiones del juego.'
+                : 'Se acabaron las vidas. Errores totales: $totalErrors',
+            style: TextStyle(color: scheme.onSurface),
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showRestartDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Se acabaron las vidas!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Errores totales: $totalErrors\n\nDebes reiniciar el juego para continuar.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
+          actions: [
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop();
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: scheme.onSurface,
+                side: BorderSide(color: scheme.onSurface),
+              ),
+              child: const Text('Volver'),
             ),
-            child: const Text('Reiniciar'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _restartGame();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.secondary,
+                foregroundColor: scheme.onSecondary,
+              ),
+              child: const Text('Jugar de nuevo'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   void _restartGame() {
-    setState(() {
-      currentRepetition = 1;
-    });
-    _initializeGame();
+    _initializeSession();
   }
 
   @override
   void dispose() {
+    _sequenceTimer?.cancel();
     _glowController.dispose();
     _errorController.dispose();
     super.dispose();
@@ -313,15 +326,16 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final cardColors = _getCardColors(scheme);
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
           'Secuencia - Ronda $currentRepetition/${widget.repetitions}',
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: scheme.onSecondary),
         ),
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
+        backgroundColor: scheme.secondary,
+        foregroundColor: scheme.onSecondary,
         automaticallyImplyLeading: !widget.isAlarmMode,
       ),
       body: Column(
@@ -329,13 +343,21 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
           // Información del juego
           Container(
             padding: const EdgeInsets.all(16),
-            color: Colors.orange.withOpacity(0.1),
+            color: scheme.secondary.withAlpha(26),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildInfoCard('Vidas', remainingLives == -1 ? '∞' : remainingLives.toString(), Colors.red),
-                _buildInfoCard('Errores', totalErrors.toString(), Colors.orange),
-                _buildInfoCard('Progreso', '${userSequence.length}/${sequence.length}', Colors.green),
+                _buildInfoCard(
+                  'Vidas',
+                  remainingLives == -1 ? '∞' : remainingLives.toString(),
+                  scheme.error,
+                ),
+                _buildInfoCard('Errores', totalErrors.toString(), scheme.secondary),
+                _buildInfoCard(
+                  'Progreso',
+                  '${userSequence.length}/${sequence.length}',
+                  scheme.primary,
+                ),
               ],
             ),
           ),
@@ -348,8 +370,8 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
                   : isUserTurn 
                       ? 'Tu turno - Repite la secuencia'
                       : 'Preparando...',
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
               ),
@@ -393,9 +415,9 @@ class _SequenceGameScreenState extends State<SequenceGameScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withAlpha(26),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withAlpha(77)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -441,6 +463,7 @@ class _SequenceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedBuilder(
@@ -448,31 +471,33 @@ class _SequenceCard extends StatelessWidget {
         builder: (context, child) {
           return Container(
             decoration: BoxDecoration(
-              color: color.withOpacity(isGlowing ? 0.9 : 0.6),
+              color: color.withAlpha(((isGlowing ? 0.9 : 0.6) * 255).round()),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isGlowing 
-                    ? Colors.white
+                    ? scheme.onSurface
                     : isError 
-                        ? Colors.red
+                        ? scheme.error
                         : color,
                 width: isGlowing ? 3 : 2,
               ),
               boxShadow: [
                 if (isGlowing)
                   BoxShadow(
-                    color: Colors.white.withOpacity(glowAnimation.value * 0.8),
+                    color: scheme.onSurface.withAlpha(
+                      ((glowAnimation.value * 0.8) * 255).round(),
+                    ),
                     blurRadius: 20 * glowAnimation.value,
                     spreadRadius: 5 * glowAnimation.value,
                   ),
                 if (isError)
                   BoxShadow(
-                    color: Colors.red.withOpacity(0.8),
+                    color: scheme.error.withAlpha(204),
                     blurRadius: 15,
                     spreadRadius: 3,
                   ),
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: scheme.shadow.withAlpha(77),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -483,7 +508,7 @@ class _SequenceCard extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.3),
+                  color: scheme.onSurface.withAlpha(77),
                   shape: BoxShape.circle,
                 ),
               ),

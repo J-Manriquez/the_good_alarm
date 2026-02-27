@@ -4,6 +4,20 @@ import '../models/sistema_model.dart';
 class SistemaFirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Stream<SistemaModel?> watchSistema(String userId) {
+    return _firestore
+        .collection('usuarios')
+        .doc(userId)
+        .collection('usuario-sistema')
+        .doc('sistema')
+        .snapshots()
+        .map((doc) {
+          final data = doc.data();
+          if (data == null) return null;
+          return SistemaModel.fromMap(data);
+        });
+  }
+
   // Obtener el documento sistema para un usuario
   Future<SistemaModel?> getSistema(String userId) async {
     try {
@@ -87,6 +101,29 @@ class SistemaFirebaseService {
       }
     } catch (e) {
       print('Error al actualizar cloudSync del dispositivo: $e');
+      throw e;
+    }
+  }
+
+  Future<void> updateDeviceTheme(String userId, String deviceName, String themeId) async {
+    try {
+      final sistema = await getSistema(userId);
+      if (sistema != null) {
+        sistema.updateDeviceTheme(deviceName, themeId);
+        await setSistema(userId, sistema);
+      } else {
+        final newSistema = SistemaModel(usuarios: [
+          {
+            'usuario': deviceName,
+            'isActive': true,
+            '_cloudSyncEnabled': false,
+            'activeThemeId': themeId,
+          }
+        ]);
+        await setSistema(userId, newSistema);
+      }
+    } catch (e) {
+      print('Error al actualizar tema del dispositivo: $e');
       throw e;
     }
   }

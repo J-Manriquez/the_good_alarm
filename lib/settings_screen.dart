@@ -1,16 +1,17 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
 import 'dart:async'; // Required for Timer
-import 'dart:convert';
-import 'home_page.dart'; // To access Alarm model and potentially _formatDuration
-import 'services/auth_service.dart';
 import 'services/alarm_firebase_service.dart';
+import 'services/alarm_local_service.dart';
+import 'services/alarm_repository.dart';
 import 'services/sistema_firebase_service.dart';
 import 'models/sistema_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'models/app_theme_model.dart';
+import 'widgets/app_theme_provider.dart';
+import 'widgets/color_input_widget.dart';
+import 'services/app_theme_controller.dart';
 
 enum AlarmGroupingOption {
   none,
@@ -52,8 +53,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultTempVolumeReductionPercent = 30;
   int _defaultTempVolumeReductionDurationSeconds = 60;
 
-  final AuthService _authService = AuthService();
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
+  final AlarmLocalService _alarmLocalService = AlarmLocalService();
+  late final AlarmRepository _alarmRepository = AlarmRepository(
+    local: _alarmLocalService,
+    cloud: _alarmFirebaseService,
+  );
   final SistemaFirebaseService _sistemaFirebaseService = SistemaFirebaseService();
   User? _currentUser;
   SistemaModel? _sistemaModel;
@@ -63,8 +68,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Duration _timeUntilNextAlarm = Duration.zero;
   Alarm? _currentNextAlarmForCountdown;
   List<Alarm> _alarms = []; // To find the next alarm
-  static const String _alarmsKey = 'alarms_list'; // Copied from HomePage
-
   @override
   void initState() {
     super.initState();
@@ -102,12 +105,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _loadSistemaData();
     }
 
-    // Load alarms to calculate next alarm countdown
-    final alarmsString = prefs.getStringList(_alarmsKey);
-    if (alarmsString != null) {
-      _alarms = alarmsString.map((s) => Alarm.fromJson(jsonDecode(s))).toList();
-      _alarms.sort((a, b) => a.time.compareTo(b.time));
-    }
+    await _alarmRepository.ensureMigrated();
+    _alarms = await _alarmRepository.loadLocalAlarms();
 
     if (mounted) {
       setState(() {
@@ -246,6 +245,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await _syncAllAlarmsToCloud();
       }
       
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -253,79 +253,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? 'Sincronización de alarmas activada'
                 : 'Sincronización de alarmas desactivada',
           ),
-          backgroundColor: Colors.green,
+          backgroundColor: Theme.of(context).colorScheme.primary,
         ),
       );
     } catch (e) {
       print('Error al actualizar sincronización: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error al actualizar la sincronización'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Error al actualizar la sincronización'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _syncAllAlarmsToCloud() async {
     try {
       if (_currentUser == null) return;
+      await _alarmRepository.ensureMigrated();
+      await _alarmRepository.pullOnce(userId: _currentUser!.uid);
+      final alarms = await _alarmRepository.loadLocalAlarms(includeDeleted: true);
 
-      // Obtener el ID de la colección del usuario
-      final userData = await _authService.getUserData(_currentUser!.uid);
-      if (userData == null) return;
+      for (final alarm in alarms) {
+        final updated = alarm.copyWith(syncToCloud: true);
+        await _alarmLocalService.upsertAlarm(updated);
+        final json = Map<String, dynamic>.from(updated.toJson());
+        json.remove('createdAt');
+        json.remove('updatedAt');
+        json.remove('revision');
+        json.remove('fieldUpdatedAt');
+        await _alarmLocalService.markDirtyFields(updated.id, json.keys.toSet());
+      }
 
-      final userCollectionId =
-          '${userData.name}_${userData.creationDate.millisecondsSinceEpoch}';
-
-      // Actualizar todas las alarmas para que se sincronicen por defecto
-      final prefs = await SharedPreferences.getInstance();
-      final alarmsString = prefs.getStringList('alarms_list');
-      if (alarmsString != null) {
-        final alarms = alarmsString
-            .map((s) => Alarm.fromJson(jsonDecode(s)))
-            .toList();
-
-        // Actualizar alarmas para sincronización
-        final updatedAlarms = alarms
-            .map(
-              (alarm) => Alarm(
-                id: alarm.id,
-                time: alarm.time,
-                title: alarm.title,
-                message: alarm.message,
-                isActive: alarm.isActive,
-                repeatDays: alarm.repeatDays,
-                snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-                maxSnoozes: alarm.maxSnoozes,
-                snoozeCount: alarm.snoozeCount,
-                requireGame: alarm.requireGame,
-                gameConfig: alarm.gameConfig,
-                syncToCloud: true, // Activar sincronización por defecto
-              ),
-            )
-            .toList();
-
-        // Guardar alarmas actualizadas localmente
-        final updatedAlarmsString = updatedAlarms
-            .map((alarm) => jsonEncode(alarm.toJson()))
-            .toList();
-        await prefs.setStringList('alarms_list', updatedAlarmsString);
-
-        // Sincronizar con Firebase
-        await _alarmFirebaseService.syncAllAlarms(
-          updatedAlarms,
-          userCollectionId,
-        );
+      await _alarmRepository.pushPendingChanges(userId: _currentUser!.uid);
+      _alarms = await _alarmRepository.loadLocalAlarms();
+      if (mounted) {
+        setState(() {});
       }
     } catch (e) {
       print('Error al sincronizar alarmas: $e');
       // Mostrar mensaje de error al usuario
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error al sincronizar alarmas con la nube'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: const Text('Error al sincronizar alarmas con la nube'),
+            backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       }
@@ -567,9 +541,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // funcion para cerrar sesion con AuthService
   Future<void> signOut() async {
-    await AuthService().signOut();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/home');
   }
 
@@ -582,8 +556,159 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '';
   }
 
+  Future<void> _openThemeEditorScreen({
+    required AppThemeController controller,
+    required AppThemeModel theme,
+  }) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => ThemeEditorScreen(
+          controller: controller,
+          theme: theme,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThemesCard(AppThemeController controller) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final scheme = Theme.of(context).colorScheme;
+        final themes = controller.themes;
+        final activeId = controller.activeThemeId ?? (themes.isNotEmpty ? themes.first.id : null);
+        final activeTheme = controller.activeTheme;
+
+        return Card(
+          elevation: 2.0,
+          margin: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Temas', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                Text(
+                  'Crea, duplica y aplica temas; también puedes asignarlos por dispositivo.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: activeId,
+                  decoration: const InputDecoration(labelText: 'Tema activo'),
+                  items: themes
+                      .map((t) => DropdownMenuItem(value: t.id, child: Text(t.name)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    controller.setActiveThemeId(v);
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () async {
+                          final created = await controller.createTheme(name: 'Nuevo tema');
+                          await _openThemeEditorScreen(controller: controller, theme: created);
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: scheme.primary,
+                          foregroundColor: scheme.onPrimary,
+                        ),
+                        child: const Text('Crear'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: (activeTheme.id == AppThemeModel.defaultDark().id)
+                            ? null
+                            : () => controller.deleteTheme(activeTheme.id),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: scheme.error,
+                          side: BorderSide(color: scheme.error),
+                        ),
+                        child: const Text('Eliminar'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _openThemeEditorScreen(
+                          controller: controller,
+                          theme: activeTheme,
+                        ),
+                        child: const Text('Editar'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: activeId == null
+                            ? null
+                            : () async {
+                                final duplicated = await controller.duplicateTheme(activeId);
+                                if (duplicated == null) return;
+                                await _openThemeEditorScreen(controller: controller, theme: duplicated);
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: scheme.primary,
+                          foregroundColor: scheme.onPrimary,
+                        ),
+                        child: const Text('Duplicar'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_currentUser != null && _sistemaModel != null) ...[
+                  const SizedBox(height: 16),
+                  Text('Asignación por dispositivo', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  ..._sistemaModel!.usuarios.map((u) {
+                    final deviceName = (u['usuario'] as String?) ?? 'Dispositivo';
+                    final deviceThemeId = (u['activeThemeId'] as String?)?.trim();
+                    final selected = (deviceThemeId != null && deviceThemeId.isNotEmpty) ? deviceThemeId : activeId;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: DropdownButtonFormField<String>(
+                        value: selected,
+                        decoration: InputDecoration(labelText: deviceName),
+                        items: themes
+                            .map((t) => DropdownMenuItem(value: t.id, child: Text(t.name)))
+                            .toList(),
+                        onChanged: (v) async {
+                          if (v == null || _currentUser == null) return;
+                          await controller.assignThemeToDevice(
+                            userId: _currentUser!.uid,
+                            deviceName: deviceName,
+                            themeId: v,
+                          );
+                          await _loadSistemaData();
+                        },
+                      ),
+                    );
+                  }),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final themeController = AppThemeProvider.of(context);
+
     // Slider values: 0 for none, 1 for twelveHour, ..., 4 for twoHour
     double sliderValue = _selectedGrouping.index.toDouble();
     final sliderDivisions = AlarmGroupingOption.values.length - 1; // 0 to 4
@@ -593,66 +718,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final nextAlarm = _getNextActiveAlarm();
 
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 0, 0, 0),
-        title: Padding(
-          padding: const EdgeInsets.only(left: 45),
-          child: Text(
-            'Configuración',
-            style: TextStyle(
-              fontSize: 25,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
+        appBar: AppBar(
+          title: const Padding(
+            padding: EdgeInsets.only(left: 45),
+            child: Text('Configuración'),
           ),
         ),
-        iconTheme: IconThemeData(color: Colors.white),
-      ),
-      body: Column(
-        children: [
+        body: Column(
+          children: [
           if (_showNextAlarmSection &&
               _currentNextAlarmForCountdown !=
                   null) // Show only if enabled and an alarm exists
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8.0),
-              color: hasActiveAlarms ? Colors.green : Colors.black,
+              color: hasActiveAlarms ? scheme.primary : scheme.surface,
               child: Text(
                 hasActiveAlarms
                     ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
                     : 'No hay alarmas activas',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: const Color.fromARGB(255, 255, 255, 255),
+                  color: hasActiveAlarms ? scheme.onPrimary : scheme.onSurface,
                 ),
                 textAlign: TextAlign.center,
               ),
             ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: <Widget>[
-                Card(
-                  elevation: 2.0,
-                  margin: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: SwitchListTile(
-                    title: const Text(
-                      'Mostrar sección "Próxima Alarma" en Inicio',
-                    ),
-                    subtitle: const Text(
-                      'Permite ver detalles de la siguiente alarma programada en la pantalla principal.',
-                    ),
-                    value: _showNextAlarmSection,
-                    activeColor: Colors.green,
-                    inactiveThumbColor: Colors.black,
-                    onChanged: (bool value) {
-                      _saveShowNextAlarmOption(value);
-                    },
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16.0,
-                      vertical: 8.0,
+                padding: const EdgeInsets.all(16.0),
+                children: <Widget>[
+                  Card(
+                    elevation: 2.0,
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: SwitchListTile(
+                      title: const Text(
+                        'Mostrar sección "Próxima Alarma" en Inicio',
+                      ),
+                      subtitle: const Text(
+                        'Permite ver detalles de la siguiente alarma programada en la pantalla principal.',
+                      ),
+                      value: _showNextAlarmSection,
+                      activeColor: scheme.primary,
+                      inactiveThumbColor: scheme.onSurface,
+                      onChanged: (bool value) {
+                        _saveShowNextAlarmOption(value);
+                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
                     ),
                   ),
-                ),
+                const SizedBox(height: 16),
+                _buildThemesCard(themeController),
                 const SizedBox(height: 16),
                 Card(
                   elevation: 2.0,
@@ -684,7 +802,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               AlarmGroupingOption.values[value.toInt()],
                             );
                           },
-                          activeColor: Colors.green,
+                          activeColor: scheme.primary,
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -729,7 +847,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveSnoozeDuration(value.toInt());
                           },
-                          activeColor: Colors.green,
+                          activeColor: scheme.primary,
                         ),
                         const SizedBox(height: 16),
 
@@ -747,7 +865,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveMaxSnoozes(value.toInt());
                           },
-                          activeColor: Colors.green,
+                          activeColor: scheme.primary,
                         ),
                       ],
                     ),
@@ -770,8 +888,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Configuraciones predeterminadas para el control de volumen de las alarmas',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: Colors.grey[600]),
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
                         ),
                         const SizedBox(height: 16),
 
@@ -789,7 +906,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveDefaultMaxVolume(value.toInt());
                           },
-                          activeColor: Colors.blue,
+                          activeColor: scheme.primary,
                         ),
                         const SizedBox(height: 16),
 
@@ -807,7 +924,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveDefaultVolumeRampUp(value.toInt());
                           },
-                          activeColor: Colors.blue,
+                          activeColor: scheme.secondary,
                         ),
                         const SizedBox(height: 16),
 
@@ -825,7 +942,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveDefaultTempVolumeReduction(value.toInt());
                           },
-                          activeColor: Colors.orange,
+                          activeColor: scheme.tertiary,
                         ),
                         const SizedBox(height: 16),
 
@@ -843,7 +960,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (double value) {
                             _saveDefaultTempVolumeReductionDuration(value.toInt());
                           },
-                          activeColor: Colors.orange,
+                          activeColor: scheme.tertiary,
                         ),
                       ],
                     ),
@@ -866,7 +983,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Icon(
                               Icons.login,
-                              color: Colors.blue[600],
+                              color: scheme.primary,
                               size: 28,
                             ),
                             const SizedBox(width: 16),
@@ -887,14 +1004,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
-                                        ?.copyWith(color: Colors.grey[600]),
+                                        ?.copyWith(color: scheme.onSurface),
                                   ),
                                 ],
                               ),
                             ),
                             Icon(
                               Icons.arrow_forward_ios,
-                              color: Colors.grey[400],
+                              color: scheme.onSurface,
                               size: 16,
                             ),
                           ],
@@ -986,7 +1103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text(
                             'Controla la sincronización de alarmas entre tus dispositivos conectados',
                             style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: Colors.grey[600]),
+                                ?.copyWith(color: scheme.onSurface),
                           ),
                           const SizedBox(height: 16),
                           if (_sistemaModel != null && _sistemaModel!.usuarios.isNotEmpty) ...
@@ -1004,29 +1121,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8.0),
                                     decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey.shade300),
+                                      border: Border.all(color: scheme.primary),
                                       borderRadius: BorderRadius.circular(8.0),
                                     ),
                                     child: ListTile(
                                       leading: Icon(
                                         Icons.phone_android,
-                                        color: (isCurrentDevice ? cloudSyncEnabled : isActive) ? Colors.green : Colors.grey,
+                                        color: (isCurrentDevice ? cloudSyncEnabled : isActive)
+                                            ? scheme.primary
+                                            : scheme.onSurface,
                                       ),
                                       title: Text(
                                         deviceName + (isCurrentDevice ? ' (Este dispositivo)' : ''),
-                                        style: const TextStyle(fontWeight: FontWeight.w500),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          color: scheme.onSurface,
+                                        ),
                                       ),
                                       subtitle: Text(
                                         (isCurrentDevice ? cloudSyncEnabled : isActive) 
                                             ? 'Sincronización activada' 
                                             : 'Sincronización desactivada',
-                                        style: TextStyle(
-                                          color: (isCurrentDevice ? cloudSyncEnabled : isActive) ? Colors.green : Colors.grey,
-                                        ),
+                                        style: TextStyle(color: scheme.onSurface),
                                       ),
                                       trailing: Switch(
                                         value: _cloudSyncEnabled && _currentUser != null,
-                                        activeColor: Colors.green,
+                                        activeColor: scheme.primary,
                                         onChanged: isCurrentDevice ? (bool value) {
                                           _saveCloudSyncOption(value);
                                         } : null, // Solo el dispositivo actual puede cambiar
@@ -1035,27 +1155,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                    );
                                  },
                                );
-                            }).toList()
+                            })
                           else
                             Container(
                               padding: const EdgeInsets.all(16.0),
                               decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
+                                color: scheme.surface,
                                 borderRadius: BorderRadius.circular(8.0),
+                                border: Border.all(color: scheme.primary),
                               ),
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.info_outline,
-                                    color: Colors.grey.shade600,
+                                    color: scheme.onSurface,
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       'No hay dispositivos conectados a esta cuenta',
-                                      style: TextStyle(
-                                        color: Colors.grey.shade600,
-                                      ),
+                                      style: TextStyle(color: scheme.onSurface),
                                     ),
                                   ),
                                 ],
@@ -1083,7 +1202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Icon(
                               Icons.logout,
-                              color: Colors.red[600],
+                              color: scheme.error,
                               size: 28,
                             ), // Icono de cerrar sesión
                             const SizedBox(width: 16),
@@ -1104,14 +1223,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
-                                        ?.copyWith(color: Colors.grey[600]),
+                                        ?.copyWith(color: scheme.onSurface),
                                   ),
                                 ],
                               ),
                             ),
                             Icon(
                               Icons.arrow_forward_ios,
-                              color: Colors.grey[400],
+                              color: scheme.onSurface,
                               size: 16,
                             ),
                           ],
@@ -1121,10 +1240,180 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
                 // Add more settings here in separate Cards if needed
-              ],
+                ],
+              ),
             ),
+          ],
+        ),
+    );
+  }
+}
+
+class ThemeEditorScreen extends StatefulWidget {
+  final AppThemeController controller;
+  final AppThemeModel theme;
+
+  const ThemeEditorScreen({
+    super.key,
+    required this.controller,
+    required this.theme,
+  });
+
+  @override
+  State<ThemeEditorScreen> createState() => _ThemeEditorScreenState();
+}
+
+class _ThemeEditorScreenState extends State<ThemeEditorScreen> {
+  late final TextEditingController _nameController;
+  late String _backgroundColor;
+  late String _surfaceColor;
+  late String _textColor;
+  late String _primaryColor;
+  late String _secondaryColor;
+  late String _tertiaryColor;
+  late double _textScale;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.theme.name);
+    _backgroundColor = widget.theme.backgroundColor;
+    _surfaceColor = widget.theme.surfaceColor;
+    _textColor = widget.theme.textColor;
+    _primaryColor = widget.theme.primaryColor;
+    _secondaryColor = widget.theme.secondaryColor;
+    _tertiaryColor = widget.theme.tertiaryColor;
+    _textScale = widget.theme.textScale;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    final updated = widget.theme.copyWith(
+      name: name.isEmpty ? widget.theme.name : name,
+      backgroundColor: _backgroundColor,
+      surfaceColor: _surfaceColor,
+      textColor: _textColor,
+      primaryColor: _primaryColor,
+      secondaryColor: _secondaryColor,
+      tertiaryColor: _tertiaryColor,
+      textScale: _textScale,
+      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    await widget.controller.updateTheme(updated);
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tema'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Nombre'),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _backgroundColor,
+                label: 'Fondo',
+                onColorChanged: (v) => setState(() {
+                  _backgroundColor = v ?? _backgroundColor;
+                }),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _surfaceColor,
+                label: 'Superficie',
+                onColorChanged: (v) => setState(() {
+                  _surfaceColor = v ?? _surfaceColor;
+                }),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _textColor,
+                label: 'Texto',
+                onColorChanged: (v) => setState(() {
+                  _textColor = v ?? _textColor;
+                }),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _primaryColor,
+                label: 'Resalte principal',
+                onColorChanged: (v) => setState(() {
+                  _primaryColor = v ?? _primaryColor;
+                }),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _secondaryColor,
+                label: 'Resalte secundario',
+                onColorChanged: (v) => setState(() {
+                  _secondaryColor = v ?? _secondaryColor;
+                }),
+              ),
+              const SizedBox(height: 12),
+              ColorInputWidget(
+                initialColor: _tertiaryColor,
+                label: 'Resalte terciario',
+                onColorChanged: (v) => setState(() {
+                  _tertiaryColor = v ?? _tertiaryColor;
+                }),
+              ),
+              const SizedBox(height: 16),
+              Text('Tamaño de texto: ${(_textScale * 100).round()}%'),
+              Slider(
+                value: _textScale,
+                min: 0.8,
+                max: 1.4,
+                divisions: 12,
+                label: '${(_textScale * 100).round()}%',
+                onChanged: (v) => setState(() => _textScale = v),
+                activeColor: scheme.primary,
+              ),
+            ],
           ),
-        ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                  ),
+                  child: const Text('Guardar'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

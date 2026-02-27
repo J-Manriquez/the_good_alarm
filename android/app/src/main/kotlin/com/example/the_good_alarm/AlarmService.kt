@@ -56,7 +56,11 @@ class AlarmService : Service() {
         super.onTaskRemoved(rootIntent)
         // Reiniciar servicio si la tarea es removida
         val restartServiceIntent = Intent(applicationContext, AlarmService::class.java)
-        startForegroundService(restartServiceIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(restartServiceIntent)
+        } else {
+            startService(restartServiceIntent)
+        }
     }
     
     override fun onBind(intent: Intent?): IBinder? {

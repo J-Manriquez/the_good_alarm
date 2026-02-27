@@ -52,13 +52,33 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
-    _initializeGame();
+    _initializeSession();
   }
 
-  void _initializeGame() {
+  void _initializeSession() {
     setState(() {
       remainingLives = widget.lives == 0 ? -1 : widget.lives; // -1 para infinitas
       totalErrors = 0;
+      currentRepetition = 1;
+    });
+    _startRepetition();
+  }
+
+  void _startRepetition() {
+    setState(() {
+      matchedPairs = 0;
+      selectedCards.clear();
+      isProcessing = false;
+    });
+    _createCards();
+  }
+
+  void _restartSessionDueToLives() {
+    if (!mounted) return;
+    setState(() {
+      remainingLives = widget.lives == 0 ? -1 : widget.lives;
+      totalErrors = 0;
+      currentRepetition = 1;
       matchedPairs = 0;
       selectedCards.clear();
       isProcessing = false;
@@ -132,7 +152,13 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
         
         // Verificar si se acabaron las vidas
         if (remainingLives == 0) {
-          _gameOver(false);
+          if (widget.isAlarmMode) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _restartSessionDueToLives();
+            });
+          } else {
+            _gameOver(false);
+          }
           return;
         }
       }
@@ -160,37 +186,40 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Ronda Completada!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Has completado la ronda $currentRepetition de ${widget.repetitions}.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _nextRepetition();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            '¡Ronda Completada!',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          content: Text(
+            'Has completado la ronda $currentRepetition de ${widget.repetitions}.',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _nextRepetition();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Continuar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
-            child: const Text(
-              'Continuar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
@@ -198,7 +227,7 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
     setState(() {
       currentRepetition++;
     });
-    _initializeGame();
+    _startRepetition();
   }
 
   void _gameOver(bool won) {
@@ -206,8 +235,9 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
       if (won && currentRepetition >= widget.repetitions) {
         widget.onGameFinished?.call(true);
       } else if (!won) {
-        // En modo alarma, mostrar opción de reiniciar cuando se pierden las vidas
-        _showRestartDialog();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _restartSessionDueToLives();
+        });
       }
       return;
     }
@@ -215,43 +245,46 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text(
-          won ? '¡Felicitaciones!' : '¡Juego Terminado!',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          won 
-            ? 'Has completado todas las repeticiones del juego.'
-            : 'Se acabaron las vidas. Errores totales: $totalErrors',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          OutlinedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white),
-            ),
-            child: const Text('Volver'),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            won ? '¡Felicitaciones!' : '¡Juego Terminado!',
+            style: TextStyle(color: scheme.onSurface),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Jugar de nuevo'),
+          content: Text(
+            won
+                ? 'Has completado todas las repeticiones del juego.'
+                : 'Se acabaron las vidas. Errores totales: $totalErrors',
+            style: TextStyle(color: scheme.onSurface),
           ),
-        ],
-      ),
+          actions: [
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop();
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: scheme.onSurface,
+                side: BorderSide(color: scheme.onSurface),
+              ),
+              child: const Text('Volver'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _restartGame();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.tertiary,
+                foregroundColor: scheme.onTertiary,
+              ),
+              child: const Text('Jugar de nuevo'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -259,38 +292,38 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Se acabaron las vidas!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Errores totales: $totalErrors\n\nDebes reiniciar el juego para continuar.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Reiniciar'),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            '¡Se acabaron las vidas!',
+            style: TextStyle(color: scheme.onSurface),
           ),
-        ],
-      ),
+          content: Text(
+            'Errores totales: $totalErrors\n\nDebes reiniciar el juego para continuar.',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _restartGame();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.tertiary,
+                foregroundColor: scheme.onTertiary,
+              ),
+              child: const Text('Reiniciar'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   void _restartGame() {
-    setState(() {
-      currentRepetition = 1;
-    });
-    _initializeGame();
+    _initializeSession();
   }
 
   @override
@@ -303,15 +336,15 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
   
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
           'Memorice - Ronda $currentRepetition/${widget.repetitions}',
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: scheme.onTertiary),
         ),
-        backgroundColor: Colors.purple,
-        foregroundColor: Colors.white,
+        backgroundColor: scheme.tertiary,
+        foregroundColor: scheme.onTertiary,
         automaticallyImplyLeading: !widget.isAlarmMode,
       ),
       body: Column(
@@ -319,13 +352,25 @@ class _MemoriceGameScreenState extends State<MemoriceGameScreen>
           // Información del juego
           Container(
             padding: const EdgeInsets.all(16),
-            color: Colors.purple.withOpacity(0.1),
+            color: scheme.tertiary.withOpacity(0.1),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildInfoCard('Vidas', remainingLives == -1 ? '∞' : remainingLives.toString(), Colors.red),
-                _buildInfoCard('Errores', totalErrors.toString(), Colors.orange),
-                _buildInfoCard('Pares', '$matchedPairs/${widget.pairs}', Colors.green),
+                _buildInfoCard(
+                  'Vidas',
+                  remainingLives == -1 ? '∞' : remainingLives.toString(),
+                  scheme.error,
+                ),
+                _buildInfoCard(
+                  'Errores',
+                  totalErrors.toString(),
+                  scheme.secondary,
+                ),
+                _buildInfoCard(
+                  'Pares',
+                  '$matchedPairs/${widget.pairs}',
+                  scheme.primary,
+                ),
               ],
             ),
           ),
@@ -418,28 +463,29 @@ class _CardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         decoration: BoxDecoration(
           color: card.isMatched 
-              ? Colors.green.withOpacity(0.3)
+              ? scheme.primary.withOpacity(0.3)
               : card.isFlipped 
-                  ? Colors.purple.withOpacity(0.8)
-                  : Colors.grey[800],
+                  ? scheme.tertiary.withOpacity(0.8)
+                  : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected 
-                ? Colors.yellow
+                ? scheme.secondary
                 : card.isMatched 
-                    ? Colors.green
-                    : Colors.grey[600]!,
+                    ? scheme.primary
+                    : scheme.outlineVariant,
             width: 2,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.3),
+              color: scheme.shadow.withOpacity(0.3),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -453,9 +499,9 @@ class _CardWidget extends StatelessWidget {
                     fontSize: 32,
                   ),
                 )
-              : const Icon(
+              : Icon(
                   Icons.help_outline,
-                  color: Colors.white,
+                  color: scheme.onSurface,
                   size: 32,
                 ),
         ),

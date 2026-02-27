@@ -1,0 +1,210 @@
+CALENDARIO (nivel Google Calendar) — Estructura de datos + descripción visual
+
+1) OBJETIVO
+Crear un calendario con eventos, eventos recurrentes, excepciones por ocurrencia, y tareas. Debe funcionar offline-first con Hive, sincronizar con Firebase/Firestore con resolución de conflictos, y permitir escalado a calendarios compartidos (roles y miembros) sin rehacer el modelo.
+
+
+2) DECISIONES CLAVE (desde el inicio)
+2.1) RRULE como formato canónico para recurrencias
+- Guardar recurrencias como string RFC5545 (RRULE) en el “evento maestro”.
+- Soportar EXDATE/RDATE y overrides por ocurrencia.
+
+2.2) Separación estricta: maestro vs override vs ocurrencia
+- Evento maestro: define la regla y los campos base.
+- Override: edita o cancela solo una ocurrencia concreta.
+- Ocurrencia materializada: documento/cache consultable por rango de fechas para vistas rápidas (día/semana/mes/agenda).
+
+2.3) Sincronización robusta
+- Todos los documentos con: createdAt, updatedAt, deletedAt (tombstone), revision, fieldUpdatedAt.
+- Offline: cola de cambios y “dirty fields” por entidad para merge por campo.
+
+2.4) Ventana móvil de ocurrencias
+- En Firestore: ocurrencias generadas solo para una ventana (ej. hoy → +12 meses), ampliable en background.
+- En Hive: cache de ocurrencias para render instantáneo y uso offline.
+
+
+3) FIREBASE (Firestore) — ESTRUCTURA RECOMENDADA
+Nota: se mantiene la colección existente `usuarios/{uid}` del proyecto. Para soportar calendarios compartidos, el calendario se almacena a nivel global (top-level) y el usuario guarda “referencias” a calendarios que puede ver.
+
+3.1) Referencias de calendarios por usuario (lookup rápido)
+Ruta:
+- usuarios/{uid}/calendarios_ref/{calendarId}
+
+Campos:
+- calendarId: string (igual al docId)
+- role: "owner" | "editor" | "reader"
+- status: "active" | "invited"
+- createdAt, updatedAt, deletedAt
+
+Uso:
+- Listar calendarios del usuario sin queries complejas.
+- Resolver permisos sin duplicar el calendario completo.
+
+3.2) Calendarios (top-level)
+Ruta:
+- calendarios/{calendarId}
+
+Campos mínimos:
+- ownerUid: string
+- name: string
+- color: int (ARGB) o string hex
+- timeZone: string IANA (ej. "Europe/Madrid")
+- visibility: "private" | "shared" | "public" (futuro)
+- createdAt, updatedAt, deletedAt
+- revision: int
+- fieldUpdatedAt: map<string, Timestamp>
+- extras: map<string, any> (opcional, para forward-compat)
+
+Subcolección de miembros:
+- calendarios/{calendarId}/miembros/{uid}
+  - uid: string
+  - role: "owner" | "editor" | "reader"
+  - status: "active" | "invited"
+  - createdAt, updatedAt, deletedAt
+
+3.3) Eventos (evento maestro)
+Ruta:
+- calendarios/{calendarId}/eventos/{eventId}
+
+Identidad:
+- eventId: string (igual al docId)
+- calendarId: string (redundante para comodidad)
+
+Campos base:
+- title: string
+- description: string
+- locationText: string
+- allDay: bool
+
+Tiempo:
+- startAt: Timestamp (si allDay=false)
+- endAt: Timestamp (si allDay=false)
+- startDate: "YYYY-MM-DD" (si allDay=true)
+- endDate: "YYYY-MM-DD" (si allDay=true, exclusivo o inclusivo según convención, fijar una)
+- timeZone: string IANA
+
+Estado/privacidad:
+- status: "confirmed" | "tentative" | "cancelled"
+- privacy: "default" | "private" | "public"
+
+Recurrencia:
+- recurrenceKind: "none" | "rrule"
+- rrule: string RFC5545 (ej. "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE")
+- exDates: array<Timestamp> (opcional, pocos)
+- rDates: array<Timestamp> (opcional)
+
+Recordatorios:
+- reminders: array<{method: "push"|"email", minutes: int}>
+
+Metadatos sync:
+- createdAt, updatedAt, deletedAt
+- revision: int
+- fieldUpdatedAt: map<string, Timestamp>
+- updatedByDevice: string (deviceId)
+
+3.4) Overrides por ocurrencia (editar solo esta / cancelar esta)
+Ruta:
+- calendarios/{calendarId}/eventos/{eventId}/overrides/{overrideId}
+
+Claves:
+- overrideId: determinista recomendado = "{instanceStartMillis}" o "{YYYYMMDDTHHMMSSZ}"
+
+Campos:
+- type: "modify" | "cancel"
+- instanceStartAt: Timestamp (la ocurrencia original)
+- patch: map<string, any> (solo campos modificados) si type="modify"
+- cancelled: bool (true) si type="cancel"
+- createdAt, updatedAt, deletedAt
+- revision, fieldUpdatedAt
+
+3.5) Ocurrencias materializadas (para queries por rango y UI rápida)
+Ruta:
+- calendarios/{calendarId}/ocurrencias/{occurrenceId}
+
+Campos:
+- occurrenceId: determinista recomendado = "{eventId}_{instanceStartMillis}"
+- calendarId: string
+- eventId: string
+- instanceStartAt: Timestamp
+- instanceEndAt: Timestamp
+- allDay: bool
+- status: "confirmed" | "tentative" | "cancelled"
+- titleSnapshot: string (opcional)
+- colorSnapshot: int (opcional)
+- source: "single" | "generated" | "override"
+- generatedAt: Timestamp
+
+Índices recomendados:
+- calendarios/{calendarId}/ocurrencias: instanceStartAt ASC (y opcional status)
+- calendarios/{calendarId}/eventos: updatedAt DESC (para sync incremental)
+
+3.6) Tareas (paridad con calendario)
+Opción recomendada:
+- listas_tareas/{taskListId}
+  - ownerUid, name, color, createdAt, updatedAt, deletedAt, revision, fieldUpdatedAt
+- listas_tareas/{taskListId}/tareas/{taskId}
+  - title, notes, status("needsAction"|"completed")
+  - dueAt Timestamp o dueDate "YYYY-MM-DD"
+  - rrule (opcional) + overrides análogos si se quiere recurrencia en tareas
+  - priority, labels[]
+  - createdAt, updatedAt, deletedAt, revision, fieldUpdatedAt
+
+
+4) HIVE (offline-first) — ESTRUCTURA LOCAL
+En este proyecto se usan cajas Hive con Map (sin TypeAdapters). Se recomienda mantener el mismo patrón.
+
+4.1) Cajas
+- calendars_box: { calendarId -> Calendar.toJson() }
+- calendar_events_box: { eventId -> CalendarEvent.toJson() }
+- calendar_overrides_box: { overrideKey -> CalendarOverride.toJson() }
+  - overrideKey recomendado: "{eventId}:{instanceStartMillis}"
+- calendar_occurrences_box: { occurrenceId -> CalendarOccurrence.toJson() }
+- calendar_sync_box: estado de sincronización/dirty fields
+
+4.2) Estado de sincronización (calendar_sync_box)
+Claves:
+- _last_pull_iso: string ISO para pull incremental general (o por entidad si se separa)
+- "{entityType}:{entityId}": map con:
+  - dirtyFields: list<string>
+  - baseFieldUpdatedAt: map<string, string ISO>
+
+4.3) Cola de cambios (si se implementa como box separado)
+- calendar_sync_queue_box:
+  - opId -> {entityType, entityId, operation, payload, createdAt, retryCount, lastError}
+
+
+5) DESCRIPCIÓN VISUAL (UI) — PROPUESTA
+5.1) Entrada y navegación
+- Añadir “Calendario” al menú superior (igual nivel que Configuración) y/o un icono dedicado.
+- Ruta principal: pantalla de calendario con vistas: Mes / Semana / Día / Agenda.
+
+5.2) Cabecera (header)
+- Selector de calendario activo (dropdown) con color.
+- Botón “Hoy”.
+- Botón “Buscar”.
+- Botón “+” para crear (Evento / Tarea).
+
+5.3) Vista Mes
+- Grid 7xN con números de día.
+- Indicadores de eventos:
+  - puntos de color por calendario
+  - barras finas para eventos all-day/multidía
+- Tap en un día abre lista inferior (Agenda del día).
+
+5.4) Vista Semana / Día
+- Columna de horas, bloques arrastrables (en fases posteriores).
+- Eventos all-day en carril superior.
+
+5.5) Agenda (lista)
+- Lista cronológica con agrupación por fecha.
+- Soporta filtros (por calendario, por estado, por etiquetas en tareas).
+
+5.6) Editor de evento/tarea
+- Campos básicos: título, calendario, fecha/hora inicio-fin, all-day.
+- Recurrencia: Ninguna / Diaria / Semanal / Mensual / Anual / Personalizada (RRULE).
+- Excepciones: “Solo esta”, “Esta y siguientes”, “Toda la serie”.
+- Recordatorios: múltiples.
+
+5.7) Offline y estado
+- Indicador discreto de “sincronizando” / “sin conexión”.
+- Ediciones offline se reflejan inmediatamente y se sincronizan luego.

@@ -1,17 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
-import '../modelo_alarm.dart';
 import 'memorice_game_screen.dart';
 import 'equations_game_screen.dart';
 import 'sequence_game_screen.dart';
 import '../services/volume_service.dart';
-import '../widgets/volume_control_button.dart';
+import '../widgets/synchronized_volume_control_button.dart';
 
 class AlarmGameWrapper extends StatelessWidget {
   final GameConfig gameConfig;
-  final VoidCallback onGameCompleted;
-  final VoidCallback onGameFailed;
   final int alarmId;
   final int tempVolumeReductionPercent;
   final int tempVolumeReductionDurationSeconds;
@@ -19,8 +15,6 @@ class AlarmGameWrapper extends StatelessWidget {
   const AlarmGameWrapper({
     super.key,
     required this.gameConfig,
-    required this.onGameCompleted,
-    required this.onGameFailed,
     required this.alarmId,
     this.tempVolumeReductionPercent = 50,
     this.tempVolumeReductionDurationSeconds = 30,
@@ -34,17 +28,15 @@ class AlarmGameWrapper extends StatelessWidget {
         _showExitWarning(context);
         return false;
       },
-      child: _buildGameScreen(),
+      child: _buildGameScreen(context),
     );
   }
 
-  Widget _buildGameScreen() {
+  Widget _buildGameScreen(BuildContext context) {
     switch (gameConfig.gameType) {
       case GameType.memorice:
         return AlarmMemoriceGameScreen(
           gameConfig: gameConfig,
-          onGameCompleted: onGameCompleted,
-          onGameFailed: onGameFailed,
           alarmId: alarmId,
           tempVolumeReductionPercent: tempVolumeReductionPercent,
           tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
@@ -52,8 +44,6 @@ class AlarmGameWrapper extends StatelessWidget {
       case GameType.equations:
         return AlarmEquationsGameScreen(
           gameConfig: gameConfig,
-          onGameCompleted: onGameCompleted,
-          onGameFailed: onGameFailed,
           alarmId: alarmId,
           tempVolumeReductionPercent: tempVolumeReductionPercent,
           tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
@@ -61,8 +51,6 @@ class AlarmGameWrapper extends StatelessWidget {
       case GameType.sequence:
         return AlarmSequenceGameScreen(
           gameConfig: gameConfig,
-          onGameCompleted: onGameCompleted,
-          onGameFailed: onGameFailed,
           alarmId: alarmId,
           tempVolumeReductionPercent: tempVolumeReductionPercent,
           tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
@@ -74,26 +62,29 @@ class AlarmGameWrapper extends StatelessWidget {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Alarma Activa!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'Debes completar el juego para apagar la alarma.',
-          style: TextStyle(color: Colors.white),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Continuar Jugando',
-              style: TextStyle(color: Colors.green),
-            ),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            '¡Alarma Activa!',
+            style: TextStyle(color: scheme.onSurface),
           ),
-        ],
-      ),
+          content: Text(
+            'Debes completar el juego para apagar la alarma.',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Continuar Jugando',
+                style: TextStyle(color: scheme.primary),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -101,8 +92,6 @@ class AlarmGameWrapper extends StatelessWidget {
 // Versión específica para alarmas del juego Memorice
 class AlarmMemoriceGameScreen extends StatefulWidget {
   final GameConfig gameConfig;
-  final VoidCallback onGameCompleted;
-  final VoidCallback onGameFailed;
   final int alarmId;
   final int tempVolumeReductionPercent;
   final int tempVolumeReductionDurationSeconds;
@@ -110,8 +99,6 @@ class AlarmMemoriceGameScreen extends StatefulWidget {
   const AlarmMemoriceGameScreen({
     super.key,
     required this.gameConfig,
-    required this.onGameCompleted,
-    required this.onGameFailed,
     required this.alarmId,
     this.tempVolumeReductionPercent = 50,
     this.tempVolumeReductionDurationSeconds = 30,
@@ -151,8 +138,9 @@ class _AlarmMemoriceGameScreenState extends State<AlarmMemoriceGameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scheme.surface,
       body: Stack(
         children: [
           MemoriceGameScreen(
@@ -162,20 +150,24 @@ class _AlarmMemoriceGameScreenState extends State<AlarmMemoriceGameScreen> {
             isAlarmMode: true,
             onGameFinished: (bool success) {
               if (success) {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-                widget.onGameCompleted();
+                Navigator.of(context).pop(true);
               } else {
-                widget.onGameFailed();
+                Navigator.of(context).pop(false);
               }
             },
           ),
           Positioned(
             top: 50,
             right: 20,
-            child: VolumeControlButton(
+            child: SynchronizedVolumeControlButton(
               tempVolumePercent: widget.tempVolumeReductionPercent,
               durationSeconds: widget.tempVolumeReductionDurationSeconds,
-              onToggle: _onVolumeReductionToggle,
+              onToggle: (isActive) {
+                print('Volume reduction toggled in memorice game: $isActive');
+              },
+              onExpired: () {
+                print('Volume reduction expired in memorice game');
+              },
             ),
           ),
         ],
@@ -187,8 +179,6 @@ class _AlarmMemoriceGameScreenState extends State<AlarmMemoriceGameScreen> {
 // Versión para Equations
 class AlarmEquationsGameScreen extends StatefulWidget {
   final GameConfig gameConfig;
-  final VoidCallback onGameCompleted;
-  final VoidCallback onGameFailed;
   final int alarmId;
   final int tempVolumeReductionPercent;
   final int tempVolumeReductionDurationSeconds;
@@ -196,8 +186,6 @@ class AlarmEquationsGameScreen extends StatefulWidget {
   const AlarmEquationsGameScreen({
     super.key,
     required this.gameConfig,
-    required this.onGameCompleted,
-    required this.onGameFailed,
     required this.alarmId,
     this.tempVolumeReductionPercent = 50,
     this.tempVolumeReductionDurationSeconds = 30,
@@ -237,8 +225,9 @@ class _AlarmEquationsGameScreenState extends State<AlarmEquationsGameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scheme.surface,
       body: Stack(
         children: [
           EquationsGameScreen(
@@ -251,20 +240,24 @@ class _AlarmEquationsGameScreenState extends State<AlarmEquationsGameScreen> {
             isAlarmMode: true,
             onGameFinished: (bool success) {
               if (success) {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-                widget.onGameCompleted();
+                Navigator.of(context).pop(true);
               } else {
-                widget.onGameFailed();
+                Navigator.of(context).pop(false);
               }
             },
           ),
           Positioned(
             top: 50,
             right: 20,
-            child: VolumeControlButton(
+            child: SynchronizedVolumeControlButton(
               tempVolumePercent: widget.tempVolumeReductionPercent,
               durationSeconds: widget.tempVolumeReductionDurationSeconds,
-              onToggle: _onVolumeReductionToggle,
+              onToggle: (isActive) {
+                print('Volume reduction toggled in equations game: $isActive');
+              },
+              onExpired: () {
+                print('Volume reduction expired in equations game');
+              },
             ),
           ),
         ],
@@ -276,8 +269,6 @@ class _AlarmEquationsGameScreenState extends State<AlarmEquationsGameScreen> {
 // Versión para Sequence
 class AlarmSequenceGameScreen extends StatefulWidget {
   final GameConfig gameConfig;
-  final VoidCallback onGameCompleted;
-  final VoidCallback onGameFailed;
   final int alarmId;
   final int tempVolumeReductionPercent;
   final int tempVolumeReductionDurationSeconds;
@@ -285,8 +276,6 @@ class AlarmSequenceGameScreen extends StatefulWidget {
   const AlarmSequenceGameScreen({
     super.key,
     required this.gameConfig,
-    required this.onGameCompleted,
-    required this.onGameFailed,
     required this.alarmId,
     this.tempVolumeReductionPercent = 50,
     this.tempVolumeReductionDurationSeconds = 30,
@@ -326,8 +315,9 @@ class _AlarmSequenceGameScreenState extends State<AlarmSequenceGameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scheme.surface,
       body: Stack(
         children: [
           SequenceGameScreen(
@@ -337,20 +327,24 @@ class _AlarmSequenceGameScreenState extends State<AlarmSequenceGameScreen> {
             isAlarmMode: true,
             onGameFinished: (bool success) {
               if (success) {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-                widget.onGameCompleted();
+                Navigator.of(context).pop(true);
               } else {
-                widget.onGameFailed();
+                Navigator.of(context).pop(false);
               }
             },
           ),
           Positioned(
             top: 50,
             right: 20,
-            child: VolumeControlButton(
+            child: SynchronizedVolumeControlButton(
               tempVolumePercent: widget.tempVolumeReductionPercent,
               durationSeconds: widget.tempVolumeReductionDurationSeconds,
-              onToggle: _onVolumeReductionToggle,
+              onToggle: (isActive) {
+                print('Volume reduction toggled in sequence game: $isActive');
+              },
+              onExpired: () {
+                print('Volume reduction expired in sequence game');
+              },
             ),
           ),
         ],

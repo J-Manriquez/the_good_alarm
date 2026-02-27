@@ -1,34 +1,433 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import 'dart:convert'; // Para jsonEncode y jsonDecode
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/alarm_firebase_service.dart';
+import 'services/alarm_local_service.dart';
+import 'services/alarm_repository.dart';
 import 'services/auth_service.dart';
+import 'services/habit_repository.dart';
+import 'services/habit_scheduler.dart';
 import 'services/sistema_firebase_service.dart';
 import 'widgets/device_name_modal.dart';
 
 import 'alarm_screen.dart'; // Importar AlarmScreen si es necesario para la navegación
+import 'calendar_screen.dart';
+import 'habit_alert_screen.dart';
+import 'habits_screen.dart';
+import 'models/habit_models.dart';
 import 'settings_screen.dart'; // Importar SettingsScreen
 import 'alarm_edit_screen.dart';
 import 'widgets/volume_control_button.dart'; // Importar VolumeControlButton
+import 'widgets/synchronized_volume_control_button.dart'; // Importar SynchronizedVolumeControlButton
 import 'package:intl/intl.dart';
+
+class HomeShell extends StatefulWidget {
+  final bool shouldSyncLocalAlarms;
+  final int initialTabIndex;
+
+  const HomeShell({
+    super.key,
+    this.shouldSyncLocalAlarms = false,
+    this.initialTabIndex = 1,
+  });
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  final GlobalKey<_HomePageState> _homeKey = GlobalKey<_HomePageState>();
+  final HabitRepository _habitRepository = HabitRepository();
+  final HabitScheduler _habitScheduler = HabitScheduler();
+  StreamSubscription<User?>? _habitsAuthSub;
+  User? _habitsUser;
+  bool _habitsCloudSyncEnabled = false;
+  late int _tabIndex;
+  bool _calendarFabExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.initialTabIndex;
+    if (i < 0) {
+      _tabIndex = 0;
+    } else if (i > 2) {
+      _tabIndex = 2;
+    } else {
+      _tabIndex = i;
+    }
+
+    _startHabitsBackground();
+  }
+
+  @override
+  void dispose() {
+    _habitsAuthSub?.cancel();
+    _habitsAuthSub = null;
+    _habitRepository.stopAllCloudSync();
+    super.dispose();
+  }
+
+  void _startHabitsBackground() {
+    _habitsAuthSub = FirebaseAuth.instance.authStateChanges().listen((user) async {
+      await _setupHabitsForUser(user);
+    });
+    unawaited(_setupHabitsForUser(FirebaseAuth.instance.currentUser));
+  }
+
+  Future<void> _setupHabitsForUser(User? user) async {
+    await _habitRepository.stopAllCloudSync();
+    _habitsUser = user;
+
+    final userId = user?.uid;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    _habitsCloudSyncEnabled = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+
+    if (_habitsCloudSyncEnabled) {
+      await _habitRepository.reconcile(userId: userId);
+      await _habitRepository.startCloudSync(
+        userId: userId,
+        onHabitsBatchApplied: (_) async {
+          await _scheduleHabitsFromLocal();
+        },
+        onCompletionsApplied: () async {},
+      );
+    }
+
+    await _scheduleHabitsFromLocal();
+  }
+
+  Future<void> _scheduleHabitsFromLocal() async {
+    final List<HabitModel> habits = await _habitRepository.loadLocalHabits();
+    final now = DateTime.now();
+    final userId = _habitsUser?.uid;
+
+    for (final habit in habits) {
+      final prev = habit.nextScheduledAtLocal;
+
+      if (!habit.isActive || habit.deletedAt != null) {
+        if (prev != null) {
+          final prevKey = _habitScheduler.occurrenceKeyFor(habit.id, prev);
+          try {
+            await _habitScheduler.cancelOccurrence(occurrenceKey: prevKey);
+          } catch (_) {}
+          await _habitRepository.upsertHabit(
+            habit: habit.copyWith(nextScheduledAtLocal: null),
+            cloudSyncEnabled: _habitsCloudSyncEnabled,
+            userId: userId,
+          );
+        }
+        continue;
+      }
+
+      final next = _habitScheduler.nextOccurrenceLocal(habit, now);
+      if (next == null) {
+        if (prev != null) {
+          final prevKey = _habitScheduler.occurrenceKeyFor(habit.id, prev);
+          try {
+            await _habitScheduler.cancelOccurrence(occurrenceKey: prevKey);
+          } catch (_) {}
+          await _habitRepository.upsertHabit(
+            habit: habit.copyWith(nextScheduledAtLocal: null),
+            cloudSyncEnabled: _habitsCloudSyncEnabled,
+            userId: userId,
+          );
+        }
+        continue;
+      }
+
+      if (prev != null && prev != next) {
+        final prevKey = _habitScheduler.occurrenceKeyFor(habit.id, prev);
+        try {
+          await _habitScheduler.cancelOccurrence(occurrenceKey: prevKey);
+        } catch (_) {}
+      }
+
+      if (prev == null || prev != next) {
+        await _habitRepository.upsertHabit(
+          habit: habit.copyWith(nextScheduledAtLocal: next),
+          cloudSyncEnabled: _habitsCloudSyncEnabled,
+          userId: userId,
+        );
+      }
+
+      try {
+        await _habitScheduler.scheduleOccurrence(habit: habit, whenLocal: next);
+      } catch (_) {}
+    }
+  }
+
+  String _currentTabName() {
+    switch (_tabIndex) {
+      case 0:
+        return 'Calendario';
+      case 1:
+        return 'Home';
+      case 2:
+        return 'Hábitos';
+      default:
+        return 'Home';
+    }
+  }
+
+  AppBar _buildHomeAppBar(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return AppBar(
+      automaticallyImplyLeading: false,
+      title: Padding(
+        padding: const EdgeInsets.only(left: 85),
+        child: Text(
+          'The Good Alarm',
+          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 25),
+        ),
+      ),
+      actions: [
+        Theme(
+          data: Theme.of(context).copyWith(
+            popupMenuTheme: PopupMenuThemeData(
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: scheme.primary, width: 2.0),
+                borderRadius: BorderRadius.circular(4.0),
+              ),
+            ),
+          ),
+          child: PopupMenuButton<String>(
+            color: scheme.surface,
+            icon: const Icon(Icons.more_vert, size: 30),
+            onSelected: (String value) async {
+              switch (value) {
+                case 'settings':
+                  await Navigator.pushNamed(context, '/settings');
+                  _homeKey.currentState?._loadSettingsAndAlarms();
+                  await _setupHabitsForUser(FirebaseAuth.instance.currentUser);
+                  break;
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.settings, color: scheme.onSurface),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Configuración',
+                      style: TextStyle(color: scheme.onSurface),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentName = _currentTabName();
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: _buildHomeAppBar(context),
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          const CalendarScreen(embedInShell: true),
+          HomePage(
+            key: _homeKey,
+            shouldSyncLocalAlarms: widget.shouldSyncLocalAlarms,
+            embedInShell: true,
+          ),
+          const _ExtrasScreen(),
+        ],
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: _tabIndex != 1
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 48),
+              child: SizedBox(
+                width: 140,
+                height: _calendarFabExpanded ? 190 : 70,
+                child: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: FloatingActionButton(
+                        heroTag: 'home_alarm_fab',
+                        onPressed: () => _homeKey.currentState?._setAlarm(),
+                        tooltip: 'Añadir alarma',
+                        focusColor: scheme.onPrimary,
+                        foregroundColor: scheme.onPrimary,
+                        backgroundColor: scheme.primary,
+                        child: const Icon(Icons.add),
+                      ),
+                    ),
+                    Positioned(
+                      right: 72,
+                      bottom: 0,
+                      child: FloatingActionButton(
+                        heroTag: 'home_calendar_fab',
+                        onPressed: () {
+                          setState(() {
+                            _calendarFabExpanded = !_calendarFabExpanded;
+                          });
+                        },
+                        tooltip: 'Calendario',
+                        focusColor: scheme.onPrimary,
+                        foregroundColor: scheme.onPrimary,
+                        backgroundColor: scheme.primary,
+                        child: Icon(
+                          _calendarFabExpanded ? Icons.close : Icons.calendar_month,
+                        ),
+                      ),
+                    ),
+                    if (_calendarFabExpanded) ...[
+                      Positioned(
+                        right: 72,
+                        bottom: 70,
+                        child: FloatingActionButton.small(
+                          heroTag: 'home_calendar_task_fab',
+                          onPressed: () async {
+                            setState(() {
+                              _calendarFabExpanded = false;
+                            });
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => CalendarEventEditorScreen(
+                                  initialDay: DateTime.now(),
+                                  initialKind: 'task',
+                                ),
+                              ),
+                            );
+                          },
+                          tooltip: 'Tarea',
+                          foregroundColor: scheme.onPrimary,
+                          backgroundColor: scheme.primary,
+                          child: const Icon(Icons.task_alt),
+                        ),
+                      ),
+                      Positioned(
+                        right: 72,
+                        bottom: 130,
+                        child: FloatingActionButton.small(
+                          heroTag: 'home_calendar_event_fab',
+                          onPressed: () async {
+                            setState(() {
+                              _calendarFabExpanded = false;
+                            });
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => CalendarEventEditorScreen(
+                                  initialDay: DateTime.now(),
+                                  initialKind: 'event',
+                                ),
+                              ),
+                            );
+                          },
+                          tooltip: 'Evento',
+                          foregroundColor: scheme.onPrimary,
+                          backgroundColor: scheme.primary,
+                          child: const Icon(Icons.event),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            border: Border(top: BorderSide(color: scheme.primary, width: 1)),
+          ),
+          padding: const EdgeInsets.only(top: 9, bottom: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              IconButton(
+                onPressed: () => setState(() => _tabIndex = 0),
+                iconSize: 36,
+                icon: Icon(
+                  Icons.calendar_month,
+                  color: _tabIndex == 0 ? scheme.primary : scheme.onSurface,
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: () => setState(() => _tabIndex = 1),
+                    iconSize: 36,
+                    icon: Icon(
+                      Icons.home,
+                      color: _tabIndex == 1 ? scheme.primary : scheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    currentName,
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                onPressed: () => setState(() => _tabIndex = 2),
+                iconSize: 36,
+                icon: Icon(
+                  Icons.extension,
+                  color: _tabIndex == 2 ? scheme.primary : scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExtrasScreen extends StatelessWidget {
+  const _ExtrasScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const HabitsScreen(embedInShell: true, manageCloudSync: false);
+  }
+}
 
 class HomePage extends StatefulWidget {
   final bool shouldSyncLocalAlarms;
+  final bool embedInShell;
   
-  const HomePage({super.key, this.shouldSyncLocalAlarms = false});
+  const HomePage({
+    super.key,
+    this.shouldSyncLocalAlarms = false,
+    this.embedInShell = false,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final List<Alarm> _alarms = [];
-  static const String _alarmsKey = 'alarms_list';
   static const platform = MethodChannel('com.example.the_good_alarm/alarm');
 
   AlarmGroupingOption _currentGroupingOption = AlarmGroupingOption.none;
@@ -62,28 +461,92 @@ class _HomePageState extends State<HomePage> {
 
   // Servicios de Firebase
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
+  final AlarmLocalService _alarmLocalService = AlarmLocalService();
+  late final AlarmRepository _alarmRepository = AlarmRepository(
+    local: _alarmLocalService,
+    cloud: _alarmFirebaseService,
+  );
   final AuthService _authService = AuthService();
   final SistemaFirebaseService _sistemaFirebaseService =
       SistemaFirebaseService();
   User? _currentUser;
-  StreamSubscription<List<Alarm>>? _firebaseAlarmsSubscription;
+  bool _isAlarmCloudSyncing = false;
   bool _cloudSyncEnabled = false;
   int? _pendingAlarmId;
 
   bool moreAlarms = false; // Oculto por defecto
+  Offset? _fabOffset;
+  static const double _fabSize = 56;
+  static const double _fabMargin = 16;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     platform.setMethodCallHandler(_handleNativeCalls);
     _loadSettingsAndAlarms(); // Cargar configuración primero
   }
 
   @override
   void dispose() {
-    _firebaseAlarmsSubscription?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _alarmRepository.stopCloudSync();
     _countdownTimer?.cancel();
     super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _consumeNativeAlarmEvents();
+    }
+  }
+
+  List<int> _normalizeRepeatDaysForAlarm(Alarm alarm) {
+    if (alarm.repeatDays.isNotEmpty) return List<int>.from(alarm.repeatDays);
+    if (alarm.isDaily) return const [1, 2, 3, 4, 5, 6, 7];
+    if (alarm.isWeekend) return const [6, 7];
+    if (alarm.isWeekly) return [alarm.time.weekday];
+    return const [];
+  }
+
+  bool _isRepeatingAlarm(Alarm alarm) => _normalizeRepeatDaysForAlarm(alarm).isNotEmpty;
+
+  Map<String, dynamic> _deriveRepeatFlags(List<int> repeatDays) {
+    final normalized = repeatDays.toSet();
+    final isDaily = normalized.length == 7 &&
+        normalized.containsAll(const {1, 2, 3, 4, 5, 6, 7});
+    final isWeekend = normalized.length == 2 && normalized.containsAll(const {6, 7});
+    final isWeekly = normalized.length == 1;
+    return {
+      'isDaily': isDaily,
+      'isWeekly': isWeekly,
+      'isWeekend': isWeekend,
+    };
+  }
+
+  Future<void> _consumeNativeAlarmEvents() async {
+    try {
+      final raw = await platform.invokeMethod('getAndClearAlarmEvents');
+      if (raw is! List) return;
+
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final map = Map<String, dynamic>.from(item);
+        final type = map['type'] as String?;
+        final alarmId = (map['alarmId'] as num?)?.toInt();
+        if (type == null || alarmId == null) continue;
+
+        if (type == 'stopped') {
+          await _handleAlarmStopped(alarmId);
+        } else if (type == 'snoozed') {
+          final newTimeInMillis = (map['newTimeInMillis'] as num?)?.toInt();
+          if (newTimeInMillis != null) {
+            await _handleAlarmSnoozed(alarmId, newTimeInMillis);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadSettingsAndAlarms() async {
@@ -100,6 +563,7 @@ class _HomePageState extends State<HomePage> {
     _currentUser = FirebaseAuth.instance.currentUser;
 
     await _loadAlarms(); // Cargar alarmas después de la configuración
+    await _consumeNativeAlarmEvents();
 
     // Inicializar escucha de dispositivos activos (siempre activada si hay usuario)
     if (_currentUser != null) {
@@ -149,13 +613,35 @@ class _HomePageState extends State<HomePage> {
     if (_currentUser == null) return;
 
     try {
-      // Suscribirse a cambios en Firebase
-      _firebaseAlarmsSubscription = _alarmFirebaseService
-          .getAlarmsStream(_currentUser!.uid)
-          .listen(_handleFirebaseAlarmsUpdate);
+      await _alarmRepository.reconcile(userId: _currentUser!.uid);
+      await _reloadAlarmsFromLocal();
 
-      // Sincronizar alarmas locales con Firebase
-      await _syncLocalAlarmsToFirebase();
+      await _alarmRepository.startCloudSync(
+        userId: _currentUser!.uid,
+        onBatchApplied: (batch) async {
+          for (final alarm in batch.effectiveAlarms) {
+            final isDeleted =
+                alarm.deletedAt != null || alarm.extras['deleted'] == true;
+            if (isDeleted) {
+              await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+              continue;
+            }
+            if (alarm.isActive) {
+              await _setNativeAlarm(alarm);
+            } else {
+              await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+            }
+          }
+
+          await _reloadAlarmsFromLocal();
+          if (!mounted) return;
+          if (_currentGroupingOption != AlarmGroupingOption.none) {
+            _initializeGroupStates();
+          }
+          _startOrUpdateCountdown();
+        },
+      );
+      _isAlarmCloudSyncing = true;
     } catch (e) {
       print('Error al inicializar sincronización con Firebase: $e');
     }
@@ -190,109 +676,13 @@ class _HomePageState extends State<HomePage> {
       onDeviceNameSet: () {
         // Mostrar mensaje de confirmación
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Nombre del dispositivo actualizado'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: const Text('Nombre del dispositivo actualizado'),
+            backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
       },
     );
-  }
-
-  // Manejar actualizaciones de alarmas desde Firebase
-  Future<void> _handleFirebaseAlarmsUpdate(List<Alarm> firebaseAlarms) async {
-    if (!_cloudSyncEnabled || _currentUser == null) return;
-
-    try {
-      // Crear mapas para comparación eficiente
-      final localAlarmsMap = {for (var alarm in _alarms) alarm.id: alarm};
-      final firebaseAlarmsMap = {
-        for (var alarm in firebaseAlarms) alarm.id: alarm,
-      };
-
-      bool hasChanges = false;
-
-      // Procesar alarmas de Firebase
-      for (final firebaseAlarm in firebaseAlarms) {
-        final localAlarm = localAlarmsMap[firebaseAlarm.id];
-
-        if (localAlarm == null) {
-          // Nueva alarma desde Firebase
-          _alarms.add(firebaseAlarm);
-          await _setNativeAlarm(firebaseAlarm);
-          hasChanges = true;
-        } else if (_shouldUpdateLocalAlarm(localAlarm, firebaseAlarm)) {
-          // Actualizar alarma local
-          final index = _alarms.indexWhere((a) => a.id == firebaseAlarm.id);
-          if (index != -1) {
-            _alarms[index] = firebaseAlarm;
-            if (firebaseAlarm.isActive) {
-              await _setNativeAlarm(firebaseAlarm);
-            } else {
-              await platform.invokeMethod('cancelAlarm', {
-                'alarmId': firebaseAlarm.id,
-              });
-            }
-            hasChanges = true;
-          }
-        }
-      }
-
-      // Eliminar alarmas que ya no están en Firebase
-      final alarmsToRemove = <Alarm>[];
-      for (final localAlarm in _alarms) {
-        if (localAlarm.syncToCloud &&
-            !firebaseAlarmsMap.containsKey(localAlarm.id)) {
-          alarmsToRemove.add(localAlarm);
-        }
-      }
-
-      for (final alarmToRemove in alarmsToRemove) {
-        _alarms.remove(alarmToRemove);
-        if (alarmToRemove.isActive) {
-          await platform.invokeMethod('cancelAlarm', {
-            'alarmId': alarmToRemove.id,
-          });
-        }
-        hasChanges = true;
-      }
-
-      if (hasChanges) {
-        await _saveAlarms();
-        _startOrUpdateCountdown();
-      }
-    } catch (e) {
-      print('Error al manejar actualizaciones de Firebase: $e');
-    }
-  }
-
-  // Verificar si se debe actualizar la alarma local
-  bool _shouldUpdateLocalAlarm(Alarm localAlarm, Alarm firebaseAlarm) {
-    return localAlarm.time != firebaseAlarm.time ||
-        localAlarm.title != firebaseAlarm.title ||
-        localAlarm.message != firebaseAlarm.message ||
-        localAlarm.isActive != firebaseAlarm.isActive ||
-        localAlarm.repeatDays.toString() !=
-            firebaseAlarm.repeatDays.toString() ||
-        localAlarm.maxSnoozes != firebaseAlarm.maxSnoozes ||
-        localAlarm.snoozeDurationMinutes !=
-            firebaseAlarm.snoozeDurationMinutes ||
-        localAlarm.requireGame != firebaseAlarm.requireGame;
-  }
-
-  // Sincronizar alarmas locales con Firebase
-  Future<void> _syncLocalAlarmsToFirebase() async {
-    if (_currentUser == null) return;
-
-    try {
-      final alarmsToSync = _alarms.where((alarm) => alarm.syncToCloud).toList();
-      await _alarmFirebaseService.syncAllAlarms(
-        alarmsToSync,
-        _currentUser!.uid,
-      );
-    } catch (e) {
-      print('Error al sincronizar alarmas locales: $e');
-    }
   }
 
   // Sincronizar todas las alarmas locales existentes al iniciar sesión
@@ -300,19 +690,20 @@ class _HomePageState extends State<HomePage> {
     if (_currentUser == null) return;
 
     try {
-      // Marcar todas las alarmas locales para sincronización
       for (int i = 0; i < _alarms.length; i++) {
-        _alarms[i] = _alarms[i].copyWith(syncToCloud: true);
+        final updated = _alarms[i].copyWith(syncToCloud: true);
+        _alarms[i] = updated;
+
+        final json = Map<String, dynamic>.from(updated.toJson());
+        json.remove('createdAt');
+        json.remove('updatedAt');
+        json.remove('revision');
+        json.remove('fieldUpdatedAt');
+        await _alarmLocalService.upsertAlarm(updated);
+        await _alarmLocalService.markDirtyFields(updated.id, json.keys.toSet());
       }
-      
-      // Guardar cambios localmente
-      await _saveAlarms();
-      
-      // Sincronizar con Firebase
-      await _alarmFirebaseService.syncAllAlarms(
-        _alarms,
-        _currentUser!.uid,
-      );
+
+      await _alarmRepository.pushPendingChanges(userId: _currentUser!.uid);
       
       print('Todas las alarmas locales sincronizadas con Firebase');
     } catch (e) {
@@ -372,8 +763,8 @@ class _HomePageState extends State<HomePage> {
       }
     } else {
       // Solo cancelar sincronización de alarmas, mantener escucha de dispositivos
-      _firebaseAlarmsSubscription?.cancel();
-      _firebaseAlarmsSubscription = null;
+      await _alarmRepository.stopCloudSync();
+      _isAlarmCloudSyncing = false;
       print('Sincronización de alarmas desactivada');
     }
     
@@ -387,8 +778,8 @@ class _HomePageState extends State<HomePage> {
 
     if (newUser != _currentUser) {
       // Cancelar suscripción anterior
-      _firebaseAlarmsSubscription?.cancel();
-      _firebaseAlarmsSubscription = null;
+      await _alarmRepository.stopCloudSync();
+      _isAlarmCloudSyncing = false;
 
       _currentUser = newUser;
 
@@ -417,7 +808,7 @@ class _HomePageState extends State<HomePage> {
       final alarmSyncEnabled = prefs.getBool('alarm_sync_enabled') ?? false;
       
       // Verificar si el estado ha cambiado
-      final isCurrentlySyncing = _firebaseAlarmsSubscription != null;
+      final isCurrentlySyncing = _isAlarmCloudSyncing;
       
       if (alarmSyncEnabled && !isCurrentlySyncing && _cloudSyncEnabled && _currentUser != null) {
         // Activar sincronización
@@ -425,8 +816,8 @@ class _HomePageState extends State<HomePage> {
         print('Sincronización de alarmas activada automáticamente');
       } else if (!alarmSyncEnabled && isCurrentlySyncing) {
         // Desactivar sincronización
-        _firebaseAlarmsSubscription?.cancel();
-        _firebaseAlarmsSubscription = null;
+        await _alarmRepository.stopCloudSync();
+        _isAlarmCloudSyncing = false;
         print('Sincronización de alarmas desactivada automáticamente');
       }
     });
@@ -682,6 +1073,24 @@ class _HomePageState extends State<HomePage> {
           );
         }
         break;
+      case 'showHabitScreen':
+        final habitId = call.arguments['habitId'] as String;
+        final occurrenceKey = call.arguments['occurrenceKey'] as String;
+        final scheduledAtLocalMillis =
+            (call.arguments['scheduledAtLocalMillis'] as num?)?.toInt() ??
+                DateTime.now().millisecondsSinceEpoch;
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => HabitAlertScreen(
+                habitId: habitId,
+                occurrenceKey: occurrenceKey,
+                scheduledAtLocalMillis: scheduledAtLocalMillis,
+              ),
+            ),
+          );
+        }
+        break;
       // NUEVO: Manejar notificación de alarma sonando
       case 'notifyAlarmRinging':
         final alarmId = call.arguments['alarmId'] as int;
@@ -734,15 +1143,7 @@ class _HomePageState extends State<HomePage> {
           _ringingAlarmSnoozeCount = 0;
         });
 
-        // Encontrar la alarma y actualizar su snoozeCount
-        final alarmIndex = _alarms.indexWhere((alarm) => alarm.id == alarmId);
-        if (alarmIndex != -1) {
-          setState(() {
-            _alarms[alarmIndex].snoozeCount += 1; // INCREMENTAR SNOOZE COUNT
-            // Actualizar el tiempo si es necesario
-          });
-          await _saveAlarms(); // GUARDAR CAMBIOS
-        }
+        await _handleAlarmSnoozed(alarmId, newTimeInMillis);
 
         if (mounted) {
           Navigator.of(context).popUntil((route) => route.isFirst);
@@ -772,33 +1173,32 @@ class _HomePageState extends State<HomePage> {
     print('=== HANDLE ALARM STOPPED START ===');
     print('Processing stopped alarm ID: $alarmId');
 
+    // Limpiar la marca de pantalla de alarma para permitir futuras activaciones
+    try {
+      await platform.invokeMethod('clearAlarmScreenFlag', {'alarmId': alarmId});
+      print('Cleared alarm screen flag for alarm $alarmId');
+    } catch (e) {
+      print('Error clearing alarm screen flag: $e');
+    }
+
     final index = _alarms.indexWhere((a) => a.id == alarmId);
     if (index != -1) {
       final alarm = _alarms[index];
-      print('Found alarm: ${alarm.title}, isRepeating: ${alarm.isRepeating()}');
+      final repeating = _isRepeatingAlarm(alarm);
+      print('Found alarm: ${alarm.title}, isRepeating: $repeating');
 
       // Si la alarma NO es repetitiva, desactivarla
-      if (!alarm.isRepeating()) {
+      if (!repeating) {
         print('Non-repeating alarm, deactivating...');
+        final updated = alarm.copyWith(isActive: false, snoozeCount: 0);
         setState(() {
-          _alarms[index].isActive = false;
-          _alarms[index].snoozeCount = 0; // Reset snooze count
+          _alarms[index] = updated;
         });
-        await _saveAlarms();
-
-        // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled &&
-            _currentUser != null &&
-            _alarms[index].syncToCloud) {
-          try {
-            await _alarmFirebaseService.updateAlarmToCloud(
-              _alarms[index],
-              _currentUser!.uid,
-            );
-          } catch (e) {
-            print('Error al sincronizar alarma detenida con Firebase: $e');
-          }
-        }
+        await _alarmRepository.upsertAlarm(
+          alarm: updated,
+          cloudSyncEnabled: _cloudSyncEnabled,
+          userId: _currentUser?.uid,
+        );
 
         print('Non-repeating alarm deactivated and saved');
       } else {
@@ -811,24 +1211,15 @@ class _HomePageState extends State<HomePage> {
           // No hacer nada, la alarma se reprogramará automáticamente
         } else {
           print('Repeating alarm with active snoozes, resetting snooze count');
+          final updated = alarm.copyWith(snoozeCount: 0);
           setState(() {
-            _alarms[index].snoozeCount = 0; // Reset snooze count
+            _alarms[index] = updated;
           });
-          await _saveAlarms();
-
-          // Sincronizar con Firebase si está habilitado
-          if (_cloudSyncEnabled &&
-              _currentUser != null &&
-              _alarms[index].syncToCloud) {
-            try {
-              await _alarmFirebaseService.updateAlarmToCloud(
-                _alarms[index],
-                _currentUser!.uid,
-              );
-            } catch (e) {
-              print('Error al sincronizar reset de snooze con Firebase: $e');
-            }
-          }
+          await _alarmRepository.upsertAlarm(
+            alarm: updated,
+            cloudSyncEnabled: _cloudSyncEnabled,
+            userId: _currentUser?.uid,
+          );
         }
       }
 
@@ -871,88 +1262,34 @@ class _HomePageState extends State<HomePage> {
       if (alarm.snoozeCount >= alarm.maxSnoozes) {
         print('Maximum snoozes reached for alarm $alarmId, deactivating alarm');
 
-        // Desactivar la alarma si alcanzó el máximo
-        final updatedAlarm = Alarm(
-          id: alarm.id,
-          time: alarm.time,
-          title: alarm.title,
-          message: alarm.message,
-          isActive: false, // Desactivar
-          repeatDays: alarm.repeatDays,
-          isDaily: alarm.isDaily,
-          isWeekly: alarm.isWeekly,
-          isWeekend: alarm.isWeekend,
-          snoozeCount: 0, // Resetear contador
-          maxSnoozes: alarm.maxSnoozes,
-          snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-          requireGame: alarm.requireGame,
-          gameConfig: alarm.gameConfig,
-          syncToCloud: alarm.syncToCloud,
-        );
+        final updatedAlarm = alarm.copyWith(isActive: false, snoozeCount: 0);
 
         setState(() {
           _alarms[index] = updatedAlarm;
         });
 
-        await _saveAlarms();
-
-        // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled &&
-            _currentUser != null &&
-            updatedAlarm.syncToCloud) {
-          try {
-            await _alarmFirebaseService.updateAlarmToCloud(
-              updatedAlarm,
-              _currentUser!.uid,
-            );
-          } catch (e) {
-            print(
-              'Error al sincronizar alarma desactivada por máximo snooze con Firebase: $e',
-            );
-          }
-        }
+        await _alarmRepository.upsertAlarm(
+          alarm: updatedAlarm,
+          cloudSyncEnabled: _cloudSyncEnabled,
+          userId: _currentUser?.uid,
+        );
 
         _startOrUpdateCountdown();
         return;
       }
 
       // Continuar con la posposición normal
+      final updatedAlarm = alarm.copyWith(
+        snoozeCount: alarm.snoozeCount + 1,
+      );
       setState(() {
-        // Actualizar tiempo de la alarma al tiempo de snooze
-        _alarms[index] = Alarm(
-          id: alarm.id,
-          time: DateTime.fromMillisecondsSinceEpoch(newTimeInMillis),
-          title: alarm.title,
-          message: alarm.message,
-          isActive: alarm.isActive,
-          repeatDays: alarm.repeatDays,
-          isDaily: alarm.isDaily,
-          isWeekly: alarm.isWeekly,
-          isWeekend: alarm.isWeekend,
-          snoozeCount: alarm.snoozeCount + 1,
-          maxSnoozes: alarm.maxSnoozes,
-          snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-          requireGame: alarm.requireGame,
-          gameConfig: alarm.gameConfig,
-          syncToCloud: alarm.syncToCloud,
-        );
+        _alarms[index] = updatedAlarm;
       });
-
-      await _saveAlarms();
-
-      // Sincronizar con Firebase si está habilitado
-      if (_cloudSyncEnabled &&
-          _currentUser != null &&
-          _alarms[index].syncToCloud) {
-        try {
-          await _alarmFirebaseService.updateAlarmToCloud(
-            _alarms[index],
-            _currentUser!.uid,
-          );
-        } catch (e) {
-          print('Error al sincronizar alarma pospuesta con Firebase: $e');
-        }
-      }
+      await _alarmRepository.upsertAlarm(
+        alarm: updatedAlarm,
+        cloudSyncEnabled: _cloudSyncEnabled,
+        userId: _currentUser?.uid,
+      );
 
       _startOrUpdateCountdown();
       print(
@@ -964,30 +1301,28 @@ class _HomePageState extends State<HomePage> {
     print('=== HANDLE ALARM SNOOZED END ===');
   }
 
-  Future<void> _loadAlarms() async {
-    final prefs = await SharedPreferences.getInstance();
-    final alarmsString = prefs.getStringList(_alarmsKey);
-    if (alarmsString != null) {
-      _alarms.clear();
-      _alarms.addAll(alarmsString.map((s) => Alarm.fromJson(jsonDecode(s))));
-      _alarms.sort((a, b) => a.time.compareTo(b.time)); // Asegurar orden
+  Future<void> _reloadAlarmsFromLocal() async {
+    final alarms = await _alarmRepository.loadLocalAlarms();
+    if (!mounted) return;
+    setState(() {
+      _alarms
+        ..clear()
+        ..addAll(alarms);
+    });
+    if (_currentGroupingOption != AlarmGroupingOption.none) {
+      _initializeGroupStates();
     }
-    // No llamar a setState aquí, se llama en _loadSettingsAndAlarms
   }
 
-  Future<void> _saveAlarms() async {
-    final prefs = await SharedPreferences.getInstance();
-    final alarmsString = _alarms.map((a) => jsonEncode(a.toJson())).toList();
-    await prefs.setStringList(_alarmsKey, alarmsString);
-    // Si se guardan alarmas, puede que necesitemos re-inicializar los grupos
-    if (_currentGroupingOption != AlarmGroupingOption.none) {
-      _initializeGroupStates(); // Re-evaluar grupos si cambian las alarmas
-    }
-    if (mounted) setState(() {});
+  Future<void> _loadAlarms() async {
+    await _alarmRepository.ensureMigrated();
+    await _reloadAlarmsFromLocal();
   }
 
   Future<void> _setNativeAlarm(Alarm alarm) async {
     try {
+      final repeatDays = _normalizeRepeatDaysForAlarm(alarm);
+      final flags = _deriveRepeatFlags(repeatDays);
       await platform.invokeMethod('setAlarm', {
         'id': alarm.id,
         'hour': alarm.time.hour,
@@ -995,10 +1330,10 @@ class _HomePageState extends State<HomePage> {
         'title': alarm.title,
         'message': alarm.message,
         'screenRoute': '/alarm',
-        'repeatDays': alarm.repeatDays,
-        'isDaily': alarm.isDaily,
-        'isWeekly': alarm.isWeekly,
-        'isWeekend': alarm.isWeekend,
+        'repeatDays': repeatDays,
+        'isDaily': flags['isDaily'],
+        'isWeekly': flags['isWeekly'],
+        'isWeekend': flags['isWeekend'],
         'maxSnoozes': alarm.maxSnoozes,
         'snoozeDurationMinutes': alarm.snoozeDurationMinutes,
         'maxVolumePercent': alarm.maxVolumePercent,
@@ -1012,6 +1347,21 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  List<int> _normalizeRepeatDaysFromEditorResult({
+    required String repetitionType,
+    required List<int> repeatDays,
+    required DateTime baseTime,
+  }) {
+    if (repetitionType == 'daily') return const [1, 2, 3, 4, 5, 6, 7];
+    if (repetitionType == 'weekend') return const [6, 7];
+    if (repetitionType == 'weekly') {
+      if (repeatDays.isNotEmpty) return [repeatDays.first];
+      return [baseTime.weekday];
+    }
+    if (repetitionType == 'custom') return List<int>.from(repeatDays);
+    return const [];
+  }
+
   Future<void> _setAlarm() async {
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
@@ -1021,8 +1371,7 @@ class _HomePageState extends State<HomePage> {
     if (result != null && mounted) {
       final selectedTime = result['time'] as TimeOfDay;
       final now = DateTime.now();
-
-      var alarmTime = DateTime(
+      final baseTime = DateTime(
         now.year,
         now.month,
         now.day,
@@ -1032,7 +1381,6 @@ class _HomePageState extends State<HomePage> {
         0,
       );
 
-      // Si la hora seleccionada ya pasó hoy, programarla para mañana
       final nowNormalized = DateTime(
         now.year,
         now.month,
@@ -1042,10 +1390,6 @@ class _HomePageState extends State<HomePage> {
         0,
         0,
       );
-      if (alarmTime.isBefore(nowNormalized) ||
-          alarmTime.isAtSameMomentAs(nowNormalized)) {
-        alarmTime = alarmTime.add(const Duration(days: 1));
-      }
 
       final title = result['title']!.isNotEmpty ? result['title']! : 'Alarma';
       final message = result['message']!.isNotEmpty
@@ -1063,16 +1407,30 @@ class _HomePageState extends State<HomePage> {
       final tempVolumeReductionPercent = result['tempVolumeReductionPercent'] ?? 50;
       final tempVolumeReductionDurationSeconds = result['tempVolumeReductionDurationSeconds'] ?? 30;
 
-      // Configurar los valores de repetición
-      bool isDaily = repetitionType == 'daily';
-      bool isWeekly = repetitionType == 'weekly';
-      bool isWeekend = repetitionType == 'weekend';
-
-      // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
-      List<int> finalRepeatDays = List.from(repeatDays);
-      if (isWeekly && finalRepeatDays.isEmpty) {
-        finalRepeatDays.add(alarmTime.weekday);
-      }
+      final finalRepeatDays = _normalizeRepeatDaysFromEditorResult(
+        repetitionType: repetitionType,
+        repeatDays: repeatDays,
+        baseTime: baseTime,
+      );
+      final flags = _deriveRepeatFlags(finalRepeatDays);
+      final alarmTime = finalRepeatDays.isEmpty
+          ? (baseTime.isBefore(nowNormalized) ||
+                  baseTime.isAtSameMomentAs(nowNormalized)
+              ? baseTime.add(const Duration(days: 1))
+              : baseTime)
+          : _calculateNextOccurrence(
+              Alarm(
+                id: 0,
+                time: baseTime,
+                title: title,
+                message: message,
+                repeatDays: finalRepeatDays,
+                isDaily: flags['isDaily'] as bool,
+                isWeekly: flags['isWeekly'] as bool,
+                isWeekend: flags['isWeekend'] as bool,
+              ),
+              now,
+            );
 
       // Crear un nuevo ID para la alarma
       final alarmId = DateTime.now().millisecondsSinceEpoch % 100000;
@@ -1085,9 +1443,9 @@ class _HomePageState extends State<HomePage> {
         message: message,
         isActive: true,
         repeatDays: finalRepeatDays,
-        isDaily: isDaily,
-        isWeekly: isWeekly,
-        isWeekend: isWeekend,
+        isDaily: flags['isDaily'] as bool,
+        isWeekly: flags['isWeekly'] as bool,
+        isWeekend: flags['isWeekend'] as bool,
         maxSnoozes: maxSnoozes,
         snoozeCount: 0,
         snoozeDurationMinutes: snoozeDuration,
@@ -1102,26 +1460,23 @@ class _HomePageState extends State<HomePage> {
 
       try {
         await _setNativeAlarm(alarm);
-        _alarms.add(alarm);
-        await _saveAlarms();
+        setState(() {
+          _alarms.add(alarm);
+        });
+        await _alarmRepository.upsertAlarm(
+          alarm: alarm,
+          cloudSyncEnabled: _cloudSyncEnabled,
+          userId: _currentUser?.uid,
+        );
+        await _reloadAlarmsFromLocal();
 
-        // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled && _currentUser != null && alarm.syncToCloud) {
-          try {
-            await _alarmFirebaseService.saveAlarmToCloud(
-              alarm,
-              _currentUser!.uid,
-            );
-          } catch (e) {
-            print('Error al sincronizar alarma con Firebase: $e');
-          }
-        }
-
+        if (!mounted) return;
         _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Alarma configurada y activa')),
         );
       } on PlatformException catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al configurar alarma: ${e.message}')),
         );
@@ -1139,15 +1494,13 @@ class _HomePageState extends State<HomePage> {
       final selectedTime = result['time'] as TimeOfDay;
       final now = DateTime.now();
 
-      DateTime alarmTime = DateTime(
+      final baseTime = DateTime(
         now.year,
         now.month,
         now.day,
         selectedTime.hour,
         selectedTime.minute,
       );
-
-      // Si la hora seleccionada ya pasó hoy, programarla para mañana
       final nowNormalized = DateTime(
         now.year,
         now.month,
@@ -1157,12 +1510,6 @@ class _HomePageState extends State<HomePage> {
         0,
         0,
       );
-      if (alarmTime.isBefore(nowNormalized) &&
-          (!alarm.isRepeating() ||
-              selectedTime.hour != alarm.time.hour ||
-              selectedTime.minute != alarm.time.minute)) {
-        alarmTime = alarmTime.add(const Duration(days: 1));
-      }
 
       final title = (result['title'] as String).isNotEmpty
           ? result['title'] as String
@@ -1184,16 +1531,27 @@ class _HomePageState extends State<HomePage> {
       final previousSyncToCloud = alarm.syncToCloud;
       final shouldDeleteFromFirebase = previousSyncToCloud && !syncToCloud;
 
-      // Configurar los valores de repetición
-      bool isDaily = repetitionType == 'daily';
-      bool isWeekly = repetitionType == 'weekly';
-      bool isWeekend = repetitionType == 'weekend';
-
-      // Si es semanal y no hay días seleccionados, usar el día de la semana de la fecha seleccionada
-      List<int> finalRepeatDays = List.from(repeatDays);
-      if (isWeekly && finalRepeatDays.isEmpty) {
-        finalRepeatDays.add(alarm.time.weekday);
-      }
+      final finalRepeatDays = _normalizeRepeatDaysFromEditorResult(
+        repetitionType: repetitionType,
+        repeatDays: repeatDays,
+        baseTime: baseTime,
+      );
+      final flags = _deriveRepeatFlags(finalRepeatDays);
+      final alarmTime = finalRepeatDays.isEmpty
+          ? (baseTime.isBefore(nowNormalized) ||
+                  baseTime.isAtSameMomentAs(nowNormalized)
+              ? baseTime.add(const Duration(days: 1))
+              : baseTime)
+          : _calculateNextOccurrence(
+              alarm.copyWith(
+                time: baseTime,
+                repeatDays: finalRepeatDays,
+                isDaily: flags['isDaily'] as bool,
+                isWeekly: flags['isWeekly'] as bool,
+                isWeekend: flags['isWeekend'] as bool,
+              ),
+              now,
+            );
 
       // Cancelar la alarma anterior
       try {
@@ -1202,62 +1560,51 @@ class _HomePageState extends State<HomePage> {
         print('Error al cancelar la alarma anterior: $e');
       }
 
-      // Actualizar la alarma en la lista
-      setState(() async {
-        final index = _alarms.indexWhere((a) => a.id == alarm.id);
-        if (index != -1) {
-          _alarms[index] = Alarm(
-            id: alarm.id,
-            time: alarmTime,
-            title: title,
-            message: message,
-            isActive: alarm.isActive,
-            repeatDays: finalRepeatDays,
-            isDaily: isDaily,
-            isWeekly: isWeekly,
-            isWeekend: isWeekend,
-            maxSnoozes: maxSnoozes,
-            snoozeCount: alarm.snoozeCount,
-            snoozeDurationMinutes: snoozeDuration,
-            requireGame: requireGame,
-            gameConfig: gameConfig,
-            syncToCloud: syncToCloud,
-            maxVolumePercent: maxVolumePercent,
-            volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
-            tempVolumeReductionPercent: tempVolumeReductionPercent,
-            tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
+      final updatedAlarm = alarm.copyWith(
+        time: alarmTime,
+        title: title,
+        message: message,
+        repeatDays: finalRepeatDays,
+        isDaily: flags['isDaily'] as bool,
+        isWeekly: flags['isWeekly'] as bool,
+        isWeekend: flags['isWeekend'] as bool,
+        maxSnoozes: maxSnoozes,
+        snoozeDurationMinutes: snoozeDuration,
+        requireGame: requireGame,
+        gameConfig: gameConfig,
+        syncToCloud: syncToCloud,
+        maxVolumePercent: maxVolumePercent,
+        volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
+        tempVolumeReductionPercent: tempVolumeReductionPercent,
+        tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
+      );
+
+      final index = _alarms.indexWhere((a) => a.id == alarm.id);
+      if (index != -1) {
+        setState(() {
+          _alarms[index] = updatedAlarm;
+        });
+      }
+
+      await _alarmRepository.upsertAlarm(
+        alarm: updatedAlarm,
+        cloudSyncEnabled: _cloudSyncEnabled,
+        userId: _currentUser?.uid,
+      );
+
+      if (_cloudSyncEnabled && _currentUser != null && shouldDeleteFromFirebase) {
+        try {
+          await _alarmFirebaseService.deleteAlarmToCloud(
+            alarm.id,
+            _currentUser!.uid,
           );
-          _saveAlarms();
-
-          // Eliminar de Firebase si se desactivó la sincronización
-          if (_cloudSyncEnabled &&
-              _currentUser != null &&
-              shouldDeleteFromFirebase) {
-            try {
-              await _alarmFirebaseService.deleteAlarmToCloud(
-                alarm.id,
-                _currentUser!.uid,
-              );
-            } catch (e) {
-              print('Error al eliminar alarma de Firebase: $e');
-            }
-          }
-
-          // Sincronizar con Firebase si está habilitado y la sincronización está activa
-          if (_cloudSyncEnabled &&
-              _currentUser != null &&
-              _alarms[index].syncToCloud) {
-            try {
-              await _alarmFirebaseService.updateAlarmToCloud(
-                _alarms[index],
-                _currentUser!.uid,
-              );
-            } catch (e) {
-              print('Error al sincronizar alarma editada con Firebase: $e');
-            }
-          }
+          await _alarmLocalService.clearDirty(alarm.id);
+        } catch (e) {
+          print('Error al eliminar alarma de Firebase: $e');
         }
-      });
+      }
+
+      await _reloadAlarmsFromLocal();
 
       // Reprogramar la alarma si está activa
       if (alarm.isActive) {
@@ -1265,6 +1612,7 @@ class _HomePageState extends State<HomePage> {
           final updatedAlarm =
               _alarms[_alarms.indexWhere((a) => a.id == alarm.id)];
           await _setNativeAlarm(updatedAlarm);
+          if (!mounted) return;
           _startOrUpdateCountdown();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1275,6 +1623,7 @@ class _HomePageState extends State<HomePage> {
           );
         } catch (e) {
           print('Error al reprogramar la alarma: $e');
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Error al reprogramar la alarma')),
           );
@@ -1290,76 +1639,58 @@ class _HomePageState extends State<HomePage> {
       if (alarm.isActive == isActive) return; // No change needed
 
       try {
+        Alarm updatedAlarm;
         if (isActive) {
           // Reactivar alarma: calcular el próximo tiempo de alarma antes de activarla
           final now = DateTime.now();
           DateTime nextOccurrence = _calculateNextOccurrence(alarm, now);
 
           // Crear una copia de la alarma con el tiempo actualizado para la próxima ocurrencia
-          final updatedAlarm = Alarm(
-            id: alarm.id,
-            time:
-                nextOccurrence, // Usar el tiempo calculado para la próxima ocurrencia
-            title: alarm.title,
-            message: alarm.message,
-            isActive: true,
-            repeatDays: alarm.repeatDays,
-            isDaily: alarm.isDaily,
-            isWeekly: alarm.isWeekly,
-            isWeekend: alarm.isWeekend,
-            snoozeCount: alarm.snoozeCount,
-            maxSnoozes: alarm.maxSnoozes,
-            snoozeDurationMinutes: alarm.snoozeDurationMinutes,
-            requireGame: alarm.requireGame,
-            gameConfig: alarm.gameConfig,
-            syncToCloud: alarm.syncToCloud,
-            maxVolumePercent: alarm.maxVolumePercent,
-            volumeRampUpDurationSeconds: alarm.volumeRampUpDurationSeconds,
-            tempVolumeReductionPercent: alarm.tempVolumeReductionPercent,
-            tempVolumeReductionDurationSeconds: alarm.tempVolumeReductionDurationSeconds,
-          );
+          updatedAlarm = alarm.copyWith(time: nextOccurrence, isActive: true);
 
           // Setear la alarma con el tiempo actualizado
           await _setNativeAlarm(updatedAlarm);
 
           // Actualizar el objeto de alarma en la lista con el tiempo calculado
-          _alarms[index] = updatedAlarm;
+          setState(() {
+            _alarms[index] = updatedAlarm;
+          });
         } else {
           // Desactivar alarma: cancelarla
-          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
-          _alarms[index].isActive = false;
-        }
-
-        await _saveAlarms(); // Guardar y refrescar UI
-
-        // Sincronizar con Firebase si está habilitado
-        if (_cloudSyncEnabled &&
-            _currentUser != null &&
-            _alarms[index].syncToCloud) {
-          try {
-            await _alarmFirebaseService.toggleAlarmStatus(
-              alarm.id,
-              isActive,
-              _currentUser!.uid,
-            );
-          } catch (e) {
-            print('Error al sincronizar estado de alarma con Firebase: $e');
+          if (_isAlarmRinging && _ringingAlarmId == alarm.id) {
+            try {
+              await platform.invokeMethod('stopAlarm', {'alarmId': alarm.id});
+            } catch (_) {}
           }
+          await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
+          updatedAlarm = alarm.copyWith(isActive: false);
+          setState(() {
+            _alarms[index] = updatedAlarm;
+          });
         }
 
+        await _alarmRepository.upsertAlarm(
+          alarm: updatedAlarm,
+          cloudSyncEnabled: _cloudSyncEnabled,
+          userId: _currentUser?.uid,
+        );
+        await _reloadAlarmsFromLocal();
+
+        if (!mounted) return;
         _startOrUpdateCountdown();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Alarma ${isActive ? "activada" : "desactivada"}'),
             backgroundColor: isActive
-                ? Colors.green
-                : const Color.fromARGB(255, 211, 47, 47),
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.error,
           ),
         );
       } on PlatformException catch (e) {
         setState(() {
           alarm.isActive = !isActive; // Revertir
         });
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1382,25 +1713,18 @@ class _HomePageState extends State<HomePage> {
         if (alarm.isActive) {
           await platform.invokeMethod('cancelAlarm', {'alarmId': alarm.id});
         }
-
-        // Eliminar de Firebase si está sincronizada
-        if (_cloudSyncEnabled && _currentUser != null && alarm.syncToCloud) {
-          try {
-            await _alarmFirebaseService.deleteAlarmToCloud(
-              alarm.id,
-              _currentUser!.uid,
-            );
-          } catch (e) {
-            print('Error al eliminar alarma de Firebase: $e');
-          }
-        }
-
-        _alarms.removeAt(index);
-        await _saveAlarms(); // Esto llamará a setState y re-inicializará grupos
+        await _alarmRepository.deleteAlarm(
+          alarmId: alarm.id,
+          cloudSyncEnabled: _cloudSyncEnabled,
+          userId: _currentUser?.uid,
+        );
+        await _reloadAlarmsFromLocal();
+        if (!mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Alarma eliminada')));
       } on PlatformException catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al eliminar alarma: ${e.message}')),
         );
@@ -1528,7 +1852,7 @@ class _HomePageState extends State<HomePage> {
       DateTime nextAlarmTime;
 
       // SIEMPRE calcular basándose en la hora actual, no en la fecha original
-      if (alarm.isRepeating()) {
+      if (_isRepeatingAlarm(alarm)) {
         nextAlarmTime = _calculateNextOccurrence(alarm, now);
       } else {
         // Para alarmas no repetitivas, usar la hora actual como base
@@ -1576,99 +1900,46 @@ class _HomePageState extends State<HomePage> {
   }
 
   DateTime _calculateNextOccurrence(Alarm alarm, DateTime now) {
-    // SIEMPRE usar la fecha actual como base, NO la fecha original de la alarma
-    DateTime baseTime = DateTime(
+    final repeatDays = _normalizeRepeatDaysForAlarm(alarm);
+    final baseTime = DateTime(
       now.year,
       now.month,
       now.day,
       alarm.time.hour,
       alarm.time.minute,
     );
-
     print(
-      'Calculating next occurrence - Current: $now, Target time: ${alarm.time.hour}:${alarm.time.minute}',
+      'Calculating next occurrence - Current: $now, Target time: ${alarm.time.hour}:${alarm.time.minute}, RepeatDays: $repeatDays',
     );
 
-    if (alarm.isDaily) {
-      // Para alarmas diarias
-      if (baseTime.isAfter(now)) {
-        print('Daily alarm: scheduling for today');
-        return baseTime;
-      } else {
-        print('Daily alarm: time passed today, scheduling for tomorrow');
-        return baseTime.add(const Duration(days: 1));
-      }
-    } else if (alarm.isWeekly) {
-      // Para alarmas semanales - usar el día de la semana original
-      final targetWeekday = alarm.time.weekday;
-      int daysUntilNext = (targetWeekday - now.weekday) % 7;
-
-      // Si es el mismo día, verificar si la hora ya pasó
-      if (daysUntilNext == 0) {
-        if (baseTime.isAfter(now)) {
-          print('Weekly alarm: scheduling for today');
-          return baseTime;
-        } else {
-          daysUntilNext = 7; // Próxima semana
-          print('Weekly alarm: time passed today, scheduling for next week');
-        }
-      }
-
-      return baseTime.add(Duration(days: daysUntilNext));
-    } else if (alarm.isWeekend) {
-      // Para alarmas de fin de semana
-      final isCurrentlyWeekend =
-          now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
-
-      if (isCurrentlyWeekend && baseTime.isAfter(now)) {
-        print('Weekend alarm: scheduling for today');
+    if (repeatDays.isNotEmpty) {
+      if (repeatDays.contains(now.weekday) && baseTime.isAfter(now)) {
+        print('Repeat alarm: scheduling for today');
         return baseTime;
       }
 
-      // Buscar el próximo fin de semana
-      DateTime nextWeekendTime = baseTime;
-      while (true) {
-        nextWeekendTime = nextWeekendTime.add(const Duration(days: 1));
-        if (nextWeekendTime.weekday == DateTime.saturday ||
-            nextWeekendTime.weekday == DateTime.sunday) {
-          print('Weekend alarm: scheduling for next weekend');
-          break;
-        }
-      }
-
-      return nextWeekendTime;
-    } else if (alarm.repeatDays.isNotEmpty) {
-      // Para alarmas personalizadas
-
-      // Verificar si hoy está en los días de repetición y la hora no ha pasado
-      if (alarm.repeatDays.contains(now.weekday) && baseTime.isAfter(now)) {
-        print('Custom repeat alarm: scheduling for today');
-        return baseTime;
-      }
-
-      // Buscar el próximo día válido
-      DateTime nextValidTime = baseTime;
       for (int daysToAdd = 1; daysToAdd <= 7; daysToAdd++) {
-        nextValidTime = baseTime.add(Duration(days: daysToAdd));
-        if (alarm.repeatDays.contains(nextValidTime.weekday)) {
-          print(
-            'Custom repeat alarm: scheduling for next occurrence in $daysToAdd days',
+        final testDate = now.add(Duration(days: daysToAdd));
+        if (repeatDays.contains(testDate.weekday)) {
+          final next = DateTime(
+            testDate.year,
+            testDate.month,
+            testDate.day,
+            alarm.time.hour,
+            alarm.time.minute,
           );
-          break;
+          print('Repeat alarm: scheduling for next occurrence in $daysToAdd days');
+          return next;
         }
       }
-
-      return nextValidTime;
     }
 
-    // Para alarmas no repetitivas
     if (baseTime.isAfter(now)) {
       print('One-time alarm: scheduling for today');
       return baseTime;
-    } else {
-      print('One-time alarm: time passed today, scheduling for tomorrow');
-      return baseTime.add(const Duration(days: 1));
     }
+    print('One-time alarm: time passed today, scheduling for tomorrow');
+    return baseTime.add(const Duration(days: 1));
   }
 
   String _formatDuration(Duration duration) {
@@ -1694,6 +1965,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildNextAlarmSection() {
+    final scheme = Theme.of(context).colorScheme;
     final nextAlarm = _getNextActiveAlarm();
     if (nextAlarm == null || !_showNextAlarmSection) {
       return const SizedBox.shrink();
@@ -1712,12 +1984,12 @@ class _HomePageState extends State<HomePage> {
         right: 16.0,
       ),
       decoration: BoxDecoration(
-        color: Colors.green.shade100,
+        color: scheme.primary.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.green.shade400, width: 2),
+        border: Border.all(color: scheme.primary, width: 2),
         boxShadow: [
           BoxShadow(
-            color: Colors.green.shade200,
+            color: scheme.primary.withOpacity(0.25),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -1732,7 +2004,7 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
-              color: Colors.green.shade700,
+              color: scheme.primary,
             ),
           ),
           const SizedBox(height: 8),
@@ -1740,9 +2012,9 @@ class _HomePageState extends State<HomePage> {
             margin: const EdgeInsets.all(0),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.green.shade300),
+              border: Border.all(color: scheme.primary),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1753,12 +2025,16 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Text(
                       nextAlarm.title,
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleMedium?.copyWith(color: scheme.onSurface),
                     ),
                     if (nextAlarm.message.isNotEmpty)
                       Text(
                         nextAlarm.message,
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: scheme.onSurface),
                       ),
                   ],
                 ),
@@ -1767,8 +2043,8 @@ class _HomePageState extends State<HomePage> {
                   onChanged: (bool value) {
                     _toggleAlarmState(nextAlarm.id, value);
                   },
-                  activeColor: Colors.green,
-                  inactiveThumbColor: Colors.black,
+                  activeColor: scheme.primary,
+                  inactiveThumbColor: scheme.onSurface,
                 ),
               ],
             ),
@@ -1792,7 +2068,7 @@ class _HomePageState extends State<HomePage> {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.green.shade700,
+                          color: scheme.primary,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -1802,7 +2078,7 @@ class _HomePageState extends State<HomePage> {
                         icon: Icon(
                           moreAlarms ? Icons.visibility_off : Icons.visibility,
                           size: 20,
-                          color: Colors.green,
+                          color: scheme.primary,
                         ),
                         onPressed: () {
                           setState(() {
@@ -1823,10 +2099,10 @@ class _HomePageState extends State<HomePage> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 5),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: scheme.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: Colors.green.shade400,
+                        color: scheme.primary,
                         width: 1,
                       ),
                     ),
@@ -1850,13 +2126,13 @@ class _HomePageState extends State<HomePage> {
                                 dense: true,
                                 leading: Icon(
                                   Icons.alarm,
-                                  color: Colors.green,
+                                  color: scheme.primary,
                                   size: 20,
                                 ),
                                 title: Text(
                                   alarm.title,
-                                  style: const TextStyle(
-                                    color: Colors.black,
+                                  style: TextStyle(
+                                    color: scheme.onSurface,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -1868,12 +2144,7 @@ class _HomePageState extends State<HomePage> {
                                       Text(
                                         alarm.message,
                                         style: TextStyle(
-                                          color: const Color.fromARGB(
-                                            255,
-                                            0,
-                                            0,
-                                            0,
-                                          ),
+                                          color: scheme.onSurface,
                                           fontSize: 11,
                                         ),
                                         maxLines: 1,
@@ -1882,12 +2153,7 @@ class _HomePageState extends State<HomePage> {
                                     Text(
                                       'Sonará a las ${DateFormat('HH:mm').format(alarm.time)}',
                                       style: TextStyle(
-                                        color: const Color.fromARGB(
-                                          255,
-                                          0,
-                                          0,
-                                          0,
-                                        ),
+                                        color: scheme.onSurface,
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -1899,7 +2165,7 @@ class _HomePageState extends State<HomePage> {
                                   onChanged: (bool value) {
                                     _toggleAlarmState(alarm.id, value);
                                   },
-                                  activeColor: Colors.green,
+                                  activeColor: scheme.primary,
                                   materialTapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
                                 ),
@@ -1922,78 +2188,93 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildAlarmItem(Alarm alarm) {
-    return ListTile(
-      leading: PopupMenuButton<String>(
-        onSelected: (String result) {
-          if (result == 'delete') {
-            _deleteAlarm(alarm.id);
-          } else if (result == 'edit') {
-            _editAlarm(alarm);
-          }
-        },
-        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-          const PopupMenuItem<String>(value: 'edit', child: Text('Editar')),
-          const PopupMenuItem<String>(value: 'delete', child: Text('Eliminar')),
-        ],
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.primary, width: 1),
       ),
-      title: RichText(
-        text: TextSpan(
-          children: [
-            TextSpan(
-              text: '${alarm.title} ',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-                fontSize: 16,
-              ),
-            ),
-            if (alarm.isRepeating())
+      child: ListTile(
+        leading: PopupMenuButton<String>(
+          onSelected: (String result) {
+            if (result == 'delete') {
+              _deleteAlarm(alarm.id);
+            } else if (result == 'edit') {
+              _editAlarm(alarm);
+            }
+          },
+          itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+            const PopupMenuItem<String>(value: 'edit', child: Text('Editar')),
+            const PopupMenuItem<String>(value: 'delete', child: Text('Eliminar')),
+          ],
+        ),
+        title: RichText(
+          text: TextSpan(
+            children: [
               TextSpan(
-                text: _getRepeatDaysPrefix(alarm),
+                text: '${alarm.title} ',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade700,
-                  fontSize: 12,
+                  color: scheme.onSurface,
+                  fontSize: 16,
                 ),
+              ),
+              if (alarm.isRepeating())
+                TextSpan(
+                  text: _getRepeatDaysPrefix(alarm),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurface,
+                    fontSize: 12,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              alarm.message.isNotEmpty ? alarm.message : 'Sin mensaje',
+              style: TextStyle(color: scheme.onSurface),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                Text('Próxima vez: ', style: TextStyle(color: scheme.onSurface)),
+                Text(
+                  TimeOfDay.fromDateTime(alarm.time).format(context),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+            if (alarm.isActive)
+              Builder(
+                builder: (context) {
+                  final durationUntilAlarm = _calculateTimeUntilAlarm(alarm);
+                  return Text(
+                    'Faltan: ${_formatDuration(durationUntilAlarm)}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: scheme.primary),
+                  );
+                },
               ),
           ],
         ),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(alarm.message.isNotEmpty ? alarm.message : 'Sin mensaje'),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              Text('Próxima vez: '),
-              Text(
-                TimeOfDay.fromDateTime(alarm.time).format(context),
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          if (alarm.isActive)
-            Builder(
-              builder: (context) {
-                final durationUntilAlarm = _calculateTimeUntilAlarm(alarm);
-                return Text(
-                  'Faltan: ${_formatDuration(durationUntilAlarm)}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: Colors.green),
-                );
-              },
-            ),
-        ],
-      ),
-      trailing: Switch(
-        value: alarm.isActive,
-        onChanged: (bool value) {
-          _toggleAlarmState(alarm.id, value);
-        },
-        activeColor: Colors.green,
-        inactiveThumbColor: Colors.black,
+        trailing: Switch(
+          value: alarm.isActive,
+          onChanged: (bool value) {
+            _toggleAlarmState(alarm.id, value);
+          },
+          activeColor: scheme.primary,
+          inactiveThumbColor: scheme.onSurface,
+        ),
       ),
     );
   }
@@ -2004,6 +2285,7 @@ class _HomePageState extends State<HomePage> {
       return const SizedBox.shrink();
     }
 
+    final scheme = Theme.of(context).colorScheme;
     final canSnooze = _ringingAlarmSnoozeCount < _ringingAlarmMaxSnoozes;
     
     // Encontrar la alarma actual para obtener configuraciones de volumen
@@ -2044,12 +2326,12 @@ class _HomePageState extends State<HomePage> {
         margin: const EdgeInsets.all(8.0),
         padding: const EdgeInsets.all(16.0),
         decoration: BoxDecoration(
-          color: Colors.red.shade100,
+          color: scheme.errorContainer,
           borderRadius: BorderRadius.circular(8.0),
-          border: Border.all(color: Colors.red.shade400, width: 2),
+          border: Border.all(color: scheme.error, width: 2),
           boxShadow: [
             BoxShadow(
-              color: Colors.red.shade200,
+              color: scheme.error.withOpacity(0.25),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -2061,7 +2343,7 @@ class _HomePageState extends State<HomePage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.alarm, color: Colors.red.shade700, size: 35),
+                Icon(Icons.alarm, color: scheme.error, size: 35),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -2069,7 +2351,7 @@ class _HomePageState extends State<HomePage> {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: Colors.red.shade700,
+                      color: scheme.error,
                     ),
                   ),
                 ),
@@ -2083,10 +2365,10 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   Text(
                     _ringingAlarmTitle.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 35,
                       fontWeight: FontWeight.bold,
-                      color: Color.fromARGB(255, 211, 47, 47),
+                      color: scheme.error,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -2096,7 +2378,7 @@ class _HomePageState extends State<HomePage> {
                       _ringingAlarmMessage,
                       style: TextStyle(
                         fontSize: 20,
-                        color: Colors.red.shade600,
+                        color: scheme.error,
                         fontWeight: FontWeight.w900,
                       ),
                       textAlign: TextAlign.center,
@@ -2112,9 +2394,9 @@ class _HomePageState extends State<HomePage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: scheme.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(color: scheme.outline),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2124,29 +2406,29 @@ class _HomePageState extends State<HomePage> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade700,
+                      color: scheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Volumen máximo: ${currentAlarm.maxVolumePercent}%',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   Text(
                     'Aumento gradual: ${currentAlarm.volumeRampUpDurationSeconds}s',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   const SizedBox(height: 8),
-                  VolumeControlButton(
+                  SynchronizedVolumeControlButton(
                     tempVolumePercent: currentAlarm.tempVolumeReductionPercent,
                     durationSeconds: currentAlarm.tempVolumeReductionDurationSeconds,
                     onToggle: (isActive) {
                       // Manejar activación/desactivación de reducción temporal
-                      print('Volume reduction toggled: $isActive');
+                      print('Volume reduction toggled in home: $isActive');
                     },
                     onExpired: () {
                       // Manejar expiración de reducción temporal
-                      print('Volume reduction expired');
+                      print('Volume reduction expired in home');
                     },
                   ),
                 ],
@@ -2169,8 +2451,8 @@ class _HomePageState extends State<HomePage> {
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -2197,8 +2479,8 @@ class _HomePageState extends State<HomePage> {
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
+                      backgroundColor: scheme.error,
+                      foregroundColor: scheme.onError,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -2216,18 +2498,18 @@ class _HomePageState extends State<HomePage> {
                   Container(
                     padding: const EdgeInsets.all(8.0),
                     decoration: BoxDecoration(
-                      color: Colors.red,
+                      color: scheme.errorContainer,
                       borderRadius: BorderRadius.circular(8.0),
-                      border: Border.all(color: Colors.red.shade300),
+                      border: Border.all(color: scheme.error),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(Icons.warning, color: Colors.white, size: 25),
+                        Icon(Icons.warning, color: scheme.onErrorContainer, size: 25),
                         Text(
                           'Máximo Posposiciones Alcanzado ($_ringingAlarmSnoozeCount/$_ringingAlarmMaxSnoozes)',
                           style: TextStyle(
-                            color: const Color.fromARGB(255, 255, 255, 255),
+                            color: scheme.onErrorContainer,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -2287,96 +2569,26 @@ class _HomePageState extends State<HomePage> {
         ? _getGroupedAlarms()
         : {};
 
+    final scheme = Theme.of(context).colorScheme;
     // Verificar si hay alarmas activas
     final hasActiveAlarms = _alarms.any((alarm) => alarm.isActive);
     final nextAlarm = _getNextActiveAlarm();
 
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color.fromARGB(255, 0, 0, 0),
-        title: Padding(
-          padding: const EdgeInsets.only(left: 85),
-          child: Text(
-            'The Good Alarm',
-            style: TextStyle(
-              fontSize: 25,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        actions: [
-          Theme(
-            data: Theme.of(context).copyWith(
-              popupMenuTheme: PopupMenuThemeData(
-                shape: RoundedRectangleBorder(
-                  side: BorderSide(color: Colors.white, width: 2.0),
-                  borderRadius: BorderRadius.circular(
-                    4.0,
-                  ), // Optional: for rounded corners
-                ),
-              ),
-            ),
-            child: PopupMenuButton<String>(
-              color: Colors.black,
-              icon: const Icon(Icons.more_vert, color: Colors.white, size: 30),
-              onSelected: (String value) async {
-                switch (value) {
-                  case 'settings':
-                    await Navigator.pushNamed(context, '/settings');
-                    _loadSettingsAndAlarms();
-                    break;
-                  // case 'device_name':
-                  //   await _showDeviceNameModal();
-                  //   break;
-                }
-              },
-              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(
-                  value: 'settings',
-                  child: Row(
-                    children: [
-                      Icon(Icons.settings, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text(
-                        'Configuración',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // const PopupMenuItem<String>(
-                //   value: 'device_name',
-                //   child: Row(
-                //     children: [
-                //       Icon(Icons.phone_android, color: Colors.black),
-                //       SizedBox(width: 8),
-                //       Text('Cambiar nombre del dispositivo'),
-                //     ],
-                //   ),
-                // ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Column(
+    final body = SingleChildScrollView(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (hasActiveAlarms) ...[
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
-                color: hasActiveAlarms ? Colors.green : Colors.black,
+                color: hasActiveAlarms ? scheme.primary : scheme.surface,
                 child: Text(
                   hasActiveAlarms
                       ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
                       : 'No hay alarmas activas',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: const Color.fromARGB(255, 255, 255, 255),
+                    color: hasActiveAlarms ? scheme.onPrimary : scheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -2392,12 +2604,12 @@ class _HomePageState extends State<HomePage> {
                 margin: const EdgeInsets.all(8.0),
                 padding: const EdgeInsets.all(16.0),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade100,
+                  color: scheme.secondary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8.0),
-                  border: Border.all(color: Colors.orange.shade400, width: 2),
+                  border: Border.all(color: scheme.secondary, width: 2),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.orange.shade200,
+                      color: scheme.secondary.withOpacity(0.25),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
@@ -2410,7 +2622,7 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         Icon(
                           Icons.snooze,
-                          color: Colors.orange.shade700,
+                          color: scheme.secondary,
                           size: 35,
                         ),
                         const SizedBox(width: 8),
@@ -2420,7 +2632,7 @@ class _HomePageState extends State<HomePage> {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade700,
+                            color: scheme.secondary,
                           ),
                         ),
                       ],
@@ -2431,9 +2643,9 @@ class _HomePageState extends State<HomePage> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: scheme.surface,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange.shade300),
+                          border: Border.all(color: scheme.secondary),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2455,7 +2667,7 @@ class _HomePageState extends State<HomePage> {
                                       Text(
                                         'Faltan: ${_formatDuration(_calculateTimeUntilSnoozedAlarm(alarm))}',
                                         style: TextStyle(
-                                          color: Colors.orange.shade700,
+                                          color: scheme.secondary,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12,
                                         ),
@@ -2465,13 +2677,13 @@ class _HomePageState extends State<HomePage> {
                                   Text(
                                     'Sonará a las: ${DateFormat('HH:mm').format(_calculateSnoozedAlarmTime(alarm))}',
                                     style: TextStyle(
-                                      color: Colors.grey.shade600,
+                                      color: scheme.onSurface,
                                     ),
                                   ),
                                   Text(
                                     'Pospuesta: ${alarm.snoozeCount}/${alarm.maxSnoozes} veces',
                                     style: TextStyle(
-                                      color: Colors.orange.shade700,
+                                      color: scheme.secondary,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -2480,43 +2692,35 @@ class _HomePageState extends State<HomePage> {
                             ),
                             IconButton(
                               onPressed: () async {
-                                // Desactivar alarma pospuesta
-                                await _toggleAlarmState(alarm.id, false);
-                                // Resetear contador de snooze
-                                setState(() {
-                                  final index = _alarms.indexWhere(
-                                    (a) => a.id == alarm.id,
-                                  );
-                                  if (index != -1) {
-                                    _alarms[index].snoozeCount = 0;
-                                  }
-                                });
-                                await _saveAlarms();
+                                try {
+                                  await platform.invokeMethod('cancelAlarm', {
+                                    'alarmId': alarm.id,
+                                  });
+                                } catch (_) {}
 
-                                // Sincronizar con Firebase si está habilitado
+                                final updatedAlarm = alarm.copyWith(
+                                  isActive: false,
+                                  snoozeCount: 0,
+                                );
                                 final index = _alarms.indexWhere(
                                   (a) => a.id == alarm.id,
                                 );
-                                if (index != -1 &&
-                                    _cloudSyncEnabled &&
-                                    _currentUser != null &&
-                                    _alarms[index].syncToCloud) {
-                                  try {
-                                    await _alarmFirebaseService
-                                        .updateAlarmToCloud(
-                                          _alarms[index],
-                                          _currentUser!.uid,
-                                        );
-                                  } catch (e) {
-                                    print(
-                                      'Error al sincronizar reset de snooze con Firebase: $e',
-                                    );
-                                  }
+                                if (index != -1) {
+                                  setState(() {
+                                    _alarms[index] = updatedAlarm;
+                                  });
                                 }
+
+                                await _alarmRepository.upsertAlarm(
+                                  alarm: updatedAlarm,
+                                  cloudSyncEnabled: _cloudSyncEnabled,
+                                  userId: _currentUser?.uid,
+                                );
+                                await _reloadAlarmsFromLocal();
                               },
                               icon: Icon(
                                 Icons.cancel,
-                                color: Colors.red.shade600,
+                                color: scheme.error,
                               ),
                               tooltip: 'Desactivar alarma pospuesta',
                             ),
@@ -2561,9 +2765,10 @@ class _HomePageState extends State<HomePage> {
                           vertical: 4,
                         ),
                         elevation: 1.0,
+                        color: scheme.surface,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8.0),
-                          side: BorderSide.none,
+                          side: BorderSide(color: scheme.primary, width: 2),
                         ),
                         child: ExpansionTile(
                           collapsedIconColor: Colors.transparent,
@@ -2577,7 +2782,7 @@ class _HomePageState extends State<HomePage> {
                                       ? Icons.alarm_on
                                       : Icons.alarm_off,
                                 ),
-                                color: Colors.black,
+                                color: scheme.onSurface,
                                 iconSize: 35,
                                 tooltip: showActiveOnly
                                     ? 'Mostrar todas'
@@ -2594,8 +2799,9 @@ class _HomePageState extends State<HomePage> {
                                 padding: EdgeInsets.only(top: 5),
                                 child: Text(
                                   groupKey,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                   textAlign: TextAlign.center,
                                 ),
@@ -2612,10 +2818,11 @@ class _HomePageState extends State<HomePage> {
                           shape: Border.all(color: Colors.transparent),
                           children: displayAlarms.isEmpty
                               ? [
-                                  const ListTile(
+                                  ListTile(
                                     title: Center(
                                       child: Text(
                                         'No hay alarmas en este grupo',
+                                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
                                       ),
                                     ),
                                   ),
@@ -2629,14 +2836,119 @@ class _HomePageState extends State<HomePage> {
                   ),
           ],
         ),
+    );
+
+    if (widget.embedInShell) {
+      return Container(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: body,
+      );
+    }
+
+    final fab = FloatingActionButton(
+      onPressed: _setAlarm,
+      tooltip: 'Añadir alarma',
+      focusColor: scheme.onPrimary,
+      foregroundColor: scheme.onPrimary,
+      backgroundColor: scheme.primary,
+      child: const Icon(Icons.add),
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: Padding(
+          padding: const EdgeInsets.only(left: 85),
+          child: Text(
+            'The Good Alarm',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+              fontSize: 25,
+            ),
+          ),
+        ),
+        actions: [
+          Theme(
+            data: Theme.of(context).copyWith(
+              popupMenuTheme: PopupMenuThemeData(
+                shape: RoundedRectangleBorder(
+                  side: BorderSide(color: scheme.primary, width: 2.0),
+                  borderRadius: BorderRadius.circular(4.0),
+                ),
+              ),
+            ),
+            child: PopupMenuButton<String>(
+              color: scheme.surface,
+              icon: const Icon(Icons.more_vert, size: 30),
+              onSelected: (String value) async {
+                switch (value) {
+                  case 'settings':
+                    await Navigator.pushNamed(context, '/settings');
+                    _loadSettingsAndAlarms();
+                    break;
+                }
+              },
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                PopupMenuItem<String>(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, color: scheme.onSurface),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Configuración',
+                        style: TextStyle(color: scheme.onSurface),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _setAlarm,
-        tooltip: 'Añadir alarma',
-        focusColor: Colors.white,
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.black,
-        child: const Icon(Icons.add),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          final initial = Offset(
+            size.width - _fabSize - _fabMargin,
+            size.height - _fabSize - _fabMargin,
+          );
+          final current = _fabOffset ?? initial;
+          final clamped = Offset(
+            current.dx.clamp(_fabMargin, size.width - _fabSize - _fabMargin),
+            current.dy.clamp(_fabMargin, size.height - _fabSize - _fabMargin),
+          );
+          _fabOffset = clamped;
+
+          return Stack(
+            children: [
+              body,
+              Positioned(
+                left: clamped.dx,
+                top: clamped.dy,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    final next = Offset(
+                      (_fabOffset!.dx + details.delta.dx).clamp(
+                        _fabMargin,
+                        size.width - _fabSize - _fabMargin,
+                      ),
+                      (_fabOffset!.dy + details.delta.dy).clamp(
+                        _fabMargin,
+                        size.height - _fabSize - _fabMargin,
+                      ),
+                    );
+                    setState(() {
+                      _fabOffset = next;
+                    });
+                  },
+                  child: fab,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

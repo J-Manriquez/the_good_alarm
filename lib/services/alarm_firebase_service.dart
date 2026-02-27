@@ -18,17 +18,44 @@ class AlarmFirebaseService {
     return _firestore.collection('usuarios').doc(userId).collection('alarmas');
   }
 
+  CollectionReference<Map<String, dynamic>> _alarmsCollection(String userId) {
+    return _firestore.collection('usuarios').doc(userId).collection('alarmas');
+  }
+
+  Map<String, dynamic> _stripCloudMetadata(Map<String, dynamic> json) {
+    final data = Map<String, dynamic>.from(json);
+    data.remove('createdAt');
+    data.remove('updatedAt');
+    data.remove('deletedAt');
+    data.remove('revision');
+    data.remove('fieldUpdatedAt');
+    return data;
+  }
+
+  Map<String, dynamic> _initialFieldUpdatedAtForData(Map<String, dynamic> alarmData) {
+    final result = <String, dynamic>{};
+    for (final key in alarmData.keys) {
+      result[key] = FieldValue.serverTimestamp();
+    }
+    return result;
+  }
+
   // Guardar una alarma en Firebase
   Future<void> saveAlarmToCloud(Alarm alarm, String userId) async {
     try {
       if (!alarm.syncToCloud) return;
 
-      final alarmsCollection = _firestore
-.collection('usuarios')
-          .doc(userId)
-          .collection('alarmas');
-
-      await alarmsCollection.doc(alarm.id.toString()).set(alarm.toJson());
+      final alarmsCollection = _alarmsCollection(userId);
+      final alarmData = _stripCloudMetadata(alarm.toJson());
+      await alarmsCollection.doc(alarm.id.toString()).set({
+        ...alarmData,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedByDevice': _currentUserId,
+        'revision': 1,
+        'deletedAt': null,
+        'fieldUpdatedAt': _initialFieldUpdatedAtForData(alarmData),
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error al guardar alarma en Firebase: $e');
       rethrow;
@@ -44,12 +71,13 @@ class AlarmFirebaseService {
         return;
       }
 
-      final alarmsCollection = _firestore
-          .collection('usuarios')
-          .doc(userId)
-          .collection('alarmas');
-
-      await alarmsCollection.doc(alarm.id.toString()).update(alarm.toJson());
+      final alarmsCollection = _alarmsCollection(userId);
+      final alarmData = _stripCloudMetadata(alarm.toJson());
+      await alarmsCollection.doc(alarm.id.toString()).set({
+        ...alarmData,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedByDevice': _currentUserId,
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error al actualizar alarma en Firebase: $e');
       rethrow;
@@ -59,12 +87,13 @@ class AlarmFirebaseService {
   // Eliminar una alarma de Firebase
   Future<void> deleteAlarmToCloud(int alarmId, String userId) async {
     try {
-      final alarmsCollection = _firestore
-.collection('usuarios')
-          .doc(userId)
-          .collection('alarmas');
-
-      await alarmsCollection.doc(alarmId.toString()).delete();
+      final alarmsCollection = _alarmsCollection(userId);
+      await alarmsCollection.doc(alarmId.toString()).set({
+        'deletedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedByDevice': _currentUserId,
+        'deleted': true,
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error al eliminar alarma de Firebase: $e');
       rethrow;
@@ -78,14 +107,13 @@ class AlarmFirebaseService {
     String userId,
   ) async {
     try {
-      final alarmsCollection = _firestore
-          .collection('usuarios')
-          .doc(userId)
-          .collection('alarmas');
-
-      await alarmsCollection.doc(alarmId.toString()).update({
+      final alarmsCollection = _alarmsCollection(userId);
+      await alarmsCollection.doc(alarmId.toString()).set({
         'isActive': isActive,
-      });
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedByDevice': _currentUserId,
+        'fieldUpdatedAt': {'isActive': FieldValue.serverTimestamp()},
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error al cambiar estado de alarma en Firebase: $e');
       rethrow;
@@ -115,14 +143,11 @@ class AlarmFirebaseService {
   // Stream para escuchar cambios en las alarmas
   Stream<List<Alarm>> getAlarmsStream(String userId) {
     try {
-      final alarmsCollection = _firestore
-          .collection('usuarios')
-          .doc(userId)
-          .collection('alarmas');
+      final alarmsCollection = _alarmsCollection(userId);
 
       return alarmsCollection.snapshots().map((snapshot) {
         return snapshot.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
           return Alarm.fromJson(data);
         }).toList();
       });
@@ -130,6 +155,81 @@ class AlarmFirebaseService {
       print('Error al crear stream de alarmas: $e');
       return Stream.value([]);
     }
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> getAlarmsQueryStream(String userId) {
+    return _alarmsCollection(userId).snapshots();
+  }
+
+  Future<void> applyAlarmPatch({
+    required String userId,
+    required int alarmId,
+    required Map<String, dynamic> patch,
+    required Map<String, DateTime?> baseFieldUpdatedAt,
+    required String deviceId,
+  }) async {
+    final alarmsCollection = _alarmsCollection(userId);
+    final docRef = alarmsCollection.doc(alarmId.toString());
+
+    await _firestore.runTransaction((tx) async {
+      final snap = await tx.get(docRef);
+      final exists = snap.exists;
+      final remote = exists ? (snap.data() ?? <String, dynamic>{}) : <String, dynamic>{};
+
+      final remoteRevision = (remote['revision'] as num?)?.toInt() ?? 0;
+      final remoteFieldUpdatedAtRaw = remote['fieldUpdatedAt'];
+      final remoteFieldUpdatedAt = <String, Timestamp>{};
+      if (remoteFieldUpdatedAtRaw is Map) {
+        remoteFieldUpdatedAtRaw.forEach((k, v) {
+          if (k is String && v is Timestamp) {
+            remoteFieldUpdatedAt[k] = v;
+          }
+        });
+      }
+
+      final updates = <String, dynamic>{};
+      final fieldUpdatedAtUpdates = <String, dynamic>{};
+
+      for (final entry in patch.entries) {
+        final field = entry.key;
+        final newValue = entry.value;
+
+        final base = baseFieldUpdatedAt[field];
+        final remoteUpdated = remoteFieldUpdatedAt[field]?.toDate();
+        final remoteValue = remote[field];
+
+        if (base != null && remoteUpdated != null && remoteUpdated.isAfter(base) && remoteValue != newValue) {
+          final changeRef = docRef.collection('cambios').doc();
+          tx.set(changeRef, {
+            'field': field,
+            'remoteValue': remoteValue,
+            'incomingValue': newValue,
+            'baseFieldUpdatedAt': base.toIso8601String(),
+            'remoteFieldUpdatedAt': remoteUpdated.toIso8601String(),
+            'deviceId': deviceId,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+
+        updates[field] = newValue;
+        fieldUpdatedAtUpdates['fieldUpdatedAt.$field'] = FieldValue.serverTimestamp();
+      }
+
+      updates['updatedAt'] = FieldValue.serverTimestamp();
+      updates['updatedByDevice'] = deviceId;
+      updates['revision'] = remoteRevision + 1;
+
+      updates.addAll(fieldUpdatedAtUpdates);
+
+      if (!exists) {
+        updates['createdAt'] = FieldValue.serverTimestamp();
+        if (!updates.containsKey('deletedAt')) {
+          updates['deletedAt'] = null;
+        }
+      }
+
+      tx.set(docRef, updates, SetOptions(merge: true));
+    });
   }
 
   // Sincronizar todas las alarmas locales con Firebase
@@ -147,7 +247,14 @@ class AlarmFirebaseService {
       for (final alarm in localAlarms) {
         if (alarm.syncToCloud) {
           final docRef = alarmsCollection.doc(alarm.id.toString());
-          batch.set(docRef, alarm.toJson());
+          final alarmData = _stripCloudMetadata(alarm.toJson());
+          batch.set(docRef, {
+            ...alarmData,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'updatedByDevice': _currentUserId,
+            'deletedAt': null,
+            'deleted': false,
+          }, SetOptions(merge: true));
         }
       }
 

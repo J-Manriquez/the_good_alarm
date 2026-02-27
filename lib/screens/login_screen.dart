@@ -51,7 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
           
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (context) {
-              return const HomePage(shouldSyncLocalAlarms: true);
+              return const HomeShell(shouldSyncLocalAlarms: true);
             }),
           );
         }

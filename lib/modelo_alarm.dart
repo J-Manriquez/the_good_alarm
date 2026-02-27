@@ -1,4 +1,5 @@
 
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:the_good_alarm/games/modelo_juegos.dart';
 
 class Alarm {
@@ -24,6 +25,12 @@ class Alarm {
   int volumeRampUpDurationSeconds;
   int tempVolumeReductionPercent;
   int tempVolumeReductionDurationSeconds;
+  DateTime? createdAt;
+  DateTime? updatedAt;
+  DateTime? deletedAt;
+  int revision;
+  Map<String, DateTime>? fieldUpdatedAt;
+  Map<String, dynamic> extras;
 
   Alarm({
     required this.id,
@@ -46,7 +53,13 @@ class Alarm {
     this.volumeRampUpDurationSeconds = 30,
     this.tempVolumeReductionPercent = 30,
     this.tempVolumeReductionDurationSeconds = 60,
-  });
+    this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
+    this.revision = 0,
+    this.fieldUpdatedAt,
+    Map<String, dynamic>? extras,
+  }) : extras = extras ?? <String, dynamic>{};
 
   bool isRepeating() {
     return isDaily || isWeekly || isWeekend || repeatDays.isNotEmpty;
@@ -73,36 +86,98 @@ class Alarm {
     'volumeRampUpDurationSeconds': volumeRampUpDurationSeconds,
     'tempVolumeReductionPercent': tempVolumeReductionPercent,
     'tempVolumeReductionDurationSeconds': tempVolumeReductionDurationSeconds,
+    'createdAt': createdAt?.toIso8601String(),
+    'updatedAt': updatedAt?.toIso8601String(),
+    'deletedAt': deletedAt?.toIso8601String(),
+    'revision': revision,
+    'fieldUpdatedAt': fieldUpdatedAt?.map((k, v) => MapEntry(k, v.toIso8601String())),
+    ...extras,
   };
 
-  factory Alarm.fromJson(Map<String, dynamic> json) => Alarm(
-    id: json['id'] as int,
-    time: DateTime.parse(json['time'] as String),
-    title: json['title'] as String,
-    message: json['message'] as String,
-    isActive: json['isActive'] as bool? ?? true,
-    repeatDays: json['repeatDays'] != null
-        ? List<int>.from(json['repeatDays'])
-        : [],
-    isDaily: json['isDaily'] as bool? ?? false,
-    isWeekly: json['isWeekly'] as bool? ?? false,
-    isWeekend: json['isWeekend'] as bool? ?? false,
-    snoozeCount: json['snoozeCount'] as int? ?? 0,
-    maxSnoozes: json['maxSnoozes'] as int? ?? 3,
-    snoozeDurationMinutes: json['snoozeDurationMinutes'] as int? ?? 5,
-    requireGame: json['requireGame'] as bool? ?? false,
-    gameConfig: json['gameConfig'] != null 
-        ? GameConfig.fromJson(json['gameConfig']) 
-        : null,
-    syncToCloud: json['syncToCloud'] as bool? ?? true,
-    activeOnlyIn: json['activeOnlyIn'] != null
-        ? List<Map<String, dynamic>>.from(json['activeOnlyIn'])
-        : null,
-    maxVolumePercent: json['maxVolumePercent'] as int? ?? 100,
-    volumeRampUpDurationSeconds: json['volumeRampUpDurationSeconds'] as int? ?? 30,
-    tempVolumeReductionPercent: json['tempVolumeReductionPercent'] as int? ?? 30,
-    tempVolumeReductionDurationSeconds: json['tempVolumeReductionDurationSeconds'] as int? ?? 60,
-  );
+  factory Alarm.fromJson(Map<String, dynamic> json) {
+    final extras = Map<String, dynamic>.from(json);
+    for (final key in <String>{
+      'id',
+      'time',
+      'title',
+      'message',
+      'isActive',
+      'repeatDays',
+      'isDaily',
+      'isWeekly',
+      'isWeekend',
+      'snoozeCount',
+      'maxSnoozes',
+      'snoozeDurationMinutes',
+      'requireGame',
+      'gameConfig',
+      'syncToCloud',
+      'activeOnlyIn',
+      'maxVolumePercent',
+      'volumeRampUpDurationSeconds',
+      'tempVolumeReductionPercent',
+      'tempVolumeReductionDurationSeconds',
+      'createdAt',
+      'updatedAt',
+      'deletedAt',
+      'revision',
+      'fieldUpdatedAt',
+    }) {
+      extras.remove(key);
+    }
+
+    DateTime? _parseDate(dynamic value) {
+      if (value == null) return null;
+      if (value is DateTime) return value;
+      if (value is Timestamp) return value.toDate();
+      if (value is String) return DateTime.tryParse(value);
+      if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+      return null;
+    }
+
+    Map<String, DateTime>? _parseFieldUpdatedAt(dynamic value) {
+      if (value == null) return null;
+      if (value is! Map) return null;
+      final result = <String, DateTime>{};
+      value.forEach((k, v) {
+        if (k is! String) return;
+        final parsed = _parseDate(v);
+        if (parsed != null) {
+          result[k] = parsed;
+        }
+      });
+      return result.isEmpty ? null : result;
+    }
+
+    return Alarm(
+      id: (json['id'] as num).toInt(),
+      time: DateTime.parse(json['time'] as String),
+      title: json['title'] as String,
+      message: json['message'] as String,
+      isActive: json['isActive'] as bool? ?? true,
+      repeatDays: json['repeatDays'] != null ? List<int>.from(json['repeatDays']) : [],
+      isDaily: json['isDaily'] as bool? ?? false,
+      isWeekly: json['isWeekly'] as bool? ?? false,
+      isWeekend: json['isWeekend'] as bool? ?? false,
+      snoozeCount: (json['snoozeCount'] as num?)?.toInt() ?? 0,
+      maxSnoozes: (json['maxSnoozes'] as num?)?.toInt() ?? 3,
+      snoozeDurationMinutes: (json['snoozeDurationMinutes'] as num?)?.toInt() ?? 5,
+      requireGame: json['requireGame'] as bool? ?? false,
+      gameConfig: json['gameConfig'] is Map ? GameConfig.fromJson(Map<String, dynamic>.from(json['gameConfig'])) : null,
+      syncToCloud: json['syncToCloud'] as bool? ?? true,
+      activeOnlyIn: json['activeOnlyIn'] != null ? List<Map<String, dynamic>>.from(json['activeOnlyIn']) : null,
+      maxVolumePercent: (json['maxVolumePercent'] as num?)?.toInt() ?? 100,
+      volumeRampUpDurationSeconds: (json['volumeRampUpDurationSeconds'] as num?)?.toInt() ?? 30,
+      tempVolumeReductionPercent: (json['tempVolumeReductionPercent'] as num?)?.toInt() ?? 30,
+      tempVolumeReductionDurationSeconds: (json['tempVolumeReductionDurationSeconds'] as num?)?.toInt() ?? 60,
+      createdAt: _parseDate(json['createdAt']),
+      updatedAt: _parseDate(json['updatedAt']),
+      deletedAt: _parseDate(json['deletedAt']),
+      revision: (json['revision'] as num?)?.toInt() ?? 0,
+      fieldUpdatedAt: _parseFieldUpdatedAt(json['fieldUpdatedAt']),
+      extras: extras,
+    );
+  }
   
   // Crear una copia de la alarma con propiedades modificadas
   Alarm copyWith({
@@ -126,6 +201,12 @@ class Alarm {
     int? volumeRampUpDurationSeconds,
     int? tempVolumeReductionPercent,
     int? tempVolumeReductionDurationSeconds,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? deletedAt,
+    int? revision,
+    Map<String, DateTime>? fieldUpdatedAt,
+    Map<String, dynamic>? extras,
   }) {
     return Alarm(
       id: id ?? this.id,
@@ -148,6 +229,12 @@ class Alarm {
       volumeRampUpDurationSeconds: volumeRampUpDurationSeconds ?? this.volumeRampUpDurationSeconds,
       tempVolumeReductionPercent: tempVolumeReductionPercent ?? this.tempVolumeReductionPercent,
       tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds ?? this.tempVolumeReductionDurationSeconds,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      revision: revision ?? this.revision,
+      fieldUpdatedAt: fieldUpdatedAt ?? (this.fieldUpdatedAt == null ? null : Map<String, DateTime>.from(this.fieldUpdatedAt!)),
+      extras: extras ?? Map<String, dynamic>.from(this.extras),
     );
   }
 }

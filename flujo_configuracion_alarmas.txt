@@ -1,0 +1,295 @@
+# FLUJO DE CONFIGURACIÓN DE ALARMAS - THE GOOD ALARM
+# Desde la UI de Flutter hasta los Scripts Nativos de Android
+
+## RESUMEN GENERAL
+Este documento explica el flujo completo de configuración de alarmas en The Good Alarm,
+desde que el usuario crea una alarma en la interfaz de Flutter hasta que la alarma
+suena y se apaga, incluyendo toda la comunicación con los scripts nativos de Android.
+
+================================================================================
+## 1. CREACIÓN DE ALARMAS EN LA UI DE FLUTTER
+================================================================================
+
+### 1.1 Pantalla de Edición de Alarmas (alarm_edit_screen.dart)
+- El usuario accede a AlarmEditScreen para crear o editar una alarma
+- La pantalla permite configurar:
+  * Hora y minuto de la alarma
+  * Título y mensaje personalizado
+  * Tipo de repetición (diaria, semanal, personalizada, etc.)
+  * Configuraciones de snooze (máximo de repeticiones y duración)
+  * Configuraciones de volumen (volumen máximo, escalado gradual, reducción temporal)
+  * Configuración de juegos obligatorios para apagar la alarma
+  * Sincronización con la nube (Firebase)
+
+### 1.2 Modelo de Datos (modelo_alarm.dart)
+- La clase Alarm define la estructura de datos:
+  * Información básica: id, time, title, message, isActive
+  * Configuraciones de repetición: repeatDays, isDaily, isWeekly, isWeekend
+  * Configuraciones de snooze: snoozeCount, maxSnoozes, snoozeDurationMinutes
+  * Configuraciones de juegos: requireGame, gameConfig
+  * Configuraciones de volumen: maxVolumePercent, volumeRampUpDurationSeconds, 
+    tempVolumeReductionPercent, tempVolumeReductionDurationSeconds
+  * Sincronización: syncToCloud, activeOnlyIn
+
+### 1.3 Guardado Local y en la Nube
+- Las alarmas se guardan localmente usando SharedPreferences
+- Si está habilitada la sincronización, se guardan en Firebase Firestore
+- El servicio AlarmFirebaseService maneja la sincronización con la nube
+
+================================================================================
+## 2. COMUNICACIÓN FLUTTER-ANDROID VIA PLATFORM CHANNELS
+================================================================================
+
+### 2.1 Method Channel Principal
+- Canal: "com.example.the_good_alarm/alarm"
+- Ubicación en Flutter: Llamadas desde alarm_edit_screen.dart y alarm_screen.dart
+- Ubicación en Android: MainActivity.kt (método configureFlutterEngine)
+
+### 2.2 Métodos Disponibles en el Platform Channel
+
+#### setAlarm
+- **Propósito**: Programar una nueva alarma en el sistema Android
+- **Parámetros enviados desde Flutter**:
+  * id: Identificador único de la alarma
+  * hour, minute: Hora y minuto de la alarma
+  * title, message: Título y mensaje de la alarma
+  * repeatDays: Lista de días de repetición
+  * isDaily, isWeekly, isWeekend: Tipos de repetición
+  * maxSnoozes, snoozeDurationMinutes: Configuración de snooze
+  * maxVolumePercent, volumeRampUpDurationSeconds: Configuración de volumen
+  * tempVolumeReductionPercent, tempVolumeReductionDurationSeconds: Reducción temporal
+
+#### cancelAlarm
+- **Propósito**: Cancelar una alarma programada
+- **Parámetros**: alarmId
+
+#### stopAlarm
+- **Propósito**: Detener una alarma que está sonando
+- **Parámetros**: alarmId
+
+#### snoozeAlarm
+- **Propósito**: Posponer una alarma por el tiempo configurado
+- **Parámetros**: alarmId, maxSnoozes, snoozeDurationMinutes
+
+### 2.3 Canal de Control de Volumen
+- Canal: "alarm_volume_control"
+- Métodos: startVolumeControl, stopVolumeControl, setTemporaryVolumeReduction
+
+================================================================================
+## 3. PROCESAMIENTO EN ANDROID (MainActivity.kt)
+================================================================================
+
+### 3.1 Configuración Inicial
+- Al inicializar la app, MainActivity configura:
+  * AlarmManager para programar alarmas del sistema
+  * AudioManager para control de volumen
+  * Canales de notificación
+  * Permisos necesarios (Do Not Disturb, overlay, batería)
+
+### 3.2 Método setAlarm (líneas 596-658)
+**Proceso**:
+1. Recibe parámetros desde Flutter via Platform Channel
+2. Crea un objeto AlarmData con la información recibida
+3. Calcula el próximo tiempo de activación usando calculateNextAlarmTime()
+4. Verifica permisos para programar alarmas exactas (Android 12+)
+5. Llama al método privado setAlarm() para programar la alarma
+
+### 3.3 Programación de la Alarma (método setAlarm privado)
+**Proceso**:
+1. Crea un Intent dirigido a AlarmReceiver con todos los parámetros
+2. Crea un PendingIntent con FLAG_UPDATE_CURRENT e FLAG_IMMUTABLE
+3. Usa AlarmManager.setExactAndAllowWhileIdle() para programar la alarma
+4. La alarma queda registrada en el sistema Android
+
+### 3.4 Cálculo del Próximo Tiempo (calculateNextAlarmTime)
+**Lógica**:
+- Para alarmas sin repetición: próxima ocurrencia de la hora especificada
+- Para alarmas diarias: todos los días a la hora especificada
+- Para alarmas semanales: mismo día de la semana
+- Para alarmas de fin de semana: sábados y domingos
+- Para alarmas personalizadas: días específicos seleccionados
+
+================================================================================
+## 4. ACTIVACIÓN DE LA ALARMA (AlarmReceiver.kt)
+================================================================================
+
+### 4.1 Trigger de la Alarma
+- Cuando llega el tiempo programado, Android activa el AlarmReceiver
+- El método onReceive() es llamado automáticamente
+- Se ejecuta en background, incluso si la app está cerrada
+
+### 4.2 Procesamiento en handleAlarmTrigger
+**Secuencia de acciones**:
+1. **Extracción de parámetros**: Lee todos los datos del Intent
+2. **WakeLock**: Adquiere un WakeLock para mantener el dispositivo despierto
+3. **Control de volumen**: Inicia el escalado gradual de volumen
+4. **Reproducción de sonido**: Inicia el ringtone de la alarma
+5. **Vibración**: Activa el patrón de vibración
+6. **Notificación**: Crea una notificación persistente
+7. **Navegación**: Intenta abrir la app en la pantalla de alarma
+
+### 4.3 Control de Volumen Inteligente
+**Características**:
+- Inicia con volumen bajo y escala gradualmente
+- Respeta el porcentaje máximo configurado
+- Implementa reducción temporal cuando se solicita
+- Restaura el volumen original al finalizar
+
+### 4.4 Notificación de Alarma
+**Elementos**:
+- Título y mensaje personalizados
+- Botones de acción: "Detener" y "Snooze"
+- Prioridad alta para mostrar en pantalla de bloqueo
+- Sonido y vibración configurables
+
+================================================================================
+## 5. PANTALLA DE ALARMA ACTIVA (alarm_screen.dart)
+================================================================================
+
+### 5.1 Navegación Automática
+- Cuando la alarma se activa, AlarmReceiver intenta abrir la app
+- Si la app está cerrada, se abre automáticamente
+- Se navega a AlarmScreen con los parámetros de la alarma
+
+### 5.2 Funcionalidades de la Pantalla
+**Opciones disponibles**:
+- **Detener alarma**: Llama a stopAlarm via Platform Channel
+- **Snooze**: Llama a snoozeAlarm con duración configurada
+- **Control de volumen**: Botones para reducir temporalmente el volumen
+- **Juegos obligatorios**: Si está configurado, debe completar un juego
+
+### 5.3 Integración con Juegos
+- Si requireGame es true, debe completar un juego antes de apagar
+- Navega a AlarmGameWrapper con el tipo de juego configurado
+- Solo permite apagar la alarma tras completar exitosamente el juego
+
+================================================================================
+## 6. GESTIÓN DE SNOOZE
+================================================================================
+
+### 6.1 Proceso de Snooze
+**En Flutter (alarm_screen.dart)**:
+1. Usuario presiona botón de snooze
+2. Se llama al método snoozeAlarm via Platform Channel
+3. Se pasan parámetros: alarmId, maxSnoozes, snoozeDurationMinutes
+
+**En Android (MainActivity.kt)**:
+1. Detiene el sonido y vibración actuales
+2. Cancela la alarma original y notificaciones
+3. Calcula nuevo tiempo (tiempo actual + duración de snooze)
+4. Programa nueva alarma para el tiempo calculado
+5. Limpia flags de pantalla mostrada
+
+### 6.2 Limitaciones de Snooze
+- Respeta el máximo de snoozes configurado (maxSnoozes)
+- Cada snooze incrementa el contador snoozeCount
+- Al alcanzar el máximo, la alarma debe ser detenida manualmente
+
+================================================================================
+## 7. DETENCIÓN DE ALARMAS
+================================================================================
+
+### 7.1 Detención Manual
+**Proceso**:
+1. Usuario presiona "Detener" en AlarmScreen o notificación
+2. Se llama a stopAlarm via Platform Channel
+3. AlarmReceiver.stopAlarmSound() detiene el ringtone
+4. AlarmReceiver.stopVibration() cancela la vibración
+5. Se cancelan todas las notificaciones relacionadas
+6. Se limpia el flag de pantalla mostrada
+7. Se restaura el volumen original
+
+### 7.2 Detención por Juego
+- Si requireGame es true, solo se puede detener completando el juego
+- AlarmGameWrapper maneja la lógica del juego
+- Al completar exitosamente, se llama a _actuallyStopAlarm()
+
+### 7.3 Limpieza de Recursos
+**Acciones de limpieza**:
+- Liberación de WakeLock
+- Detención de handlers de volumen
+- Cancelación de notificaciones
+- Limpieza de referencias a ringtone y vibrator
+
+================================================================================
+## 8. PERSISTENCIA Y SINCRONIZACIÓN
+================================================================================
+
+### 8.1 Almacenamiento Local
+- SharedPreferences para configuraciones de la app
+- Hive para persistencia estructurada de alarmas (incluye metadatos de sync)
+- Restauración automática al reiniciar la app desde Hive
+
+### 8.2 Sincronización con Firebase
+**Servicios involucrados**:
+- AlarmRepository: orquesta local (Hive) + nube (Firestore) y resolución de conflictos
+- AlarmFirebaseService: operaciones en Firestore
+- AlarmLocalService: acceso a Hive, migración y marcado de campos "dirty"
+- AuthService: Autenticación de usuarios
+- Estructura: usuarios/{userId}/alarmas/{alarmId}
+- Estrategia: local-first con reconciliación por metadatos (revision/fieldUpdatedAt)
+
+### 8.3 Manejo de Cambios de Zona Horaria
+- BroadcastReceiver para ACTION_TIMEZONE_CHANGED
+- Recalculo automático de tiempos de alarma
+- Notificación a Flutter para actualizar UI
+
+================================================================================
+## 9. PERMISOS Y CONFIGURACIONES DEL SISTEMA
+================================================================================
+
+### 9.1 Permisos Requeridos
+- **SCHEDULE_EXACT_ALARM**: Para alarmas exactas (Android 12+)
+- **SYSTEM_ALERT_WINDOW**: Para mostrar sobre otras apps
+- **ACCESS_NOTIFICATION_POLICY**: Para Do Not Disturb
+- **REQUEST_IGNORE_BATTERY_OPTIMIZATIONS**: Para evitar optimizaciones
+
+### 9.2 Configuraciones Automáticas
+- Creación de canal de notificaciones
+- Solicitud de permisos en tiempo de ejecución
+- Configuración de audio attributes para alarmas
+- Registro de BroadcastReceivers
+
+================================================================================
+## 10. FLUJO COMPLETO - RESUMEN
+================================================================================
+
+1. **CREACIÓN**: Usuario crea alarma en AlarmEditScreen (Flutter)
+2. **GUARDADO**: Alarma se guarda localmente en Hive y se marca para sincronización
+3. **PROGRAMACIÓN**: Platform Channel envía datos a MainActivity (Android)
+4. **REGISTRO**: MainActivity programa alarma en AlarmManager del sistema
+5. **ACTIVACIÓN**: Sistema Android activa AlarmReceiver al llegar la hora
+6. **EJECUCIÓN**: AlarmReceiver reproduce sonido, vibra y muestra notificación
+7. **NAVEGACIÓN**: Se abre AlarmScreen automáticamente
+8. **INTERACCIÓN**: Usuario puede detener, hacer snooze o jugar
+9. **FINALIZACIÓN**: Alarma se detiene y recursos se liberan
+10. **REPETICIÓN**: Si es recurrente, se programa próxima ocurrencia
+
+================================================================================
+## ARCHIVOS CLAVE DEL SISTEMA
+================================================================================
+
+### Flutter (Dart)
+- lib/alarm_edit_screen.dart: UI de creación/edición
+- lib/alarm_screen.dart: UI cuando suena la alarma
+- lib/modelo_alarm.dart: Modelo de datos
+- lib/services/alarm_repository.dart: Sincronización local/nube y conciliación
+- lib/services/alarm_local_service.dart: Persistencia Hive, migración y estado de sync
+- lib/services/alarm_firebase_service.dart: Sincronización con Firebase
+- lib/services/volume_service.dart: Control de volumen
+
+### Android (Kotlin)
+- MainActivity.kt: Platform Channels y lógica principal
+- AlarmReceiver.kt: BroadcastReceiver para activación de alarmas
+- AndroidManifest.xml: Permisos y configuración de componentes
+
+### Configuración
+- pubspec.yaml: Dependencias de Flutter
+- build.gradle: Configuración de Android
+- firebase.json: Configuración de Firebase
+
+================================================================================
+Este flujo garantiza que las alarmas funcionen de manera confiable,
+incluso cuando la aplicación está cerrada o el dispositivo está en modo de ahorro
+de energía, proporcionando una experiencia de usuario robusta y completa.
+================================================================================

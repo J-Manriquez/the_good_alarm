@@ -137,31 +137,32 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     required VoidCallback onTap,
     required List<Widget> children,
   }) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
-      color: Colors.black,
+      color: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Colors.green, width: 2),
+        side: BorderSide(color: scheme.primary, width: 2),
       ),
       child: Column(
         children: [
           ListTile(
             title: Text(
               title,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             trailing: Icon(
               isExpanded ? Icons.expand_less : Icons.expand_more,
-              color: Colors.green,
+              color: scheme.primary,
             ),
             onTap: onTap,
           ),
           if (isExpanded) ...[
-            const Divider(color: Colors.green, height: 1),
+            Divider(color: scheme.primary, height: 1),
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -184,43 +185,42 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       helpText: 'Seleccionar Hora',
       initialEntryMode: TimePickerEntryMode.input,
       builder: (BuildContext context, Widget? child) {
+        final scheme = Theme.of(context).colorScheme;
         return Theme(
-          data: ThemeData.dark().copyWith(
+          data: Theme.of(context).copyWith(
             timePickerTheme: TimePickerThemeData(
-              backgroundColor: Colors.black,
+              backgroundColor: scheme.surface,
               hourMinuteTextColor: WidgetStateColor.resolveWith(
                 (states) => states.contains(WidgetState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
+                    ? scheme.onPrimary
+                    : scheme.onSurface,
               ),
               hourMinuteColor: WidgetStateColor.resolveWith(
                 (states) => states.contains(WidgetState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
+                    ? scheme.primary
+                    : scheme.surfaceContainerHighest,
               ),
               dayPeriodTextColor: WidgetStateColor.resolveWith(
                 (states) => states.contains(WidgetState.selected)
-                    ? const Color.fromARGB(255, 0, 0, 0)
-                    : const Color.fromARGB(255, 0, 0, 0),
+                    ? scheme.onPrimary
+                    : scheme.onSurface,
               ),
               dayPeriodColor: WidgetStateColor.resolveWith(
                 (states) => states.contains(WidgetState.selected)
-                    ? const Color.fromARGB(255, 208, 252, 210)
-                    : const Color.fromARGB(255, 255, 255, 255),
+                    ? scheme.primary
+                    : scheme.surfaceContainerHighest,
               ),
-              dialHandColor: Colors.green,
-              dialBackgroundColor: Colors.grey.shade800,
-              entryModeIconColor: Colors.green,
-              helpTextStyle: const TextStyle(
-                color: Colors.white,
+              dialHandColor: scheme.primary,
+              dialBackgroundColor: scheme.surfaceContainerHighest,
+              entryModeIconColor: scheme.primary,
+              helpTextStyle: TextStyle(
+                color: scheme.onSurface,
                 fontWeight: FontWeight.bold,
                 fontSize: 22,
               ),
               confirmButtonStyle: ButtonStyle(
-                foregroundColor: WidgetStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
-                backgroundColor: WidgetStateProperty.all(Colors.green),
+                foregroundColor: WidgetStateProperty.all(scheme.onPrimary),
+                backgroundColor: WidgetStateProperty.all(scheme.primary),
                 textStyle: WidgetStateProperty.all(
                   const TextStyle(fontSize: 20),
                 ),
@@ -231,12 +231,8 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 ),
               ),
               cancelButtonStyle: ButtonStyle(
-                foregroundColor: WidgetStateProperty.all(
-                  const Color.fromARGB(255, 0, 0, 0),
-                ),
-                backgroundColor: WidgetStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
-                ),
+                foregroundColor: WidgetStateProperty.all(scheme.onSurface),
+                backgroundColor: WidgetStateProperty.all(scheme.surface),
                 textStyle: WidgetStateProperty.all(
                   const TextStyle(fontSize: 20),
                 ),
@@ -250,7 +246,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
             textButtonTheme: TextButtonThemeData(
               style: ButtonStyle(
                 foregroundColor: WidgetStateProperty.all(
-                  const Color.fromARGB(255, 255, 255, 255),
+                  scheme.onSurface,
                 ),
               ),
             ),
@@ -375,21 +371,18 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
         title: Text(
           widget.alarm == null ? 'Nueva Alarma' : 'Editar Alarma',
-          style: const TextStyle(color: Colors.white),
         ),
-        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           TextButton(
             onPressed: _saveAlarm,
-            child: const Text(
+            child: Text(
               'Guardar',
-              style: TextStyle(color: Colors.green, fontSize: 16),
+              style: TextStyle(color: scheme.primary, fontSize: 16),
             ),
           ),
         ],
@@ -401,41 +394,38 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
           children: [
             // Selector de hora
             Card(
-              color: Colors.grey[900],
+              color: scheme.surface,
               child: ListTile(
-                leading: const Icon(Icons.access_time, color: Colors.green),
-                title: const Text(
+                leading: Icon(Icons.access_time, color: scheme.primary),
+                title: Text(
                   'Hora',
-                  style: TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 subtitle: Text(
                   _selectedTime.format(context),
-                  style: const TextStyle(color: Colors.green, fontSize: 18),
+                  style: TextStyle(color: scheme.primary, fontSize: 18),
                 ),
                 onTap: _selectTime,
-                trailing: const Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white,
-                ),
+                trailing: const Icon(Icons.arrow_forward_ios),
               ),
             ),
 
             const SizedBox(height: 20),
 
             // Título
-            const Text(
+            Text(
               'Título',
-              style: TextStyle(color: Colors.white, fontSize: 16),
+              style: TextStyle(color: scheme.onSurface, fontSize: 16),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _titleController,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: scheme.onSurface),
               decoration: InputDecoration(
                 hintText: 'Título de la alarma',
-                hintStyle: TextStyle(color: Colors.grey[600]),
+                hintStyle: TextStyle(color: scheme.onSurface),
                 filled: true,
-                fillColor: Colors.grey[900],
+                fillColor: scheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide.none,
@@ -446,19 +436,19 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
             const SizedBox(height: 20),
 
             // Mensaje
-            const Text(
+            Text(
               'Mensaje',
-              style: TextStyle(color: Colors.white, fontSize: 16),
+              style: TextStyle(color: scheme.onSurface, fontSize: 16),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _messageController,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: scheme.onSurface),
               decoration: InputDecoration(
                 hintText: 'Mensaje de la alarma',
-                hintStyle: TextStyle(color: Colors.grey[600]),
+                hintStyle: TextStyle(color: scheme.onSurface),
                 filled: true,
-                fillColor: Colors.grey[900],
+                fillColor: scheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide.none,
@@ -469,9 +459,9 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
             const SizedBox(height: 20),
 
             // Repetición
-            const Text(
+            Text(
               'Repetición',
-              style: TextStyle(color: Colors.white, fontSize: 16),
+              style: TextStyle(color: scheme.onSurface, fontSize: 16),
             ),
             const SizedBox(height: 8),
 
@@ -479,21 +469,21 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
               (option) => RadioListTile<String>(
                 title: Text(
                   option['label']!,
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 value: option['value']!,
                 groupValue: _repetitionType,
                 onChanged: _updateRepetitionType,
-                activeColor: Colors.green,
+                activeColor: scheme.primary,
               ),
             ),
 
             // Selección de días personalizados
             if (_repetitionType == 'custom') ...[
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Selecciona los días:',
-                style: TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(color: scheme.onSurface, fontSize: 16),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -504,12 +494,12 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                     label: Text(_daysOfWeek[index]),
                     selected: _selectedDays.contains(dayValue),
                     onSelected: (selected) => _toggleDay(dayValue),
-                    selectedColor: Colors.green,
-                    backgroundColor: Colors.grey[800],
+                    selectedColor: scheme.primary,
+                    backgroundColor: scheme.surfaceContainerHighest,
                     labelStyle: TextStyle(
                       color: _selectedDays.contains(dayValue)
-                          ? Colors.black
-                          : Colors.white,
+                          ? scheme.onPrimary
+                          : scheme.onSurface,
                     ),
                   );
                 }),
@@ -531,7 +521,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 // Duración del snooze
                 Text(
                   'Duración: $_snoozeDuration minutos',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Slider(
                   value: _snoozeDuration.toDouble(),
@@ -539,7 +529,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 30,
                   divisions: 29,
                   label: '$_snoozeDuration min',
-                  activeColor: Colors.green,
+                  activeColor: scheme.primary,
                   onChanged: (value) {
                     setState(() {
                       _snoozeDuration = value.toInt();
@@ -550,7 +540,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 // Número máximo de snoozes
                 Text(
                   'Número máximo de snoozes: $_maxSnoozes',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Slider(
                   value: _maxSnoozes.toDouble(),
@@ -558,7 +548,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 10,
                   divisions: 10,
                   label: _maxSnoozes.toString(),
-                  activeColor: Colors.green,
+                  activeColor: scheme.primary,
                   onChanged: (value) {
                     setState(() {
                       _maxSnoozes = value.toInt();
@@ -582,13 +572,13 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
               children: [
                 Text(
                   'Controla cómo se comporta el volumen de esta alarma',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                  style: TextStyle(color: scheme.onSurface, fontSize: 14),
                 ),
                 const SizedBox(height: 16),
                 // Volumen máximo
                 Text(
                   'Volumen máximo: $_maxVolumePercent%',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Slider(
                   value: _maxVolumePercent.toDouble(),
@@ -596,7 +586,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 100,
                   divisions: 18,
                   label: '$_maxVolumePercent%',
-                  activeColor: Colors.blue,
+                  activeColor: scheme.secondary,
                   onChanged: (value) {
                     setState(() {
                       _maxVolumePercent = value.toInt();
@@ -607,13 +597,13 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 // Duración de escalado de volumen
                 Text(
                   'Duración de escalado: $_volumeRampUpDurationSeconds segundos',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Text(
                   _volumeRampUpDurationSeconds == 0 
                       ? 'El volumen comenzará al máximo inmediatamente'
                       : 'El volumen aumentará gradualmente hasta el máximo',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  style: TextStyle(color: scheme.onSurface, fontSize: 12),
                 ),
                 Slider(
                   value: _volumeRampUpDurationSeconds.toDouble(),
@@ -621,7 +611,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 120,
                   divisions: 24,
                   label: '$_volumeRampUpDurationSeconds s',
-                  activeColor: Colors.blue,
+                  activeColor: scheme.secondary,
                   onChanged: (value) {
                     setState(() {
                       _volumeRampUpDurationSeconds = value.toInt();
@@ -632,11 +622,11 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 // Porcentaje de reducción temporal
                 Text(
                   'Reducción temporal: $_tempVolumeReductionPercent%',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Text(
                   'Volumen al presionar el botón de reducción temporal',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  style: TextStyle(color: scheme.onSurface, fontSize: 12),
                 ),
                 Slider(
                   value: _tempVolumeReductionPercent.toDouble(),
@@ -644,7 +634,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 80,
                   divisions: 14,
                   label: '$_tempVolumeReductionPercent%',
-                  activeColor: Colors.orange,
+                  activeColor: scheme.tertiary,
                   onChanged: (value) {
                     setState(() {
                       _tempVolumeReductionPercent = value.toInt();
@@ -655,11 +645,11 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 // Duración de reducción temporal
                 Text(
                   'Duración de reducción: $_tempVolumeReductionDurationSeconds segundos',
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: scheme.onSurface),
                 ),
                 Text(
                   'Tiempo que durará la reducción de volumen',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  style: TextStyle(color: scheme.onSurface, fontSize: 12),
                 ),
                 Slider(
                   value: _tempVolumeReductionDurationSeconds.toDouble(),
@@ -667,7 +657,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                   max: 300,
                   divisions: 19,
                   label: '$_tempVolumeReductionDurationSeconds s',
-                  activeColor: Colors.orange,
+                  activeColor: scheme.tertiary,
                   onChanged: (value) {
                     setState(() {
                       _tempVolumeReductionDurationSeconds = value.toInt();
@@ -691,18 +681,18 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
               children: [
                 // Switch para habilitar/deshabilitar juego
                 SwitchListTile(
-                  title: const Text(
+                  title: Text(
                     'Requerir juego para apagar',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   subtitle: Text(
                     _requireGame
                         ? 'Deberás completar un juego para apagar la alarma'
                         : 'La alarma se puede apagar normalmente',
-                    style: TextStyle(color: Colors.grey[400]),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   value: _requireGame,
-                  activeColor: Colors.green,
+                  activeColor: scheme.primary,
                   onChanged: (value) {
                     setState(() {
                       _requireGame = value;
@@ -716,37 +706,37 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 if (_requireGame) ...[
                   const SizedBox(height: 16),
                   Card(
-                    color: Colors.grey[900],
+                    color: scheme.surface,
                     child: ListTile(
                       leading: Icon(
                         _gameConfig != null
                             ? _getGameIcon(_gameConfig!.gameType)
                             : Icons.videogame_asset,
-                        color: Colors.green,
+                        color: scheme.primary,
                       ),
                       title: Text(
                         _gameConfig != null
                             ? _getGameName(_gameConfig!.gameType)
                             : 'Seleccionar juego',
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: scheme.onSurface),
                       ),
                       subtitle: _gameConfig != null
                           ? Text(
                               _getGameDescription(_gameConfig!),
-                              style: TextStyle(color: Colors.grey[400]),
+                              style: TextStyle(color: scheme.onSurface),
                             )
-                          : const Text(
+                          : Text(
                               'Toca para elegir un juego',
-                              style: TextStyle(color: Colors.grey),
+                              style: TextStyle(color: scheme.onSurface),
                             ),
                       trailing: _gameConfig != null
                           ? IconButton(
-                              icon: const Icon(Icons.close, color: Colors.red),
+                              icon: Icon(Icons.close, color: scheme.error),
                               onPressed: _removeGame,
                             )
-                          : const Icon(
+                          : Icon(
                               Icons.arrow_forward_ios,
-                              color: Colors.white,
+                              color: scheme.onSurface,
                             ),
                       onTap: _selectGame,
                     ),
@@ -758,26 +748,26 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
             // Card de sincronización en la nube
             if (_cloudSyncEnabled && FirebaseAuth.instance.currentUser != null) ...[
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Sincronización en la Nube',
-                style: TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(color: scheme.onSurface, fontSize: 16),
               ),
               const SizedBox(height: 16),
               Card(
-                color: Colors.grey[900],
+                color: scheme.surface,
                 child: SwitchListTile(
-                  title: const Text(
+                  title: Text(
                     'Guardar en Firebase',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   subtitle: Text(
                     _syncToCloud
                         ? 'Esta alarma se sincronizará con la nube'
                         : 'Esta alarma solo se guardará localmente',
-                    style: TextStyle(color: Colors.grey[400]),
+                    style: TextStyle(color: scheme.onSurface),
                   ),
                   value: _syncToCloud,
-                  activeColor: Colors.green,
+                  activeColor: scheme.primary,
                   onChanged: (value) {
                     setState(() {
                       _syncToCloud = value;

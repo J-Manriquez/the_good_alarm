@@ -221,13 +221,19 @@ class EquationBank {
     ],
   };
 
-  static List<SimpleEquation> getEquations(EquationOperationType operationType, int subEquations, int count) {
-    String key = _getKey(operationType, subEquations);
+  static List<SimpleEquation> getEquations(
+    EquationOperationType operationType,
+    int subEquations,
+    int count,
+  ) {
+    final normalizedSubEquations = subEquations.clamp(1, 3);
+    final normalizedCount = count < 1 ? 1 : count;
+    String key = _getKey(operationType, normalizedSubEquations);
     List<Map<String, dynamic>> equationData = _equations[key] ?? [];
     
     if (equationData.isEmpty) {
       // Fallback a generación automática si no hay ecuaciones predefinidas
-      return _generateFallbackEquations(operationType, subEquations, count);
+      return _generateFallbackEquations(operationType, normalizedSubEquations, normalizedCount);
     }
     
     // Mezclar y tomar las ecuaciones necesarias
@@ -235,7 +241,7 @@ class EquationBank {
     shuffled.shuffle();
     
     List<SimpleEquation> result = [];
-    for (int i = 0; i < count && i < shuffled.length; i++) {
+    for (int i = 0; i < normalizedCount && i < shuffled.length; i++) {
       result.add(SimpleEquation(
         equation: shuffled[i]['equation'],
         result: shuffled[i]['result'],
@@ -243,9 +249,9 @@ class EquationBank {
     }
     
     // Si necesitamos más ecuaciones de las disponibles, repetir con mezcla
-    while (result.length < count) {
+    while (result.length < normalizedCount) {
       shuffled.shuffle();
-      for (int i = 0; i < shuffled.length && result.length < count; i++) {
+      for (int i = 0; i < shuffled.length && result.length < normalizedCount; i++) {
         result.add(SimpleEquation(
           equation: shuffled[i]['equation'],
           result: shuffled[i]['result'],
@@ -327,48 +333,135 @@ class EquationBank {
     );
   }
   
-  static SimpleEquation _generateComplexEquation(Random random, EquationOperationType operationType, int subEquations) {
-    List<String> operations = _getOperationsForType(operationType);
-    
-    List<int> numbers = [];
-    List<String> ops = [];
-    
-    // Generar números y operaciones
-    numbers.add(random.nextInt(20) + 1);
-    for (int i = 0; i < subEquations; i++) {
-      ops.add(operations[random.nextInt(operations.length)]);
-      numbers.add(random.nextInt(15) + 1);
-    }
-    
-    // Construir ecuación y calcular resultado
-    String equation = numbers[0].toString();
-    int result = numbers[0];
-    
-    for (int i = 0; i < ops.length; i++) {
-      equation += ' ${ops[i]} ${numbers[i + 1]}';
-      
-      switch (ops[i]) {
-        case '+':
-          result += numbers[i + 1];
-          break;
-        case '-':
-          result -= numbers[i + 1];
-          break;
-        case '×':
-          result *= numbers[i + 1];
-          break;
-        case '÷':
-          if (numbers[i + 1] != 0) {
-            result = (result / numbers[i + 1]).round();
+  static SimpleEquation _generateComplexEquation(
+    Random random,
+    EquationOperationType operationType,
+    int subEquations,
+  ) {
+    final operations = _getOperationsForType(operationType);
+
+    int attempts = 0;
+    while (attempts < 200) {
+      attempts++;
+
+      final ops = <String>[];
+      for (int i = 0; i < subEquations; i++) {
+        ops.add(operations[random.nextInt(operations.length)]);
+      }
+
+      int firstNumber;
+      if (ops.contains('×') || ops.contains('÷')) {
+        firstNumber = random.nextInt(9) + 2;
+      } else {
+        firstNumber = random.nextInt(20) + 1;
+      }
+
+      final numbers = <int>[firstNumber];
+
+      for (int i = 0; i < ops.length; i++) {
+        final op = ops[i];
+        if (op == '×') {
+          numbers.add(random.nextInt(9) + 2);
+        } else if (op == '÷') {
+          final currentTerm = _currentMultiplicativeTermValue(numbers, ops, i);
+          final divisors = <int>[];
+          for (int d = 2; d <= 10; d++) {
+            if (currentTerm % d == 0) divisors.add(d);
           }
-          break;
+          if (divisors.isEmpty) {
+            numbers.add(2);
+          } else {
+            numbers.add(divisors[random.nextInt(divisors.length)]);
+          }
+        } else {
+          numbers.add(random.nextInt(20) + 1);
+        }
+      }
+
+      final result = _evaluateWithPrecedence(numbers, ops, numbers.length);
+      if (result != null && result >= 0 && result <= 999) {
+        String equation = numbers[0].toString();
+        for (int i = 0; i < ops.length; i++) {
+          equation += ' ${ops[i]} ${numbers[i + 1]}';
+        }
+        return SimpleEquation(equation: equation, result: result);
       }
     }
-    
-    return SimpleEquation(
-      equation: equation,
-      result: result,
-    );
+
+    return _generateSimpleEquation(random, operationType);
+  }
+
+  static int _currentMultiplicativeTermValue(
+    List<int> numbers,
+    List<String> ops,
+    int opsCount,
+  ) {
+    if (opsCount <= 0) return numbers.last;
+
+    int start = 0;
+    for (int i = opsCount - 1; i >= 0; i--) {
+      final op = ops[i];
+      if (op == '+' || op == '-') {
+        start = i + 1;
+        break;
+      }
+    }
+
+    int value = numbers[start];
+    for (int i = start; i < opsCount; i++) {
+      final op = ops[i];
+      final next = numbers[i + 1];
+      if (op == '×') {
+        value *= next;
+      } else if (op == '÷') {
+        if (next == 0) return value;
+        value = value ~/ next;
+      } else {
+        break;
+      }
+    }
+    return value;
+  }
+
+  static int? _evaluateWithPrecedence(
+    List<int> numbers,
+    List<String> ops,
+    int length,
+  ) {
+    final usedNumbers = numbers.take(length).toList();
+    final usedOps = ops.take(length - 1).toList();
+
+    final reducedNumbers = <int>[usedNumbers[0]];
+    final reducedOps = <String>[];
+
+    for (int i = 0; i < usedOps.length; i++) {
+      final op = usedOps[i];
+      final next = usedNumbers[i + 1];
+      if (op == '×') {
+        reducedNumbers[reducedNumbers.length - 1] =
+            reducedNumbers.last * next;
+      } else if (op == '÷') {
+        if (next == 0) return null;
+        final current = reducedNumbers.last;
+        if (current % next != 0) return null;
+        reducedNumbers[reducedNumbers.length - 1] = current ~/ next;
+      } else {
+        reducedOps.add(op);
+        reducedNumbers.add(next);
+      }
+    }
+
+    int result = reducedNumbers[0];
+    for (int i = 0; i < reducedOps.length; i++) {
+      final op = reducedOps[i];
+      final next = reducedNumbers[i + 1];
+      if (op == '+') {
+        result += next;
+      } else if (op == '-') {
+        result -= next;
+      }
+    }
+    return result;
   }
   
   static List<String> _getOperationsForType(EquationOperationType operationType) {

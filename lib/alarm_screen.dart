@@ -6,6 +6,7 @@ import 'package:the_good_alarm/settings_screen.dart'; // Necesario para MethodCh
 import 'games/alarm_game_wrapper.dart'; // Agregar esta importación
 import 'services/volume_service.dart';
 import 'widgets/volume_control_button.dart';
+import 'widgets/synchronized_volume_control_button.dart';
 
 class AlarmScreen extends StatefulWidget {
   final Map<String, dynamic>? arguments;
@@ -158,19 +159,6 @@ class _AlarmScreenState extends State<AlarmScreen> {
             gameConfig: gameConfig!,
             tempVolumeReductionPercent: tempVolumeReductionPercent,
             tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
-            onGameCompleted: () {
-              // El juego se completó, proceder a apagar la alarma
-              _actuallyStopAlarm();
-            }, 
-            onGameFailed: () {
-              // El juego falló, mostrar mensaje y mantener la alarma activa
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Juego fallido. La alarma sigue activa.'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            },
           ),
         ),
       );
@@ -250,25 +238,22 @@ class _AlarmScreenState extends State<AlarmScreen> {
     // Determinar si se puede posponer
     final canSnooze = snoozeCount < maxSnoozes;
     print('Can snooze: $canSnooze (count: $snoozeCount, max: $maxSnoozes)');
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 0, 0, 0),
         automaticallyImplyLeading: false,
         title: Padding(
           padding: const EdgeInsets.only(left: 85.0),
           child: Text(
             'Alarma Activa',
-            style: TextStyle(
-              fontSize: 25,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
+            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.home, color: Colors.white, size: 30),
+            icon: const Icon(Icons.home, size: 30),
             onPressed: () {
               // MODIFICADO: Usar pop en lugar de pushNamed para volver a la instancia existente
               Navigator.of(context).popUntil((route) => route.isFirst);
@@ -276,27 +261,18 @@ class _AlarmScreenState extends State<AlarmScreen> {
           ),
         ],
       ),
-      body: Container(
-        color: Colors.white,
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.all(8.0),
-            padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
-              color: Colors.red.shade100,
-              borderRadius: BorderRadius.circular(8.0),
-              border: Border.all(color: Colors.red.shade400, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.red.shade200,
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+      body: Center(
+        child: Container(
+          margin: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(8.0),
+            border: Border.all(color: scheme.error, width: 2),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
                 // Text(
                 //   title,
                 //   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -323,7 +299,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
                         style: TextStyle(
                           fontSize: 35,
                           fontWeight: FontWeight.bold,
-                          color: const Color.fromARGB(255, 211, 47, 47),
+                          color: scheme.error,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -333,7 +309,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
                           message,
                           style: TextStyle(
                             fontSize: 20,
-                            color: Colors.red.shade600,
+                            color: scheme.error,
                             fontWeight: FontWeight.w900,
                           ),
                           textAlign: TextAlign.center,
@@ -349,8 +325,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
                   child: ElevatedButton(
                     onPressed: _stopAlarm,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 40,
                         vertical: 15,
@@ -378,8 +354,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
                     child: ElevatedButton(
                       onPressed: _snoozeAlarm,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
+                        backgroundColor: scheme.error,
+                        foregroundColor: scheme.onError,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 40,
                           vertical: 15,
@@ -398,16 +374,21 @@ class _AlarmScreenState extends State<AlarmScreen> {
                     ),
                   ),
                 const SizedBox(height: 20),
-                // Botón de control de volumen
-                VolumeControlButton(
+                // Botón de control de volumen sincronizado
+                SynchronizedVolumeControlButton(
                   tempVolumePercent: tempVolumeReductionPercent,
                   durationSeconds: tempVolumeReductionDurationSeconds,
-                  onToggle: _onVolumeReductionToggle,
-                  isActive: _isVolumeReductionActive,
+                  onToggle: (isActive) {
+                    setState(() {
+                      _isVolumeReductionActive = isActive;
+                    });
+                    print('Volume reduction toggled in alarm screen: $isActive');
+                  },
                   onExpired: () {
                     setState(() {
                       _isVolumeReductionActive = false;
                     });
+                    print('Volume reduction expired in alarm screen');
                   },
                 ),
                 const SizedBox(height: 20),
@@ -416,18 +397,18 @@ class _AlarmScreenState extends State<AlarmScreen> {
                   Container(
                     padding: const EdgeInsets.all(8.0),
                     decoration: BoxDecoration(
-                      color: Colors.red,
+                      color: scheme.errorContainer,
                       borderRadius: BorderRadius.circular(8.0),
-                      border: Border.all(color: Colors.red.shade300),
+                      border: Border.all(color: scheme.error),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(Icons.warning, color: Colors.white, size: 25),
+                        Icon(Icons.warning, color: scheme.onErrorContainer, size: 25),
                         Text(
                           'Máximo Posposiciones Alcanzado ($snoozeCount/$maxSnoozes)',
                           style: TextStyle(
-                            color: const Color.fromARGB(255, 255, 255, 255),
+                            color: scheme.onErrorContainer,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -438,7 +419,6 @@ class _AlarmScreenState extends State<AlarmScreen> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );

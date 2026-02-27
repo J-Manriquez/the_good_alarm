@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'dart:async';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
-import 'package:the_good_alarm/games/modelo_por_juego.dart';
 import 'package:the_good_alarm/games/equation_bank.dart';
 
 class EquationsGameScreen extends StatefulWidget {
@@ -56,15 +54,17 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    _initializeGame();
+    _initializeSession();
   }
 
-  void _initializeGame() {
+  void _initializeSession() {
+    if (!mounted) return;
     setState(() {
       remainingLives = widget.lives == 0 ? -1 : widget.lives; // -1 para infinitas
       totalErrors = 0;
       correctAnswers = 0;
       currentEquationIndex = 0;
+      currentRepetition = 1;
       showFeedback = false;
       _answerController.clear();
       selectedOption = null;
@@ -101,6 +101,7 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
     
     while (multipleChoiceOptions.length < 4) {
       int wrongAnswer = correctAnswer + random.nextInt(20) - 10;
+      if (wrongAnswer < 0) wrongAnswer = 0;
       if (wrongAnswer != correctAnswer && !multipleChoiceOptions.contains(wrongAnswer)) {
         multipleChoiceOptions.add(wrongAnswer);
       }
@@ -142,7 +143,13 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
         if (remainingLives > 0) {
           remainingLives--;
           if (remainingLives == 0) {
-            _gameOver(false);
+            if (widget.isAlarmMode) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _initializeSession();
+              });
+            } else {
+              _gameOver(false);
+            }
             return;
           }
         }
@@ -167,20 +174,7 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
       });
       _prepareCurrentEquation();
     } else {
-      // Completó todas las ecuaciones de esta repetición
-      if (currentRepetition < widget.repetitions) {
-        setState(() {
-          currentRepetition++;
-          currentEquationIndex = 0;
-          _answerController.clear();
-          selectedOption = null;
-        });
-        _generateEquations();
-        _prepareCurrentEquation();
-      } else {
-        // Completó todas las repeticiones
-        _gameOver(true);
-      }
+      _completedRepetition();
     }
   }
   
@@ -207,140 +201,117 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Ronda Completada!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Has completado la ronda $currentRepetition de ${widget.repetitions}.\nRespuestas correctas: $correctAnswers/${widget.equations}',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _nextRepetition();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            '¡Ronda Completada!',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          content: Text(
+            'Has completado la ronda $currentRepetition de ${widget.repetitions}.\nRespuestas correctas: $correctAnswers/${widget.equations}',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _nextRepetition();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Continuar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
-            child: const Text(
-              'Continuar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
   void _nextRepetition() {
     setState(() {
       currentRepetition++;
+      currentEquationIndex = 0;
+      showFeedback = false;
+      _answerController.clear();
+      selectedOption = null;
     });
-    _initializeGame();
+    _generateEquations();
+    _prepareCurrentEquation();
   }
 
   void _gameOver(bool won) {
-    if (widget.onGameFinished != null) {
-      widget.onGameFinished!(true);
-    }
     if (widget.isAlarmMode) {
       if (won && currentRepetition >= widget.repetitions) {
         widget.onGameFinished?.call(true);
       } else if (!won) {
-        // En modo alarma, mostrar opción de reiniciar cuando se pierden las vidas
-        _showRestartDialog();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _initializeSession();
+        });
       }
       return;
     }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text(
-          won ? '¡Felicitaciones!' : '¡Juego Terminado!',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          won 
-            ? 'Has completado todas las repeticiones del juego.\nRespuestas correctas: $correctAnswers/${widget.equations * widget.repetitions}'
-            : 'Se acabaron las vidas. Errores totales: $totalErrors',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          OutlinedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white),
-            ),
-            child: const Text('Volver'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Jugar de nuevo'),
-          ),
-        ],
-      ),
-    );
-  }
+    widget.onGameFinished?.call(won);
 
-  void _showRestartDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          '¡Se acabaron las vidas!',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Errores totales: $totalErrors\n\nDebes reiniciar el juego para continuar.',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _restartGame();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Reiniciar'),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          backgroundColor: scheme.surface,
+          title: Text(
+            won ? '¡Felicitaciones!' : '¡Juego Terminado!',
+            style: TextStyle(color: scheme.onSurface),
           ),
-        ],
-      ),
+          content: Text(
+            won
+                ? 'Has completado todas las repeticiones del juego.\nRespuestas correctas: $correctAnswers/${widget.equations * widget.repetitions}'
+                : 'Se acabaron las vidas. Errores totales: $totalErrors',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop();
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: scheme.onSurface,
+                side: BorderSide(color: scheme.onSurface),
+              ),
+              child: const Text('Volver'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _restartGame();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+              ),
+              child: const Text('Jugar de nuevo'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   void _restartGame() {
-    setState(() {
-      currentRepetition = 1;
-    });
-    _initializeGame();
+    _initializeSession();
   }
 
   @override
@@ -353,25 +324,26 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
   @override
   Widget build(BuildContext context) {
     if (currentEquations.isEmpty) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
+      final scheme = Theme.of(context).colorScheme;
+      return Scaffold(
+        backgroundColor: scheme.surface,
         body: Center(
-          child: CircularProgressIndicator(color: Colors.green),
+          child: CircularProgressIndicator(color: scheme.primary),
         ),
       );
     }
 
     final currentEquation = currentEquations[currentEquationIndex];
+    final scheme = Theme.of(context).colorScheme;
     
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
           'Ecuaciones - Ronda $currentRepetition/${widget.repetitions}',
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: scheme.onPrimary),
         ),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
         automaticallyImplyLeading: !widget.isAlarmMode,
       ),
       body: Column(
@@ -379,17 +351,23 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
           // Información del juego
           Container(
             padding: const EdgeInsets.all(16),
-            color: Colors.green.withOpacity(0.1),
+            color: scheme.primary.withAlpha(26),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildInfoCard('Progreso', '${currentEquationIndex + 1}/${widget.equations}', Colors.green),
+                _buildInfoCard(
+                  'Progreso',
+                  '${currentEquationIndex + 1}/${widget.equations}',
+                  scheme.primary,
+                ),
                 _buildInfoCard(
                   'Vidas', 
                   remainingLives == -1 ? '∞' : remainingLives.toString(), 
-                  remainingLives <= 1 && remainingLives != -1 ? Colors.red : Colors.blue
+                  remainingLives <= 1 && remainingLives != -1
+                      ? scheme.error
+                      : scheme.tertiary
                 ),
-                _buildInfoCard('Errores', totalErrors.toString(), Colors.orange),
+                _buildInfoCard('Errores', totalErrors.toString(), scheme.secondary),
               ],
             ),
           ),
@@ -404,14 +382,14 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.grey[900],
+                      color: scheme.surface,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.green, width: 2),
+                      border: Border.all(color: scheme.primary, width: 2),
                     ),
                     child: Text(
                     '${currentEquation.equation} = ?',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: scheme.onSurface,
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                     ),
@@ -434,8 +412,8 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
                     child: ElevatedButton(
                       onPressed: _canSubmitAnswer() ? _checkAnswer : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
+                        backgroundColor: scheme.primary,
+                        foregroundColor: scheme.onPrimary,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -460,13 +438,13 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
                 return Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
-                  color: (isCorrect ? Colors.green : Colors.red).withOpacity(
-                    0.8 * (1.0 - _feedbackController.value),
+                  color: (isCorrect ? scheme.primary : scheme.error).withAlpha(
+                    (0.8 * (1.0 - _feedbackController.value) * 255).round(),
                   ),
                   child: Text(
                     isCorrect ? '¡Correcto!' : 'Incorrecto',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: scheme.onPrimary,
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
@@ -481,29 +459,31 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
   }
 
   Widget _buildManualInput() {
+    final scheme = Theme.of(context).colorScheme;
     return TextField(
       controller: _answerController,
       keyboardType: TextInputType.number,
-      style: const TextStyle(color: Colors.white, fontSize: 24),
+      style: TextStyle(color: scheme.onSurface, fontSize: 24),
       textAlign: TextAlign.center,
       decoration: InputDecoration(
         hintText: 'Escribe tu respuesta',
-        hintStyle: TextStyle(color: Colors.grey[400]),
+        hintStyle: TextStyle(color: scheme.onSurface.withOpacity(0.7)),
         filled: true,
-        fillColor: Colors.grey[800],
+        fillColor: scheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.green),
+          borderSide: BorderSide(color: scheme.primary),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.green, width: 2),
+          borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
       ),
     );
   }
 
   Widget _buildMultipleChoiceInput() {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       children: multipleChoiceOptions.map((option) {
         final isSelected = selectedOption == option;
@@ -517,13 +497,14 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
               });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: isSelected ? Colors.green : Colors.grey[800],
-              foregroundColor: Colors.white,
+              backgroundColor:
+                  isSelected ? scheme.primary : scheme.surfaceContainerHighest,
+              foregroundColor: isSelected ? scheme.onPrimary : scheme.onSurface,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: isSelected ? Colors.green : Colors.grey[600]!,
+                  color: isSelected ? scheme.primary : scheme.outlineVariant,
                   width: 2,
                 ),
               ),
@@ -555,7 +536,7 @@ class _EquationsGameScreenState extends State<EquationsGameScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withAlpha(26),
         border: Border.all(color: color),
         borderRadius: BorderRadius.circular(8),
       ),

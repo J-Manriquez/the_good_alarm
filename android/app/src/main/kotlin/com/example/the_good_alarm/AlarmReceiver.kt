@@ -2,14 +2,19 @@ package com.example.the_good_alarm
 
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -17,6 +22,214 @@ import androidx.core.app.NotificationCompat
 import android.util.Log
 import android.app.NotificationChannel
 import android.app.Notification
+import java.util.Calendar
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+object AlarmVolumeController {
+    private var appContext: Context? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var tickRunnable: Runnable? = null
+    private var tempEndRunnable: Runnable? = null
+
+    private var isActive = false
+    private var activeAlarmId: Int? = null
+    private var originalVolume: Int? = null
+
+    private var targetVolume: Int = 0
+    private var rampStartVolume: Int = 0
+    private var rampStartTimeMs: Long = 0L
+    private var rampDurationMs: Long = 0L
+    private var rampRunning: Boolean = false
+
+    private var tempActive: Boolean = false
+    private var tempReducedVolume: Int = 0
+
+    fun startFromAlarmTrigger(
+        context: Context,
+        alarmId: Int,
+        maxVolumePercent: Int,
+        rampUpDurationSeconds: Int
+    ) {
+        val ctx = context.applicationContext
+        appContext = ctx
+
+        if (isActive && activeAlarmId != null && activeAlarmId != alarmId) {
+            stop(ctx)
+        }
+
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (!isActive) {
+            originalVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            isActive = true
+            activeAlarmId = alarmId
+        }
+
+        val maxStreamVolume = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        targetVolume = ((maxStreamVolume * maxVolumePercent) / 100).coerceIn(0, maxStreamVolume)
+
+        if (rampUpDurationSeconds <= 0) {
+            rampRunning = false
+            handler.removeCallbacks(tickRunnable ?: Runnable {})
+            tickRunnable = null
+            applyEffectiveVolume(am, targetVolume)
+            return
+        }
+
+        val initialVolume = 1.coerceIn(0, maxStreamVolume)
+        am.setStreamVolume(AudioManager.STREAM_ALARM, initialVolume, 0)
+
+        rampStartVolume = initialVolume
+        rampStartTimeMs = SystemClock.elapsedRealtime()
+        rampDurationMs = rampUpDurationSeconds * 1000L
+        rampRunning = true
+
+        ensureTickScheduled()
+        tick()
+    }
+
+    fun ensureStarted(context: Context, maxVolumePercent: Int, rampUpDurationSeconds: Int) {
+        val ctx = context.applicationContext
+        appContext = ctx
+
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (!isActive) {
+            originalVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            isActive = true
+        }
+
+        val maxStreamVolume = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        targetVolume = ((maxStreamVolume * maxVolumePercent) / 100).coerceIn(0, maxStreamVolume)
+
+        if (!rampRunning && rampUpDurationSeconds > 0) {
+            rampStartVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            rampStartTimeMs = SystemClock.elapsedRealtime()
+            rampDurationMs = rampUpDurationSeconds * 1000L
+            rampRunning = true
+            ensureTickScheduled()
+        } else if (!rampRunning && rampUpDurationSeconds <= 0) {
+            applyEffectiveVolume(am, targetVolume)
+            return
+        }
+
+        tick()
+    }
+
+    fun setTemporaryReduction(context: Context, reductionPercent: Int, durationSeconds: Int) {
+        val ctx = context.applicationContext
+        appContext = ctx
+
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (!isActive) {
+            originalVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            isActive = true
+        }
+
+        val maxStreamVolume = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        val absoluteReduced = ((maxStreamVolume * reductionPercent) / 100).coerceIn(0, maxStreamVolume)
+        val currentVolume = am.getStreamVolume(AudioManager.STREAM_ALARM)
+        tempReducedVolume = min(currentVolume, absoluteReduced)
+        tempActive = true
+
+        handler.removeCallbacks(tempEndRunnable ?: Runnable {})
+        tempEndRunnable = Runnable {
+            tempActive = false
+            tick()
+        }
+        handler.postDelayed(tempEndRunnable!!, durationSeconds * 1000L)
+
+        applyEffectiveVolume(am, tempReducedVolume)
+        tick()
+    }
+
+    fun cancelTemporaryReduction(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+
+        handler.removeCallbacks(tempEndRunnable ?: Runnable {})
+        tempEndRunnable = null
+        tempActive = false
+        tick()
+    }
+
+    fun stop(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+
+        handler.removeCallbacks(tickRunnable ?: Runnable {})
+        handler.removeCallbacks(tempEndRunnable ?: Runnable {})
+        tickRunnable = null
+        tempEndRunnable = null
+
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        originalVolume?.let { volume ->
+            am.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0)
+        }
+
+        isActive = false
+        activeAlarmId = null
+        originalVolume = null
+        targetVolume = 0
+        rampStartVolume = 0
+        rampStartTimeMs = 0L
+        rampDurationMs = 0L
+        rampRunning = false
+        tempActive = false
+        tempReducedVolume = 0
+    }
+
+    private fun ensureTickScheduled() {
+        if (tickRunnable == null) {
+            tickRunnable = Runnable { tick() }
+        }
+        handler.removeCallbacks(tickRunnable!!)
+        handler.post(tickRunnable!!)
+    }
+
+    private fun tick() {
+        if (!isActive) return
+        val ctx = appContext ?: return
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxStreamVolume = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+
+        val baseVolume = computeBaseVolume(am, maxStreamVolume)
+        val effectiveVolume = if (tempActive) min(baseVolume, tempReducedVolume) else baseVolume
+        applyEffectiveVolume(am, effectiveVolume)
+
+        if (rampRunning) {
+            handler.removeCallbacks(tickRunnable!!)
+            handler.postDelayed(tickRunnable!!, 250L)
+        }
+    }
+
+    private fun computeBaseVolume(am: AudioManager, maxStreamVolume: Int): Int {
+        if (!rampRunning) {
+            return targetVolume.coerceIn(0, maxStreamVolume)
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = (now - rampStartTimeMs).coerceAtLeast(0L)
+        if (rampDurationMs <= 0L || elapsed >= rampDurationMs) {
+            rampRunning = false
+            return targetVolume.coerceIn(0, maxStreamVolume)
+        }
+
+        val progress = elapsed.toDouble() / rampDurationMs.toDouble()
+        val interpolated = (rampStartVolume + (targetVolume - rampStartVolume) * progress).roundToInt()
+        return interpolated.coerceIn(0, maxStreamVolume)
+    }
+
+    private fun applyEffectiveVolume(am: AudioManager, volume: Int) {
+        val maxStreamVolume = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        val clamped = volume.coerceIn(0, maxStreamVolume)
+        val current = am.getStreamVolume(AudioManager.STREAM_ALARM)
+        if (current != clamped) {
+            am.setStreamVolume(AudioManager.STREAM_ALARM, clamped, 0)
+        }
+    }
+}
 
 class AlarmReceiver : BroadcastReceiver() {
     
@@ -24,8 +237,10 @@ class AlarmReceiver : BroadcastReceiver() {
         var currentRingtone: Ringtone? = null
         var currentVibrator: Vibrator? = null
         const val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
+        private const val ALARM_ACTION = "com.example.the_good_alarm.ALARM_TRIGGERED"
         private const val STOP_ACTION = "com.example.the_good_alarm.STOP_ALARM_ACTION"
         private const val SNOOZE_ACTION = "com.example.the_good_alarm.SNOOZE_ALARM_ACTION"
+        private const val SNOOZE_REQUEST_CODE_OFFSET = 1000000
         
         fun stopAlarmSound() {
             try {
@@ -111,6 +326,42 @@ class AlarmReceiver : BroadcastReceiver() {
                 Log.e("AlarmReceiver", "Error cancelling notifications for alarm ID: $alarmId", e)
             }
         }
+
+        fun pushAlarmEvent(context: Context, type: String, alarmId: Int, newTimeInMillis: Long?) {
+            try {
+                val prefs = context.getSharedPreferences("alarm_events", Context.MODE_PRIVATE)
+                val current = prefs.getString("events", "[]") ?: "[]"
+                val array = JSONArray(current)
+                val obj = JSONObject()
+                obj.put("type", type)
+                obj.put("alarmId", alarmId)
+                obj.put("timestamp", System.currentTimeMillis())
+                if (newTimeInMillis != null) {
+                    obj.put("newTimeInMillis", newTimeInMillis)
+                }
+                array.put(obj)
+                prefs.edit().putString("events", array.toString()).apply()
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error pushing alarm event", e)
+            }
+        }
+
+        fun cancelSnoozeAlarm(context: Context, alarmId: Int) {
+            try {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                val intent = Intent(context, AlarmReceiver::class.java).apply { action = ALARM_ACTION }
+                val pending = PendingIntent.getBroadcast(
+                    context,
+                    alarmId + SNOOZE_REQUEST_CODE_OFFSET,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                alarmManager.cancel(pending)
+                pending.cancel()
+            } catch (e: Exception) {
+                Log.e("AlarmReceiver", "Error canceling snooze alarm", e)
+            }
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -124,7 +375,12 @@ class AlarmReceiver : BroadcastReceiver() {
                 
                 stopAlarmSound()
                 stopVibration(context)
+                AlarmVolumeController.stop(context)
                 cancelAllNotificationsForAlarm(context, alarmId)
+                cancelSnoozeAlarm(context, alarmId)
+                val alarmScreenKey = "alarm_screen_shown_$alarmId"
+                context.getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                pushAlarmEvent(context, type = "stopped", alarmId = alarmId, newTimeInMillis = null)
                 
                 Log.d("AlarmReceiver", "Alarm stopped completely")
             }
@@ -133,20 +389,167 @@ class AlarmReceiver : BroadcastReceiver() {
                 val alarmId = intent.getIntExtra("alarmId", -1)
                 val maxSnoozes = intent.getIntExtra("maxSnoozes", 3)
                 val snoozeDurationMinutes = intent.getIntExtra("snoozeDurationMinutes", 5)
+                val title = intent.getStringExtra("title") ?: "Alarma Pospuesta"
+                val message = intent.getStringExtra("message") ?: "¡Es hora de despertar!"
+                val maxVolumePercent = intent.getIntExtra("maxVolumePercent", 100)
+                val volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30)
+                val tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50)
+                val tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
                 
                 Log.d("AlarmReceiver", "Snoozing alarm ID: $alarmId, maxSnoozes: $maxSnoozes, duration: $snoozeDurationMinutes")
                 
                 stopAlarmSound()
                 stopVibration(context)
+                AlarmVolumeController.stop(context)
                 cancelAllNotificationsForAlarm(context, alarmId)
-                
-                // TODO: Implement snooze logic here
+                cancelSnoozeAlarm(context, alarmId)
+
+                val alarmScreenKey = "alarm_screen_shown_$alarmId"
+                context.getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+
+                val now = Calendar.getInstance()
+                now.add(Calendar.MINUTE, snoozeDurationMinutes)
+                val newTimeInMillis = now.timeInMillis
+
+                try {
+                    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                    val snoozeIntent = Intent(context, AlarmReceiver::class.java).apply {
+                        action = ALARM_ACTION
+                        putExtra("alarmId", alarmId)
+                        putExtra("title", title)
+                        putExtra("message", message)
+                        putExtra("screenRoute", "/alarm")
+                        putExtra("repeatDays", intArrayOf())
+                        putExtra("isDaily", false)
+                        putExtra("isWeekly", false)
+                        putExtra("isWeekend", false)
+                        putExtra("maxSnoozes", maxSnoozes)
+                        putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+                        putExtra("hour", -1)
+                        putExtra("minute", -1)
+                        putExtra("isSnooze", true)
+                        putExtra("maxVolumePercent", maxVolumePercent)
+                        putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
+                        putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
+                        putExtra("tempVolumeReductionDurationSeconds", tempVolumeReductionDurationSeconds)
+                    }
+                    val pending = PendingIntent.getBroadcast(
+                        context,
+                        alarmId + SNOOZE_REQUEST_CODE_OFFSET,
+                        snoozeIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, newTimeInMillis, pending)
+                    } else {
+                        alarmManager.setExact(AlarmManager.RTC_WAKEUP, newTimeInMillis, pending)
+                    }
+                } catch (e: Exception) {
+                    Log.e("AlarmReceiver", "Error scheduling snooze alarm", e)
+                }
+
+                pushAlarmEvent(context, type = "snoozed", alarmId = alarmId, newTimeInMillis = newTimeInMillis)
                 Log.d("AlarmReceiver", "Alarm snoozed")
             }
             else -> {
                 Log.d("AlarmReceiver", "Default alarm trigger action")
                 handleAlarmTrigger(context, intent)
             }
+        }
+    }
+
+    private fun calculateNextRepeatingTimeMillis(hour: Int, minute: Int, repeatDays: List<Int>): Long? {
+        if (hour !in 0..23 || minute !in 0..59) return null
+        if (repeatDays.isEmpty()) return null
+
+        val calendar = Calendar.getInstance()
+        val now = Calendar.getInstance()
+        calendar.set(Calendar.HOUR_OF_DAY, hour)
+        calendar.set(Calendar.MINUTE, minute)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+
+        val calendarDays = repeatDays.map { day ->
+            when (day) {
+                1 -> Calendar.MONDAY
+                2 -> Calendar.TUESDAY
+                3 -> Calendar.WEDNESDAY
+                4 -> Calendar.THURSDAY
+                5 -> Calendar.FRIDAY
+                6 -> Calendar.SATURDAY
+                7 -> Calendar.SUNDAY
+                else -> Calendar.MONDAY
+            }
+        }.toSet()
+
+        val currentDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+        if (calendarDays.contains(currentDayOfWeek) && calendar.after(now)) {
+            return calendar.timeInMillis
+        }
+
+        for (daysToAdd in 1..7) {
+            calendar.add(Calendar.DAY_OF_MONTH, 1)
+            if (calendarDays.contains(calendar.get(Calendar.DAY_OF_WEEK))) {
+                return calendar.timeInMillis
+            }
+        }
+        return null
+    }
+
+    private fun rescheduleNextIfRepeating(context: Context, intent: Intent, alarmId: Int) {
+        val isSnooze = intent.getBooleanExtra("isSnooze", false)
+        if (isSnooze) return
+
+        fun calendarDayToRepeatDay(dayOfWeek: Int): Int {
+            return when (dayOfWeek) {
+                Calendar.MONDAY -> 1
+                Calendar.TUESDAY -> 2
+                Calendar.WEDNESDAY -> 3
+                Calendar.THURSDAY -> 4
+                Calendar.FRIDAY -> 5
+                Calendar.SATURDAY -> 6
+                Calendar.SUNDAY -> 7
+                else -> 1
+            }
+        }
+
+        val rawRepeatDays = intent.getIntArrayExtra("repeatDays")?.toList() ?: emptyList()
+        val repeatDays = when {
+            rawRepeatDays.isNotEmpty() -> rawRepeatDays
+            intent.getBooleanExtra("isDaily", false) -> listOf(1, 2, 3, 4, 5, 6, 7)
+            intent.getBooleanExtra("isWeekend", false) -> listOf(6, 7)
+            intent.getBooleanExtra("isWeekly", false) -> listOf(
+                calendarDayToRepeatDay(Calendar.getInstance().get(Calendar.DAY_OF_WEEK))
+            )
+            else -> emptyList()
+        }
+        val hour = intent.getIntExtra("hour", -1)
+        val minute = intent.getIntExtra("minute", -1)
+        val nextTime = calculateNextRepeatingTimeMillis(hour, minute, repeatDays) ?: return
+
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val rescheduleIntent = Intent(context, AlarmReceiver::class.java).apply {
+                action = ALARM_ACTION
+                if (intent.extras != null) {
+                    putExtras(intent.extras!!)
+                }
+                putExtra("isSnooze", false)
+            }
+            val pending = PendingIntent.getBroadcast(
+                context,
+                alarmId,
+                rescheduleIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTime, pending)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTime, pending)
+            }
+        } catch (e: Exception) {
+            Log.e("AlarmReceiver", "Error rescheduling repeating alarm", e)
         }
     }
 
@@ -163,10 +566,16 @@ class AlarmReceiver : BroadcastReceiver() {
             val volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30)
             val tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50)
             val tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
+            val repeatDays = intent.getIntArrayExtra("repeatDays")?.toList() ?: emptyList()
+            val hour = intent.getIntExtra("hour", -1)
+            val minute = intent.getIntExtra("minute", -1)
             
             Log.d("AlarmReceiver", "Alarm details - ID: $alarmId, Title: $title, Message: $message")
             Log.d("AlarmReceiver", "Snooze settings - Max: $maxSnoozes, Duration: $snoozeDurationMinutes minutes")
             Log.d("AlarmReceiver", "Volume settings - Max: $maxVolumePercent%, RampUp: ${volumeRampUpDurationSeconds}s, TempReduction: $tempVolumeReductionPercent% for ${tempVolumeReductionDurationSeconds}s")
+            Log.d("AlarmReceiver", "Repeat settings - Days: $repeatDays, Hour: $hour, Minute: $minute")
+
+            rescheduleNextIfRepeating(context, intent, alarmId)
 
             // Adquirir WakeLock para mantener el dispositivo despierto
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -177,47 +586,14 @@ class AlarmReceiver : BroadcastReceiver() {
             wakeLock.acquire(10 * 60 * 1000L) // 10 minutos máximo
             Log.d("AlarmReceiver", "WakeLock acquired")
 
-            // Iniciar control de volumen antes de reproducir el sonido
             try {
                 Log.d("AlarmReceiver", "Starting volume control: maxVolume=$maxVolumePercent%, rampUp=${volumeRampUpDurationSeconds}s")
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                val originalVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_ALARM)
-                Log.d("AlarmReceiver", "Original volume saved: $originalVolume")
-                
-                // Calcular volumen objetivo
-                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM)
-                val targetVolume = (maxVolume * maxVolumePercent / 100).coerceAtMost(maxVolume)
-                Log.d("AlarmReceiver", "Volume control started: target=$targetVolume/$maxVolume")
-                
-                // Establecer volumen inicial bajo y comenzar escalado gradual
-                audioManager.setStreamVolume(android.media.AudioManager.STREAM_ALARM, 1, 0)
-                
-                // Programar escalado gradual de volumen
-                val handler = android.os.Handler(android.os.Looper.getMainLooper())
-                val totalSteps = targetVolume
-                val stepDuration = if (totalSteps > 1) {
-                    (volumeRampUpDurationSeconds * 1000L) / (totalSteps - 1)
-                } else {
-                    0L
-                }
-                
-                Log.d("AlarmReceiver", "Volume ramp configuration: duration=${volumeRampUpDurationSeconds}s, steps=$totalSteps, stepDuration=${stepDuration}ms")
-                
-                for (step in 1..targetVolume) {
-                    val delay = stepDuration * (step - 1)
-                    handler.postDelayed({
-                        try {
-                            audioManager.setStreamVolume(android.media.AudioManager.STREAM_ALARM, step, 0)
-                            Log.d("AlarmReceiver", "Volume step: $step/$targetVolume at ${delay}ms")
-                            
-                            if (step == targetVolume) {
-                                Log.d("AlarmReceiver", "Volume escalation completed in ${volumeRampUpDurationSeconds}s. Temporary reduction will be controlled by UI button.")
-                            }
-                        } catch (e: Exception) {
-                            Log.e("AlarmReceiver", "Error setting volume step $step: ${e.message}")
-                        }
-                    }, delay)
-                }
+                AlarmVolumeController.startFromAlarmTrigger(
+                    context = context,
+                    alarmId = alarmId,
+                    maxVolumePercent = maxVolumePercent,
+                    rampUpDurationSeconds = volumeRampUpDurationSeconds
+                )
             } catch (e: Exception) {
                 Log.e("AlarmReceiver", "Error starting volume control: ${e.message}")
             }
@@ -541,6 +917,15 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("alarmId", alarmId)
                 putExtra("maxSnoozes", maxSnoozes)
                 putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+                putExtra("title", title)
+                putExtra("message", message)
+                putExtra("repeatDays", repeatDays.toIntArray())
+                putExtra("hour", hour)
+                putExtra("minute", minute)
+                putExtra("maxVolumePercent", maxVolumePercent)
+                putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
+                putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
+                putExtra("tempVolumeReductionDurationSeconds", tempVolumeReductionDurationSeconds)
             }
             val pendingSnoozeIntent = PendingIntent.getBroadcast(
                 context, alarmId + 3000, snoozeIntent,

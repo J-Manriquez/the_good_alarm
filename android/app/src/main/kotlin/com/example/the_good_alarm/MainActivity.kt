@@ -54,7 +54,9 @@ data class AlarmData(
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.the_good_alarm/alarm"
     private val ALARM_ACTION = "com.example.the_good_alarm.ALARM_TRIGGERED"
+    private val HABIT_ACTION = "com.example.the_good_alarm.HABIT_TRIGGERED"
     private val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
+    private val SNOOZE_REQUEST_CODE_OFFSET = 1000000
     private lateinit var alarmManager: AlarmManager
     private lateinit var alarmReceiver: BroadcastReceiver
     private var methodChannel: MethodChannel? = null
@@ -62,15 +64,6 @@ class MainActivity : FlutterActivity() {
     
     // Volume control variables
     private lateinit var audioManager: AudioManager
-    private var originalVolume: Int = 0
-    private var isVolumeControlActive: Boolean = false
-    private var volumeHandler: Handler? = null
-    private var volumeRunnable: Runnable? = null
-    private var tempReductionHandler: Handler? = null
-    private var tempReductionRunnable: Runnable? = null
-    private var isTempVolumeReduced: Boolean = false
-    private var volumeBeforeReduction: Int = 0
-    private var currentMaxVolumePercent: Int = 100
     
     private fun checkDndPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -162,9 +155,13 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "setVolume" -> {
-                    val volumePercent = call.argument<Int>("volumePercent") ?: 100
-                    Log.d("MainActivity", "Setting volume to $volumePercent%")
-                    setVolume(volumePercent)
+                    val volumePercent = call.argument<Int>("volumePercent")
+                        ?: call.argument<Int>("percent")
+                        ?: call.argument<Double>("volume")?.let { (it * 100.0).toInt() }
+                        ?: 100
+                    val clamped = volumePercent.coerceIn(0, 100)
+                    Log.d("MainActivity", "Setting volume to $clamped%")
+                    setVolume(clamped)
                     result.success(true)
                 }
                 else -> {
@@ -219,6 +216,7 @@ class MainActivity : FlutterActivity() {
                                     setAlarm(
                                         timeInMillis = nextTime,
                                         alarmId = id,
+                                        requestCode = id,
                                         title = title,
                                         message = message,
                                         screenRoute = "/alarm",
@@ -228,6 +226,9 @@ class MainActivity : FlutterActivity() {
                                         isWeekend = isWeekend,
                                         maxSnoozes = maxSnoozes,
                                         snoozeDurationMinutes = snoozeDurationMinutes,
+                                        hour = hour,
+                                        minute = minute,
+                                        isSnooze = false,
                                         maxVolumePercent = maxVolumePercent,
                                         volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
                                         tempVolumeReductionPercent = tempVolumeReductionPercent,
@@ -245,6 +246,7 @@ class MainActivity : FlutterActivity() {
                                 setAlarm(
                                     timeInMillis = nextTime,
                                     alarmId = id,
+                                    requestCode = id,
                                     title = title,
                                     message = message,
                                     screenRoute = "/alarm",
@@ -254,6 +256,9 @@ class MainActivity : FlutterActivity() {
                                     isWeekend = isWeekend,
                                     maxSnoozes = maxSnoozes,
                                     snoozeDurationMinutes = snoozeDurationMinutes,
+                                    hour = hour,
+                                    minute = minute,
+                                    isSnooze = false,
                                     maxVolumePercent = maxVolumePercent,
                                     volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
                                     tempVolumeReductionPercent = tempVolumeReductionPercent,
@@ -272,7 +277,52 @@ class MainActivity : FlutterActivity() {
                 }
                 "cancelAlarm" -> {
                     val alarmId = call.argument<Int>("alarmId") ?: 0
-                    cancelAlarm(alarmId)
+                    cancelAlarm(alarmId, cancelBase = true, cancelSnooze = true)
+                    result.success(true)
+                }
+                "setHabit" -> {
+                    val habitId = call.argument<String>("habitId") ?: return@setMethodCallHandler
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val timeInMillis = call.argument<Long>("timeInMillis") ?: return@setMethodCallHandler
+                    val title = call.argument<String>("title") ?: "Hábito"
+                    val message = call.argument<String>("message") ?: ""
+
+                    if (timeInMillis <= System.currentTimeMillis()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (!alarmManager.canScheduleExactAlarms()) {
+                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                startActivity(intent)
+                                result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
+                                return@setMethodCallHandler
+                            }
+                        }
+                        setHabitOccurrence(
+                            timeInMillis = timeInMillis,
+                            habitId = habitId,
+                            occurrenceKey = occurrenceKey,
+                            title = title,
+                            message = message
+                        )
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("HABIT_ERROR", e.localizedMessage, null)
+                    }
+                }
+                "cancelHabit" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    cancelHabitOccurrence(occurrenceKey)
+                    result.success(true)
+                }
+                "clearHabitScreenFlag" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val key = "habit_screen_shown_$occurrenceKey"
+                    getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(key).apply()
                     result.success(true)
                 }
                 "stopAlarm" -> {
@@ -280,11 +330,25 @@ class MainActivity : FlutterActivity() {
                     Log.d("MainActivity", "Stopping alarm: $alarmId")
                     AlarmReceiver.stopAlarmSound()
                     AlarmReceiver.stopVibration(this)
+                    AlarmVolumeController.stop(this)
                     
-                    // Cancelar la alarma y todas las notificaciones asociadas
-                    cancelAlarm(alarmId)
+                    cancelAlarm(alarmId, cancelBase = false, cancelSnooze = true)
+                    cancelAllNotificationsForAlarm(alarmId)
                     
+                    // Limpiar la marca de pantalla mostrada para permitir futuras activaciones
+                    val alarmScreenKey = "alarm_screen_shown_$alarmId"
+                    getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                    Log.d("MainActivity", "Cleared alarm screen flag for alarm $alarmId")
+                    
+                    pushAlarmEvent(type = "stopped", alarmId = alarmId, newTimeInMillis = null)
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmId))
+                    result.success(true)
+                }
+                "clearAlarmScreenFlag" -> {
+                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    val alarmScreenKey = "alarm_screen_shown_$alarmId"
+                    getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                    Log.d("MainActivity", "Manually cleared alarm screen flag for alarm $alarmId")
                     result.success(true)
                 }
                 "snoozeAlarm" -> {
@@ -304,12 +368,15 @@ class MainActivity : FlutterActivity() {
                     if (alarmId != null) {
                         AlarmReceiver.stopAlarmSound()
                         AlarmReceiver.stopVibration(this)
+                        AlarmVolumeController.stop(this)
                         
-                        // Cancelar la alarma y todas las notificaciones asociadas
-                        cancelAlarm(alarmId)
-                        
-                        // Cancel all notifications for this alarm
+                        cancelAlarm(alarmId, cancelBase = false, cancelSnooze = true)
                         cancelAllNotificationsForAlarm(alarmId)
+                        
+                        // Limpiar la marca de pantalla mostrada para permitir futuras activaciones
+                        val alarmScreenKey = "alarm_screen_shown_$alarmId"
+                        getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
+                        Log.d("MainActivity", "Cleared alarm screen flag for snoozed alarm $alarmId")
                         
                         val calendar = Calendar.getInstance()
                         Log.d("MainActivity", "Current time before adding snooze: ${calendar.time}")
@@ -319,6 +386,7 @@ class MainActivity : FlutterActivity() {
                         setAlarm(
                             timeInMillis = calendar.timeInMillis,
                             alarmId = alarmId,
+                            requestCode = alarmId + SNOOZE_REQUEST_CODE_OFFSET,
                             title = "Alarma Pospuesta",
                             message = "¡Es hora de despertar!",
                             screenRoute = "/alarm",
@@ -328,6 +396,9 @@ class MainActivity : FlutterActivity() {
                             isWeekend = false,
                             maxSnoozes = maxSnoozes,
                             snoozeDurationMinutes = snoozeDurationMinutes,
+                            hour = -1,
+                            minute = -1,
+                            isSnooze = true,
                             maxVolumePercent = 100,
                             volumeRampUpDurationSeconds = 30,
                             tempVolumeReductionPercent = 50,
@@ -336,6 +407,7 @@ class MainActivity : FlutterActivity() {
                         
                         Log.d("MainActivity", "Alarm rescheduled with correct parameters")
                         
+                        pushAlarmEvent(type = "snoozed", alarmId = alarmId, newTimeInMillis = calendar.timeInMillis)
                         methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf(
                             "alarmId" to alarmId, 
                             "newTimeInMillis" to calendar.timeInMillis
@@ -359,6 +431,9 @@ class MainActivity : FlutterActivity() {
                 "notifyAlarmRinging" -> {
                     Log.d("MainActivity", "Alarm ringing notification received")
                     result.success(null)
+                }
+                "getAndClearAlarmEvents" -> {
+                    result.success(getAndClearAlarmEvents())
                 }
                 "getSystemSounds" -> {
                     val sounds = getSystemAlarmSounds()
@@ -454,7 +529,7 @@ class MainActivity : FlutterActivity() {
                     AlarmReceiver.stopVibration(this)
                     
                     // Cancelar la alarma y todas las notificaciones asociadas
-                    cancelAlarm(alarmIdFromIntent)
+                    cancelAlarm(alarmIdFromIntent, cancelBase = false, cancelSnooze = true)
                     
                     // Cancel all notifications for this alarm
                     cancelAllNotificationsForAlarm(alarmIdFromIntent)
@@ -467,6 +542,7 @@ class MainActivity : FlutterActivity() {
                     methodChannel?.invokeMethod("alarmManuallyStopped", mapOf("alarmId" to alarmIdFromIntent))
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
                     methodChannel?.invokeMethod("closeAlarmScreenIfOpen", mapOf("alarmId" to alarmIdFromIntent))
+                    pushAlarmEvent(type = "stopped", alarmId = alarmIdFromIntent, newTimeInMillis = null)
                 }
             }
             "SNOOZE_ALARM_FROM_NOTIFICATION" -> {
@@ -474,7 +550,7 @@ class MainActivity : FlutterActivity() {
                     Log.d("MainActivity", "Snoozing alarm from notification: $alarmIdFromIntent")
                     AlarmReceiver.stopAlarmSound()
                     AlarmReceiver.stopVibration(this)
-                    cancelAlarm(alarmIdFromIntent)
+                    cancelAlarm(alarmIdFromIntent, cancelBase = false, cancelSnooze = true)
                     
                     // Cancel all notifications for this alarm
                     cancelAllNotificationsForAlarm(alarmIdFromIntent)
@@ -490,6 +566,7 @@ class MainActivity : FlutterActivity() {
                     setAlarm(
                         timeInMillis = calendar.timeInMillis,
                         alarmId = alarmIdFromIntent,
+                        requestCode = alarmIdFromIntent + SNOOZE_REQUEST_CODE_OFFSET,
                         title = intent.getStringExtra("title") ?: "Alarma Pospuesta",
                         message = intent.getStringExtra("message") ?: "¡Es hora de despertar!",
                         screenRoute = "/alarm",
@@ -499,11 +576,15 @@ class MainActivity : FlutterActivity() {
                         isWeekend = false,
                         maxSnoozes = intent.getIntExtra("maxSnoozes", 3),
                         snoozeDurationMinutes = snoozeDurationMinutes,
+                        hour = -1,
+                        minute = -1,
+                        isSnooze = true,
                         maxVolumePercent = intent.getIntExtra("maxVolumePercent", 100),
                         volumeRampUpDurationSeconds = intent.getIntExtra("volumeRampUpDurationSeconds", 30),
                         tempVolumeReductionPercent = intent.getIntExtra("tempVolumeReductionPercent", 50),
                         tempVolumeReductionDurationSeconds = intent.getIntExtra("tempVolumeReductionDurationSeconds", 60)
                     )
+                    pushAlarmEvent(type = "snoozed", alarmId = alarmIdFromIntent, newTimeInMillis = calendar.timeInMillis)
                     Log.d("MainActivity", "Invoking Flutter method: alarmManuallySnoozed")
                     methodChannel?.invokeMethod("alarmManuallySnoozed", mapOf("alarmId" to alarmIdFromIntent, "newTimeInMillis" to calendar.timeInMillis))
                     Log.d("MainActivity", "Invoking Flutter method: closeAlarmScreenIfOpen")
@@ -572,6 +653,39 @@ class MainActivity : FlutterActivity() {
                         Log.d("MainActivity", "Alarm screen already shown for alarm $alarmIdFromIntent, skipping")
                     }
                 }
+
+                val habitIdFromIntent = intent.getStringExtra("habitId")
+                val occurrenceKeyFromIntent = intent.getStringExtra("occurrenceKey")
+                val scheduledAtLocalMillis = intent.getLongExtra("scheduledAtLocalMillis", -1L)
+                if (screenRoute == "/habit" && autoShow && !habitIdFromIntent.isNullOrBlank() && !occurrenceKeyFromIntent.isNullOrBlank()) {
+                    val habitScreenKey = "habit_screen_shown_$occurrenceKeyFromIntent"
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    val alreadyShown = prefs.getBoolean(habitScreenKey, false)
+
+                    if (!alreadyShown) {
+                        try {
+                            window.addFlags(
+                                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                            )
+                        } catch (_: Exception) {}
+
+                        prefs.edit().putBoolean(habitScreenKey, true).apply()
+
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            methodChannel?.invokeMethod(
+                                "showHabitScreen",
+                                mapOf(
+                                    "habitId" to habitIdFromIntent,
+                                    "occurrenceKey" to occurrenceKeyFromIntent,
+                                    "scheduledAtLocalMillis" to scheduledAtLocalMillis
+                                )
+                            )
+                        }, 300)
+                    }
+                }
             }
         }
     }
@@ -579,6 +693,7 @@ class MainActivity : FlutterActivity() {
     private fun setAlarm(
         timeInMillis: Long,
         alarmId: Int,
+        requestCode: Int,
         title: String,
         message: String,
         screenRoute: String,
@@ -588,6 +703,9 @@ class MainActivity : FlutterActivity() {
         isWeekend: Boolean,
         maxSnoozes: Int,
         snoozeDurationMinutes: Int,
+        hour: Int,
+        minute: Int,
+        isSnooze: Boolean,
         maxVolumePercent: Int = 100,
         volumeRampUpDurationSeconds: Int = 30,
         tempVolumeReductionPercent: Int = 50,
@@ -606,6 +724,9 @@ class MainActivity : FlutterActivity() {
                 putExtra("isWeekend", isWeekend)
                 putExtra("maxSnoozes", maxSnoozes)
                 putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+                putExtra("hour", hour)
+                putExtra("minute", minute)
+                putExtra("isSnooze", isSnooze)
                 putExtra("maxVolumePercent", maxVolumePercent)
                 putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
                 putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
@@ -614,7 +735,7 @@ class MainActivity : FlutterActivity() {
 
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
-                alarmId,
+                requestCode,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -637,6 +758,73 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.e("MainActivity", "Error setting alarm", e)
         }
+    }
+
+    private fun setHabitOccurrence(
+        timeInMillis: Long,
+        habitId: String,
+        occurrenceKey: String,
+        title: String,
+        message: String
+    ) {
+        val intent = Intent(this, HabitReceiver::class.java).apply {
+            action = HABIT_ACTION
+            putExtra("habitId", habitId)
+            putExtra("occurrenceKey", occurrenceKey)
+            putExtra("title", title)
+            putExtra("message", message)
+            putExtra("scheduledAtLocalMillis", timeInMillis)
+            putExtra("screenRoute", "/habit")
+            putExtra("autoShowAlarm", true)
+        }
+
+        val requestCode = stableRequestCode(occurrenceKey)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                timeInMillis,
+                pendingIntent
+            )
+        } else {
+            alarmManager.setExact(
+                AlarmManager.RTC_WAKEUP,
+                timeInMillis,
+                pendingIntent
+            )
+        }
+
+        Log.d("MainActivity", "Habit occurrence set for: ${Date(timeInMillis)} key=$occurrenceKey")
+    }
+
+    private fun cancelHabitOccurrence(occurrenceKey: String) {
+        val intent = Intent(this, HabitReceiver::class.java).apply {
+            action = HABIT_ACTION
+            putExtra("occurrenceKey", occurrenceKey)
+        }
+        val requestCode = stableRequestCode(occurrenceKey)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
+    private fun stableRequestCode(key: String): Int {
+        val h = key.hashCode().toLong()
+        val abs = kotlin.math.abs(h)
+        return (abs % 2147483647L).toInt()
     }
 
     private fun checkDoNotDisturbPermission(): Boolean {
@@ -712,22 +900,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun cancelAlarm(alarmId: Int) {
+    private fun cancelAlarm(alarmId: Int, cancelBase: Boolean, cancelSnooze: Boolean) {
         try {
-            val intent = Intent(this, AlarmReceiver::class.java).apply {
-                action = ALARM_ACTION
+            if (cancelBase) {
+                val intent = Intent(this, AlarmReceiver::class.java).apply {
+                    action = ALARM_ACTION
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    alarmId,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
             }
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                alarmId,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            alarmManager.cancel(pendingIntent)
-            pendingIntent.cancel()
+            if (cancelSnooze) {
+                val snoozeIntent = Intent(this, AlarmReceiver::class.java).apply {
+                    action = ALARM_ACTION
+                }
+                val pendingSnoozeIntent = PendingIntent.getBroadcast(
+                    this,
+                    alarmId + SNOOZE_REQUEST_CODE_OFFSET,
+                    snoozeIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                alarmManager.cancel(pendingSnoozeIntent)
+                pendingSnoozeIntent.cancel()
+            }
 
             // Use the new centralized notification cancellation method
             cancelAllNotificationsForAlarm(alarmId)
+
+            val alarmScreenKey = "alarm_screen_shown_$alarmId"
+            getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(alarmScreenKey).apply()
 
             Log.d("MainActivity", "Alarm and all related notifications canceled successfully for alarmId: $alarmId")
         } catch (e: Exception) {
@@ -827,6 +1033,7 @@ class MainActivity : FlutterActivity() {
                         setAlarm(
                             timeInMillis = nextTime,
                             alarmId = alarm.id,
+                            requestCode = alarm.id,
                             title = alarm.title,
                             message = alarm.message,
                             screenRoute = "/alarm",
@@ -835,7 +1042,10 @@ class MainActivity : FlutterActivity() {
                             isWeekly = alarm.isWeekly,
                             isWeekend = alarm.isWeekend,
                             maxSnoozes = alarm.maxSnoozes,
-                            snoozeDurationMinutes = alarm.snoozeDurationMinutes
+                            snoozeDurationMinutes = alarm.snoozeDurationMinutes,
+                            hour = alarm.hour,
+                            minute = alarm.minute,
+                            isSnooze = false
                         )
                         Log.d("MainActivity", "Restored alarm: ${alarm.title} for ${Date(nextTime)}")
                     }
@@ -858,6 +1068,27 @@ class MainActivity : FlutterActivity() {
     private fun calculateNextAlarmTime(alarm: AlarmData): Long {
         val calendar = Calendar.getInstance()
         val now = Calendar.getInstance()
+
+        fun calendarDayToRepeatDay(dayOfWeek: Int): Int {
+            return when (dayOfWeek) {
+                Calendar.MONDAY -> 1
+                Calendar.TUESDAY -> 2
+                Calendar.WEDNESDAY -> 3
+                Calendar.THURSDAY -> 4
+                Calendar.FRIDAY -> 5
+                Calendar.SATURDAY -> 6
+                Calendar.SUNDAY -> 7
+                else -> 1
+            }
+        }
+
+        val effectiveRepeatDays = when {
+            alarm.repeatDays.isNotEmpty() -> alarm.repeatDays
+            alarm.isDaily -> listOf(1, 2, 3, 4, 5, 6, 7)
+            alarm.isWeekend -> listOf(6, 7)
+            alarm.isWeekly -> listOf(calendarDayToRepeatDay(now.get(Calendar.DAY_OF_WEEK)))
+            else -> emptyList()
+        }
         
         // SIEMPRE usar la fecha actual como base
         calendar.set(Calendar.YEAR, now.get(Calendar.YEAR))
@@ -870,41 +1101,8 @@ class MainActivity : FlutterActivity() {
         
         Log.d("MainActivity", "Calculating alarm time - Current: ${now.time}, Target hour: ${alarm.hour}:${alarm.minute}")
         
-        if (alarm.isDaily) {
-            // Para alarmas diarias
-            if (calendar.before(now) || calendar.equals(now)) {
-                calendar.add(Calendar.DAY_OF_MONTH, 1)
-                Log.d("MainActivity", "Daily alarm: time passed today, scheduling for tomorrow")
-            } else {
-                Log.d("MainActivity", "Daily alarm: scheduling for today")
-            }
-            return calendar.timeInMillis
-        }
-        
-        if (alarm.isWeekend) {
-            val currentDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
-            val isWeekend = currentDayOfWeek == Calendar.SATURDAY || currentDayOfWeek == Calendar.SUNDAY
-            
-            if (isWeekend && calendar.after(now)) {
-                // Es fin de semana y la hora aún no ha pasado
-                Log.d("MainActivity", "Weekend alarm: scheduling for today")
-                return calendar.timeInMillis
-            } else {
-                // Buscar el próximo fin de semana
-                while (true) {
-                    calendar.add(Calendar.DAY_OF_MONTH, 1)
-                    val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
-                    if (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY) {
-                        Log.d("MainActivity", "Weekend alarm: scheduling for next weekend")
-                        break
-                    }
-                }
-                return calendar.timeInMillis
-            }
-        }
-        
-        if (alarm.repeatDays.isNotEmpty()) {
-            val calendarDays = alarm.repeatDays.map { day ->
+        if (effectiveRepeatDays.isNotEmpty()) {
+            val calendarDays = effectiveRepeatDays.map { day ->
                 when (day) {
                     1 -> Calendar.MONDAY
                     2 -> Calendar.TUESDAY
@@ -949,6 +1147,51 @@ class MainActivity : FlutterActivity() {
         
         Log.d("MainActivity", "Final calculated time: ${calendar.time}")
         return calendar.timeInMillis
+    }
+
+    private fun pushAlarmEvent(type: String, alarmId: Int, newTimeInMillis: Long?) {
+        try {
+            val prefs = getSharedPreferences("alarm_events", Context.MODE_PRIVATE)
+            val current = prefs.getString("events", "[]") ?: "[]"
+            val array = JSONArray(current)
+            val obj = JSONObject()
+            obj.put("type", type)
+            obj.put("alarmId", alarmId)
+            obj.put("timestamp", System.currentTimeMillis())
+            if (newTimeInMillis != null) {
+                obj.put("newTimeInMillis", newTimeInMillis)
+            }
+            array.put(obj)
+            prefs.edit().putString("events", array.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error pushing alarm event", e)
+        }
+    }
+
+    private fun getAndClearAlarmEvents(): List<Map<String, Any>> {
+        val result = mutableListOf<Map<String, Any>>()
+        try {
+            val prefs = getSharedPreferences("alarm_events", Context.MODE_PRIVATE)
+            val current = prefs.getString("events", "[]") ?: "[]"
+            val array = JSONArray(current)
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val map = mutableMapOf<String, Any>()
+                val type = obj.optString("type", "")
+                val alarmId = obj.optInt("alarmId", -1)
+                if (type.isBlank() || alarmId == -1) continue
+                map["type"] = type
+                map["alarmId"] = alarmId
+                if (obj.has("newTimeInMillis")) {
+                    map["newTimeInMillis"] = obj.optLong("newTimeInMillis")
+                }
+                result.add(map)
+            }
+            prefs.edit().putString("events", "[]").apply()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error reading alarm events", e)
+        }
+        return result
     }
     
     private fun getSystemAlarmSounds(): List<Map<String, String>> {
@@ -1067,54 +1310,7 @@ class MainActivity : FlutterActivity() {
     // Volume control methods
     private fun startVolumeControl(maxVolumePercent: Int, rampUpDurationSeconds: Int) {
         try {
-            if (!isVolumeControlActive) {
-                originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-                isVolumeControlActive = true
-                Log.d("MainActivity", "Original volume saved: $originalVolume")
-            }
-            
-            // Almacenar el volumen máximo configurado para uso en reducción temporal
-            currentMaxVolumePercent = maxVolumePercent
-            
-            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            val targetVolume = (maxVolume * maxVolumePercent) / 100
-            
-            // Si hay reducción temporal activa, no iniciar el escalado
-            if (isTempVolumeReduced) {
-                Log.d("MainActivity", "Volume ramp-up skipped due to active temporary reduction")
-                return
-            }
-            
-            if (rampUpDurationSeconds > 0) {
-                // Gradual volume increase
-                val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-                val volumeDifference = targetVolume - currentVolume
-                val steps = rampUpDurationSeconds * 2 // 2 steps per second
-                val volumeStep = volumeDifference.toFloat() / steps
-                
-                volumeHandler = Handler(Looper.getMainLooper())
-                var currentStep = 0
-                
-                volumeRunnable = object : Runnable {
-                    override fun run() {
-                        if (currentStep < steps && isVolumeControlActive) {
-                            val newVolume = (currentVolume + (volumeStep * currentStep)).toInt()
-                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, newVolume, 0)
-                            currentStep++
-                            volumeHandler?.postDelayed(this, 500) // 500ms intervals
-                        } else {
-                            // Ensure final volume is set
-                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
-                        }
-                    }
-                }
-                volumeHandler?.post(volumeRunnable!!)
-            } else {
-                // Immediate volume set
-                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
-            }
-            
-            Log.d("MainActivity", "Volume control started: target=$targetVolume/$maxVolume")
+            AlarmVolumeController.ensureStarted(this, maxVolumePercent, rampUpDurationSeconds)
         } catch (e: Exception) {
             Log.e("MainActivity", "Error starting volume control", e)
         }
@@ -1122,18 +1318,7 @@ class MainActivity : FlutterActivity() {
     
     private fun stopVolumeControl() {
         try {
-            volumeHandler?.removeCallbacks(volumeRunnable!!)
-            volumeHandler = null
-            volumeRunnable = null
-            
-            // También cancelar cualquier reducción temporal activa
-            cancelTemporaryVolumeReduction()
-            
-            if (isVolumeControlActive) {
-                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
-                isVolumeControlActive = false
-                Log.d("MainActivity", "Volume restored to original: $originalVolume")
-            }
+            AlarmVolumeController.stop(this)
         } catch (e: Exception) {
             Log.e("MainActivity", "Error stopping volume control", e)
         }
@@ -1141,45 +1326,7 @@ class MainActivity : FlutterActivity() {
     
     private fun setTemporaryVolumeReduction(reductionPercent: Int, durationSeconds: Int) {
         try {
-            // Cancelar cualquier reducción temporal anterior
-            cancelTemporaryVolumeReduction()
-            
-            // PRIORIDAD: Cancelar cualquier escalado de volumen en progreso
-            volumeHandler?.removeCallbacks(volumeRunnable!!)
-            Log.d("MainActivity", "Volume ramp-up cancelled due to temporary reduction activation")
-            
-            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            // Set volume TO the reduction percentage, not reduce BY the percentage
-            val reducedVolume = (maxVolume * reductionPercent) / 100
-            
-            // Guardar el volumen antes de la reducción (o el volumen objetivo si estaba escalando)
-            volumeBeforeReduction = if (isVolumeControlActive) {
-                // Si el control de volumen está activo, usar el volumen objetivo configurado
-                (maxVolume * currentMaxVolumePercent) / 100
-            } else {
-                currentVolume
-            }
-            isTempVolumeReduced = true
-            
-            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, reducedVolume, 0)
-            Log.d("MainActivity", "Volume temporarily set to $reducedVolume ($reductionPercent% of max) from $currentVolume, will restore to $volumeBeforeReduction")
-            
-            // Programar la restauración del volumen
-            tempReductionHandler = Handler(Looper.getMainLooper())
-            tempReductionRunnable = Runnable {
-                try {
-                    if (isTempVolumeReduced) {
-                        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, volumeBeforeReduction, 0)
-                        Log.d("MainActivity", "Volume restored to $volumeBeforeReduction after temporary reduction")
-                        isTempVolumeReduced = false
-                    }
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "Error restoring volume after temporary reduction: ${e.message}")
-                }
-            }
-            tempReductionHandler?.postDelayed(tempReductionRunnable!!, (durationSeconds * 1000).toLong())
-            
+            AlarmVolumeController.setTemporaryReduction(this, reductionPercent, durationSeconds)
         } catch (e: Exception) {
             Log.e("MainActivity", "Error setting temporary volume reduction", e)
         }
@@ -1187,15 +1334,7 @@ class MainActivity : FlutterActivity() {
     
     private fun cancelTemporaryVolumeReduction() {
         try {
-            tempReductionHandler?.removeCallbacks(tempReductionRunnable!!)
-            tempReductionHandler = null
-            tempReductionRunnable = null
-            
-            if (isTempVolumeReduced && isVolumeControlActive) {
-                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, volumeBeforeReduction, 0)
-                Log.d("MainActivity", "Temporary volume reduction cancelled, volume restored to $volumeBeforeReduction")
-                isTempVolumeReduced = false
-            }
+            AlarmVolumeController.cancelTemporaryReduction(this)
         } catch (e: Exception) {
             Log.e("MainActivity", "Error cancelling temporary volume reduction", e)
         }
