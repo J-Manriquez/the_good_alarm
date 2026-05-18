@@ -1,0 +1,1144 @@
+================================================================================
+  THE GOOD ALARM - PLAN DE IMPLEMENTACIÓN: RECORDATORIOS DE MEDICAMENTOS
+  Fecha de análisis: 28/03/2026
+================================================================================
+REGLA A CUMPLIR EN LA IMPLEMENTACION: cada vez que termines una de las secciones de esta implementacion, se debe marcar como terminado o parcial antes del numero de la seccion, en el titulo de la seccion, por ejemplo:
+
+TERMINADO / PARCIAL 3.2 MODELO: lib/models/medication_models.dart  (NUEVO)
+
+--------------------------------------------------------------------------------
+1. EVALUACIÓN DE FACTIBILIDAD
+--------------------------------------------------------------------------------
+
+VEREDICTO: TOTALMENTE FACTIBLE
+Nivel de complejidad: MEDIO-ALTO
+Riesgo de ruptura con código existente: BAJO
+
+La aplicación ya tiene implementado un sistema de "Hábitos" que sigue un patrón
+arquitectónico prácticamente idéntico al que necesitan los recordatorios de
+medicamentos. Esto simplifica enormemente la implementación porque:
+
+  - El patrón de scheduling (AlarmManager en Android vía MethodChannel) ya existe.
+  - El patrón de pantalla de alerta (fullscreen intent + Flutter route) ya existe.
+  - El patrón de confirmación (snooze/done en HabitAlertScreen) ya existe.
+  - El patrón de repositorio Local (Hive) + Cloud (Firestore) ya existe.
+  - Las pantallas de edición reutilizan componentes UI establecidos.
+
+El único componente verdaderamente nuevo es el TTS (Text-to-Speech), para el cual
+existe el paquete `flutter_tts` estable y bien documentado para Android.
+
+--------------------------------------------------------------------------------
+2. ANÁLISIS DE LA ARQUITECTURA ACTUAL (BASE)
+--------------------------------------------------------------------------------
+
+2.1 CAPAS DEL SISTEMA
+  [Flutter/Dart]
+    - Modelos:    lib/models/habit_models.dart         → plantilla para MedicationModel
+    - Servicios:  lib/services/habit_*                 → plantilla para medication_*
+    - Scheduler:  lib/services/habit_scheduler.dart    → plantilla para medication_scheduler
+    - Pantallas:  lib/habit_alert_screen.dart          → plantilla para medication_alert_screen
+    - Listado:    lib/habits_screen.dart               → plantilla para medications_screen
+
+  [Android/Kotlin]
+    - Receiver:   HabitReceiver.kt                    → plantilla para MedicationReceiver.kt
+    - Main:       MainActivity.kt (setHabit, cancelHabit, showHabitScreen)
+    - Canal:      MethodChannel "com.andodevs.the_good_alarm/alarm"
+
+2.2 FLUJO DE DATOS (HÁBITOS, BASE DEL SISTEMA NUEVO)
+  [Usuario agenda → HabitScheduler.scheduleOccurrence()]
+    ↓ MethodChannel.invokeMethod("setHabit", {...})
+    ↓ MainActivity.setHabitOccurrence() → AlarmManager.setExactAndAllowWhileIdle()
+    ↓ [Llega la hora] → HabitReceiver.onReceive() → Notificación fullscreen
+    ↓ MainActivity.handleAlarmIntent() → invokeMethod("showHabitScreen", {...})
+    ↓ HomeShell escucha → Navigator.push(HabitAlertScreen)
+
+2.3 MAPA DE ARCHIVOS EXISTENTES (RELEVANTES)
+  lib/
+    models/habit_models.dart            (HabitModel, HabitCompletionModel)
+    services/habit_local_service.dart   (Hive: habits_box, habit_completions_box)
+    services/habit_firebase_service.dart(Firestore: usuarios/{uid}/habitos)
+    services/habit_repository.dart      (orquesta local + cloud)
+    services/habit_scheduler.dart       (MethodChannel scheduling)
+    habit_edit_screen.dart              (UI creación/edición)
+    habit_alert_screen.dart             (UI alerta a pantalla completa)
+    habits_screen.dart                  (listado + FAB)
+  android/app/src/main/kotlin/.../
+    HabitReceiver.kt                    (BroadcastReceiver)
+    MainActivity.kt                     (manejo de intents + MethodChannel)
+  android/app/src/main/AndroidManifest.xml
+
+--------------------------------------------------------------------------------
+3. COMPONENTES NUEVOS A CREAR
+--------------------------------------------------------------------------------
+
+TERMINADO 3.1 DEPENDENCIA EN pubspec.yaml
+  flutter_tts: ^4.2.0
+  
+  Justificación: Paquete estable y ampliamente usado para TTS en Flutter/Android.
+  Soporta español (es-ES, es-MX), control de velocidad, tono e idioma.
+  No requiere permisos adicionales en Android; usa el motor TTS del sistema.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.2 MODELO: lib/models/medication_models.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Clase: MedicationModel
+  Propósito: Almacena toda la información de un medicamento y su recordatorio.
+
+  Campos principales:
+    String id                         - UUID único del medicamento
+    String ownerUid                   - UID del usuario dueño
+    String medicationName             - Nombre del medicamento (ej: "Ibuprofeno")
+    String dosageAmount               - Cantidad (ej: "500")
+    String dosageUnit                 - Unidad (ej: "mg", "ml", "comprimido")
+    String medicationType             - Tipo (ej: "Pastilla", "Jarabe", "Inyección", "Parche")
+    String instructions               - Instrucciones (ej: "Tomar con abundante agua")
+    String prescribedBy               - Médico que lo recetó (opcional)
+    String purpose                    - Para qué es (ej: "Dolor de cabeza, fiebre")
+    String notes                      - Notas adicionales del usuario
+    String colorHex                   - Color identificador de tarjeta (para UI)
+    bool isActive                     - Si el recordatorio está activo
+    bool syncToCloud                  - Si sincroniza con Firestore
+    String repeatMode                 - "daily" | "customDays" | "once"
+    List<int> weekdays                - Días de la semana [1..7] si repeatMode=customDays
+    List<TimeOfDay> times             - Horarios del recordatorio (puede ser múltiple)
+    int confirmationDelayMinutes      - Minutos tras el alerta para preguntar si se tomó
+    bool enableTts                    - Si activa el audio TTS
+    String ttsLanguage                - Idioma TTS (ej: "es-ES")
+    String? nextScheduledAtLocalMs    - Próxima ocurrencia scheduled
+    DateTime? createdAt
+    DateTime? updatedAt
+    DateTime? deletedAt
+    int revision
+    Map<String,DateTime>? fieldUpdatedAt
+    Map<String,dynamic> extras
+
+  Clase: MedicationCompletionModel
+  Propósito: Registro de si el medicamento fue tomado en cada ocurrencia.
+
+  Campos:
+    String id                         - occurrenceKey
+    String ownerUid
+    String medicationId
+    DateTime scheduledAtLocal         - Cuándo se programó
+    DateTime? confirmedAtLocal        - Cuándo el usuario confirmó
+    String status                     - "taken" | "skipped" | "missed" | "pending"
+    String note                       - Nota opcional del usuario
+
+  Métodos en MedicationModel:
+    toJson() / fromJson()
+    copyWith()
+    isRepeating() → bool
+    buildTtsReminderText() → String:
+        "Es hora de tomar tu medicamento: [nombre]. 
+         Dosis: [amount] [unit]. [instructions]."
+    buildTtsConfirmationText() → String:
+        "¿Tomaste [nombre]? Por favor confirma si tomaste 
+         [amount] [unit] de [nombre]."
+
+--------------------------------------------------------------------------------
+TERMINADO 3.3 SERVICIO LOCAL: lib/services/medication_local_service.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: CRUD sobre Hive para medicamentos y sus completions.
+
+  Cajas Hive a registrar en main.dart:
+    'medications_box'
+    'medication_completions_box'
+    'medication_sync_box'
+
+  Métodos principales:
+    getAllMedications({bool includeDeleted})   → List<MedicationModel>
+    getMedication(String id)                  → MedicationModel?
+    upsertMedication(MedicationModel m)
+    markMedicationDeleted(String id)
+    getCompletionsForMedication(String medId, {limit, includeDeleted})
+    upsertCompletion(MedicationCompletionModel c)
+    getDirtyFields(String medId)              → Set<String>
+    markDirtyFields(String medId, Set<String> fields)
+    clearDirtyFields(String medId)
+    getLastPullTime()                         → DateTime?
+    setLastPullTime(DateTime t)
+
+  Lógica de sync conflict (igual que habits): campo-a-campo via fieldUpdatedAt.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.4 SERVICIO FIREBASE: lib/services/medication_firebase_service.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Colección Firestore: usuarios/{uid}/medicamentos
+  Colección completions: usuarios/{uid}/medication_completions
+
+  Métodos:
+    saveMedicationToCloud(MedicationModel, String userId)
+    updateMedicationToCloud(MedicationModel, String userId)
+    deleteMedicationFromCloud(String id, String userId)
+    getStream(String userId)         → Stream<QuerySnapshot>
+    getCompletionsStream(userId)     → Stream<QuerySnapshot>
+    pushDirtyFields(medication, Set<String> fields, userId)
+
+  Nota de seguridad: Usar reglas de Firestore para restringir lectura/escritura
+  solo al usuario autenticado (uid == request.auth.uid). Ya está implementado
+  en el sistema existente de hábitos/alarmas.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.5 REPOSITORIO: lib/services/medication_repository.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Orquesta MedicationLocalService + MedicationFirebaseService.
+  Sigue el mismo patrón que HabitRepository:
+
+  Métodos:
+    loadLocalMedications()           → List<MedicationModel>
+    loadLocalMedication(id)          → MedicationModel?
+    upsertMedication(med, cloudSyncEnabled, userId)
+    deleteMedication(med, cloudSyncEnabled, userId)
+    reconcile(userId)                → pull + push pending
+    startCloudSync(userId, onBatch)
+    stopAllCloudSync()
+    upsertCompletion(completion, cloudSyncEnabled, userId)
+    loadLocalCompletions(medId)      → List<MedicationCompletionModel>
+    pushPendingChanges(userId)
+
+--------------------------------------------------------------------------------
+TERMINADO 3.6 SCHEDULER: lib/services/medication_scheduler.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: Calcular próximas ocurrencias y dispatchar a Android vía MethodChannel.
+  Usa el mismo canal existente: "com.andodevs.the_good_alarm/alarm"
+
+  Métodos:
+    nextOccurrenceLocal(med, nowLocal) → DateTime?
+      - Misma lógica que HabitScheduler: itera días hacia adelante.
+    
+    occurrenceKeyFor(String medId, DateTime when) → String
+      - Formato: "med|{medId}|{yyyyMMdd}|{HHmm}"
+    
+    scheduleOccurrence(med, whenLocal)
+      - MethodChannel.invokeMethod("setMedication", {
+          "medicationId": med.id,
+          "occurrenceKey": key,
+          "timeInMillis": whenLocal.ms,
+          "title": med.medicationName,
+          "message": "Recordatorio de medicamento",
+          "medicationJson": jsonEncode(med.toJson()),
+          "confirmationDelayMinutes": med.confirmationDelayMinutes
+        })
+    
+    scheduleConfirmation(med, occurrenceKey, afterMinutes)
+      - MethodChannel.invokeMethod("setMedicationConfirmation", {
+          "medicationId": med.id,
+          "occurrenceKey": occurrenceKey,
+          "timeInMillis": (now + delay).ms,
+          "title": med.medicationName,
+          "medicationJson": jsonEncode(med.toJson())
+        })
+    
+    cancelOccurrence(occurrenceKey)
+      - MethodChannel.invokeMethod("cancelMedication", {"occurrenceKey": occurrenceKey})
+    
+    cancelConfirmation(occurrenceKey)
+      - MethodChannel.invokeMethod("cancelMedicationConfirmation", {"occurrenceKey": occurrenceKey})
+      - SOLO se usa desde MedicationConfirmScreen cuando el usuario ya respondió
+        en esa pantalla, para evitar que aparezca nuevamente. NO se llama desde
+        MedicationAlertScreen en ningún caso.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.7 PANTALLA: lib/screens/medications_screen.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: Lista de todos los medicamentos configurados.
+  Patrón: Idéntico a HabitsScreen.
+
+  UI:
+    - AppBar con título "Mis Medicamentos"
+    - Lista de tarjetas con:
+        * Nombre del medicamento (bold)
+        * Dosis (amount + unit)
+        * Tipo (ej: "Pastilla")
+        * Horarios programados
+        * Badge de estado (Activo / Inactivo)
+        * Color de tarjeta configurable (campo colorHex)
+    - FAB para agregar nuevo medicamento
+    - Swipe-to-delete con confirmación
+    - Toggle activo/inactivo en la tarjeta
+
+  Lógica:
+    - En initState: cargar desde repo local, reconciliar con cloud si hay sesión.
+    - Llamar _scheduleAll() para registrar/actualizar AlarmManager.
+    - Escuchar auth changes para cloud sync (igual que HabitsScreen).
+
+--------------------------------------------------------------------------------
+TERMINADO 3.8 PANTALLA: lib/screens/medication_edit_screen.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: Crear / editar un recordatorio de medicamento.
+  Patrón: Similar a HabitEditScreen pero con campos específicos.
+
+  Secciones de la pantalla (expandibles tipo Card):
+
+  SECCIÓN 1 - Datos del medicamento:
+    TextField: Nombre del medicamento* (required)
+    TextField: Dosis (cantidad numérica, ej: "500")
+    DropdownButtonFormField: Unidad:
+      Opciones: mg, g, ml, µg, UI, comprimido, cápsula, gota, parche, supositorio
+    DropdownButtonFormField: Tipo de medicamento:
+      Opciones: Pastilla/Comprimido, Cápsula, Jarabe/Solución, Inyección,
+                Inhalador, Parche, Colirio, Crema/Pomada, Supositorio, Otro
+    TextField: Instrucciones (multiline, ej: "Tomar con alimentos")
+    TextField: Recetado por (médico, opcional)
+    TextField: Para qué sirve / propósito (opcional)
+    TextField: Notas adicionales (opcional)
+    ColorPicker: Color de identificación de la tarjeta
+
+  SECCIÓN 2 - Horarios:
+    RepeatMode: Diario / Días específicos / Una vez
+    Si customDays: selector de días de semana (chips)
+    Horarios: lista de TimeOfDay con botón + para agregar múltiples horarios
+
+  SECCIÓN 3 - Confirmación:
+    Switch: ¿Requiere confirmación de toma?
+    Slider/NumberInput: Tiempo de espera para preguntar (5-60 min, default 15)
+
+  SECCIÓN 4 - Audio (TTS):
+    Switch: ¿Activar lectura en voz alta?
+    DropdownButtonFormField: Idioma TTS (Español México / Español España)
+    TextArea READ-ONLY: Preview del texto que se leerá
+      (generado desde buildTtsReminderText())
+    Botón "Probar audio" → reproduce el TTS preview
+
+  SECCIÓN 5 - Sincronización:
+    Switch: Sincronizar con la nube (solo visible si cloudSync está habilitado)
+
+  Botón GUARDAR: valida campos requeridos y navega de vuelta con MedicationModel.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.9 PANTALLA: lib/screens/medication_alert_screen.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: Mostrada a pantalla completa cuando llega la hora del medicamento.
+  Patrón: Similar a HabitAlertScreen + AlarmScreen.
+
+  Inicialización:
+    - Recibe { medicationId, occurrenceKey, scheduledAtLocalMillis }
+    - Carga el MedicationModel desde repo local.
+    - Si no existe, muestra pantalla de error con botón "Cerrar".
+
+  Layout visual (tarjeta central con color del medicamento):
+    ┌──────────────────────────────────┐
+    │  💊  [TIPO] [NOMBRE]             │
+    │  ─────────────────────────────── │
+    │  Dosis: [AMOUNT] [UNIT]          │
+    │  Instrucciones: [INSTRUCCIONES]  │
+    │  Recetado por: [DOCTOR]          │
+    │  Para: [PROPÓSITO]               │
+    │  Notas: [NOTAS]                  │
+    │  ─────────────────────────────── │
+    │  ⏰ Hora: [HORA PROGRAMADA]      │
+    └──────────────────────────────────┘
+    
+    Botones:
+      [✓ Tomé el medicamento]  →  _markTaken()
+      [⏰ Recordar en X min]   →  _snooze()
+      [✗ Omitir]               →  _skip()
+
+  Layout actualizado:
+    Row superior: [hora grande] + [botón mute 🔇 en esquina derecha] (solo si enableTts)
+    El botón mute cambia icono entre volume_up / volume_off y detiene el TTS al tocarse.
+
+  Lógica TTS (si enableTts == true):
+    - En initState, después de cargar el modelo:
+      1. Inicializar FlutterTts.
+      2. Override de volumen del sistema vía MethodChannel 'setMusicStreamVolume'
+         con el valor med.ttsVolume (0–100%). Guarda el volumen previo.
+      3. Configurar idioma y velocidad (setSpeechRate 0.5).
+      4. Registrar setCompletionHandler para repetir hasta 3 veces en total.
+      5. Reproducir med.buildTtsReminderText(doseIndex, lastDoseStatus, lastDoseAt).
+      6. Al cerrar pantalla o tocar mute: stop() + restaurar volumen guardado.
+
+  Cálculo de doseIndex en _init():
+    - Se ordenan med.times ascendentemente.
+    - Se busca el índice cuya hora/minuto coincide con _scheduledAtLocal.
+    - Se pasa como argumento a buildTtsReminderText().
+
+  Carga de historial de última dosis en _init():
+    - _repo.loadLocalCompletionsForMedication(med.id, limit: 20)
+    - Se filtra: status != 'pending' && id != _occurrenceKey actual.
+    - Se ordena descendente por scheduledAtLocal; se toma el primero.
+    - Se pasa lastDoseStatus y lastDoseAt a buildTtsReminderText().
+
+  _markTaken():
+    - Registrar MedicationCompletionModel con status="taken".
+    - La alarma de confirmación NO se cancela; se enviará igualmente en N minutos
+      para reforzar y verificar que el medicamento fue tomado.
+    - Programar siguiente ocurrencia.
+    - Limpiar screen flag vía MethodChannel.
+    - Navigator.pop().
+
+  _skip():
+    - Registrar MedicationCompletionModel con status="skipped".
+    - La alarma de confirmación NO se cancela; llegará de igual forma en N minutos.
+    - Programar siguiente ocurrencia.
+    - Navigator.pop().
+
+  _snooze():
+    - NO registrar completion.
+    - Reprogramar ocurrencia en N minutos (sin afectar el ciclo normal).
+    - La alarma de confirmación NO se cancela (sigue programada).
+    - Navigator.pop().
+
+  Programación de confirmación (si requireConfirmation == true):
+    - Cuando la pantalla se MUESTRA (en initState, tras cargar el modelo):
+      medicationScheduler.scheduleConfirmation(med, occurrenceKey, med.confirmationDelayMinutes)
+    - La confirmación se programa SIEMPRE al mostrar la alerta, independientemente
+      de que el usuario responda o no responda en la pantalla inicial.
+    - Ninguna acción del usuario en MedicationAlertScreen cancela la confirmación.
+    - La confirmación es un refuerzo que siempre llega: si el usuario ya confirmó
+      en la primera pantalla, la pantalla de confirmación lo reconocerá (ver 3.10).
+
+--------------------------------------------------------------------------------
+TERMINADO 3.10 PANTALLA: lib/screens/medication_confirm_screen.dart  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Propósito: Pantalla que aparece N minutos después de la alerta original para
+  preguntar si el medicamento fue tomado.
+  
+  Recibe: { medicationId, occurrenceKey, scheduledAtLocalMillis }
+
+  Layout:
+    ┌─────────────────────────────────────┐
+    │  🔔 Confirmación de medicamento     │
+    │  ─────────────────────────────────  │
+    │  ¿Tomaste [NOMBRE]?                 │
+    │  [AMOUNT] [UNIT] · [TIPO]           │
+    │  ─────────────────────────────────  │
+    │  Hora programada: [HORA]            │
+    └─────────────────────────────────────┘
+
+    Botones:
+      [✓ Sí, lo tomé]    →  status="taken"
+      [✗ No lo tomé]     →  status="missed"
+      [⏰ Preguntar más tarde (X min)] → reprogramar confirmación
+
+  Layout actualizado:
+    Row superior: [ícono + hora centrados] + [botón mute 🔇 en esquina derecha] (solo si enableTts)
+    El botón mute silencia el TTS sin cerrar la pantalla.
+
+  Lógica TTS:
+    - En initState: override de volumen (setMusicStreamVolume), reproducir texto correspondiente.
+    - setCompletionHandler registrado para repetir hasta 3 veces en total.
+    - Al tocar mute: stop() + restaurar volumen, _ttsEnabled=false, icono cambia a volume_off.
+
+  Lógica confirmación:
+    - Al cargar: verificar si ya existe un MedicationCompletionModel para
+      este occurrenceKey con status="taken" (el usuario ya confirmó en la
+      primera pantalla). En ese caso mostrar un mensaje de reconocimiento:
+      "Ya confirmaste que tomaste [nombre] a las [hora]. ¿Es correcto?"
+      con botones [Sí, correcto] y [No, no lo tomé].
+    - Si no hay completion previa: mostrar la pantalla normal de confirmación.
+    - "Sí lo tomé" / "Sí, correcto": upsert completion con status="taken",
+      confirmedAtLocal=DateTime.now(), cerrar pantalla.
+    - "No lo tomé" / "No, no lo tomé": upsert completion con status="missed",
+      cerrar pantalla.
+    - "Preguntar más tarde": reprogramar setMedicationConfirmation en
+      min(10, confirmationDelayMinutes/2) minutos adicionales.
+      (Opción eliminada de la UI; los botones actuales son solo ‘Sí’ y ‘No’)
+
+--------------------------------------------------------------------------------
+TERMINADO 3.11 ANDROID: MedicationReceiver.kt  (NUEVO)
+--------------------------------------------------------------------------------
+
+  Archivo: android/app/src/main/kotlin/com/andodevs/the_good_alarm/MedicationReceiver.kt
+  
+  Basado en: HabitReceiver.kt con modificaciones para dos acciones.
+
+  Actions:
+    MEDICATION_ACTION = "com.andodevs.the_good_alarm.MEDICATION_TRIGGERED"
+    MEDICATION_CONFIRM_ACTION = "com.andodevs.the_good_alarm.MEDICATION_CONFIRMATION"
+
+  onReceive():
+    Caso MEDICATION_TRIGGERED:
+      - Extraer: medicationId, occurrenceKey, title, scheduledAtLocalMillis, medicationJson
+      - Crear notificación fullscreen (PRIORITY_HIGH, category REMINDER)
+      - Intent a MainActivity con screenRoute="/medication"
+      - putExtra("autoShowAlarm", true)
+      - putExtra("medicationId", medicationId)
+      - putExtra("occurrenceKey", occurrenceKey)
+      - putExtra("scheduledAtLocalMillis", scheduledAtLocalMillis)
+      - putExtra("medicationJson", medicationJson) [datos completos, por si Hive no está]
+
+    Caso MEDICATION_CONFIRMATION:
+      - Extraer: medicationId, occurrenceKey, title, scheduledAtLocalMillis
+      - Crear notificación fullscreen (PRIORITY_HIGH)
+      - Intent a MainActivity con screenRoute="/medication_confirm"
+      - putExtra("autoShowAlarm", true)
+      - putExtra("medicationId", medicationId)
+      - putExtra("occurrenceKey", occurrenceKey)
+      - putExtra("scheduledAtLocalMillis", scheduledAtLocalMillis)
+
+  Canal de notificaciones: "medication_notification_channel"
+    - Nombre: "Medicamentos"
+    - Descripción: "Recordatorios de medicamentos"
+    - Importance: HIGH
+    - Sin sonido propio (el sonido lo maneja Flutter TTS)
+
+  stableNotificationId(): misma lógica que HabitReceiver (hashCode abs mod MAX_INT)
+
+--------------------------------------------------------------------------------
+TERMINADO 3.12 ANDROID: Actualizaciones a MainActivity.kt  (MODIFICACIÓN)
+--------------------------------------------------------------------------------
+
+  Se agregan los siguientes casos en el bloque `when (call.method)` del MethodChannel:
+
+  "setMedication":
+    - Recibe: medicationId (String), occurrenceKey (String), timeInMillis (Long),
+              title (String), message (String), medicationJson (String),
+              confirmationDelayMinutes (Int)
+    - Verifica permiso de alarmas exactas (igual que setHabit)
+    - Crea PendingIntent con MedicationReceiver y MEDICATION_ACTION
+    - alarmManager.setExactAndAllowWhileIdle()
+    - Guarda extras en SharedPreferences (medication_prefs) con clave occurrenceKey:
+      medicationJson + confirmationDelayMinutes
+    - result.success(true)
+
+  "cancelMedication":
+    - Recibe: occurrenceKey (String)
+    - Calcula PendingIntent y cancela en AlarmManager
+    - result.success(true)
+
+  "setMedicationConfirmation":
+    - Recibe: medicationId (String), occurrenceKey (String), timeInMillis (Long),
+              title (String), medicationJson (String)
+    - Crea PendingIntent con MedicationReceiver y MEDICATION_CONFIRM_ACTION
+    - requestCode: stableId(occurrenceKey) + CONFIRMATION_OFFSET (2_000_000)
+    - alarmManager.setExactAndAllowWhileIdle()
+    - result.success(true)
+
+  "cancelMedicationConfirmation":
+    - Recibe: occurrenceKey (String)
+    - Cancela PendingIntent de confirmación
+    - SOLO se invoca desde MedicationConfirmScreen tras la respuesta final del
+      usuario ("Sí" o "No"), para no volver a preguntar. Nunca se invoca desde
+      MedicationAlertScreen.
+    - result.success(true)
+
+  "clearMedicationScreenFlag":
+    - Recibe: occurrenceKey (String)
+    - Elimina de SharedPreferences la clave "medication_screen_shown_{occurrenceKey}"
+    - result.success(true)
+
+  En handleAlarmIntent(), en el bloque `else`:
+    Caso screenRoute == "/medication" && autoShow:
+      - Verificar flag "medication_screen_shown_{occurrenceKey}"
+      - Si no mostrado: setear window flags, marcar como mostrado, invokeMethod(
+          "showMedicationScreen", {
+            "medicationId": medicationId,
+            "occurrenceKey": occurrenceKey,
+            "scheduledAtLocalMillis": scheduledAtLocalMillis
+          })
+    
+    Caso screenRoute == "/medication_confirm" && autoShow:
+      - Verificar flag "medication_confirm_screen_shown_{occurrenceKey}"
+      - Si no mostrado: invokeMethod("showMedicationConfirmScreen", {
+            "medicationId": medicationId,
+            "occurrenceKey": occurrenceKey,
+            "scheduledAtLocalMillis": scheduledAtLocalMillis
+          })
+
+  Métodos auxiliares nuevos en MainActivity:
+    setMedicationOccurrence(timeInMillis, medicationId, occurrenceKey, title, 
+                            message, medicationJson)
+    setMedicationConfirmationOccurrence(timeInMillis, medicationId, occurrenceKey, 
+                                        title, medicationJson)
+    cancelMedicationOccurrence(occurrenceKey)
+    cancelMedicationConfirmationOccurrence(occurrenceKey)
+    medicationNotificationId(occurrenceKey): Int (abs hashCode mod MAX_INT)
+    medicationConfirmNotificationId(occurrenceKey): Int (+ CONFIRMATION_OFFSET)
+
+--------------------------------------------------------------------------------
+TERMINADO 3.13 ANDROID: AndroidManifest.xml  (MODIFICACIÓN)
+--------------------------------------------------------------------------------
+
+  Agregar receiver de medicamentos:
+  
+    <receiver
+        android:name=".MedicationReceiver"
+        android:enabled="true"
+        android:exported="false">
+        <intent-filter>
+            <action android:name="com.andodevs.the_good_alarm.MEDICATION_TRIGGERED" />
+            <action android:name="com.andodevs.the_good_alarm.MEDICATION_CONFIRMATION" />
+        </intent-filter>
+    </receiver>
+
+  No se necesitan permisos nuevos: todos los permisos requeridos ya están en el
+  manifiesto (SCHEDULE_EXACT_ALARM, POST_NOTIFICATIONS, WAKE_LOCK, 
+  USE_FULL_SCREEN_INTENT, SYSTEM_ALERT_WINDOW, etc.).
+
+--------------------------------------------------------------------------------
+TERMINADO 3.14 DART: main.dart  (MODIFICACIÓN)
+--------------------------------------------------------------------------------
+
+  a) Hive boxes a agregar en main():
+    await Hive.openBox('medications_box');
+    await Hive.openBox('medication_completions_box');
+    await Hive.openBox('medication_sync_box');
+
+  b) Rutas a agregar en MaterialApp.routes:
+    '/medication': (context) → MedicationAlertScreen(arguments: ...)
+    '/medication_confirm': (context) → MedicationConfirmScreen(arguments: ...)
+
+  c) Imports necesarios:
+    import 'screens/medication_alert_screen.dart';
+    import 'screens/medication_confirm_screen.dart';
+
+--------------------------------------------------------------------------------
+TERMINADO 3.15 DART: home_page.dart (HomeShell)  (MODIFICACIÓN)
+--------------------------------------------------------------------------------
+
+  Similar al manejo de showHabitScreen, agregar:
+
+  a) Propiedades:
+    final MedicationRepository _medicationRepository = MedicationRepository();
+    final MedicationScheduler _medicationScheduler = MedicationScheduler();
+
+  b) En _startBackground() o equivalente:
+    - Suscribirse a auth changes de medicamentos.
+    - Llamar _scheduleAllMedications().
+
+  c) En el listener del MethodChannel (donde se procesa "showHabitScreen"):
+    Caso "showMedicationScreen":
+      - Extraer medicationId, occurrenceKey, scheduledAtLocalMillis
+      - Limpiar pending_medication_screen de prefs nativas (invokeMethod 'getPendingMedicationScreen')
+      - Navigator.push(MedicationAlertScreen(...))
+    
+    Caso "showMedicationConfirmScreen":
+      - Extraer medicationId, occurrenceKey, scheduledAtLocalMillis
+      - Limpiar pending_medication_screen de prefs nativas
+      - Navigator.push(MedicationConfirmScreen(...))
+
+  f) _checkPendingMedicationScreen() — nuevo método para cold start:
+    - Llamado desde addPostFrameCallback en initState (después de que el frame está listo).
+    - invokeMethod('getPendingMedicationScreen') → lee y borra atómicamente alarm_prefs['pending_medication_screen'].
+    - Valida que timestamp tenga menos de 1 hora (descarta datos obsoletos).
+    - Si valid: navega a MedicationAlertScreen o MedicationConfirmScreen según screenRoute/isConfirmation.
+    - Garantiza que si el MethodChannel.invokeMethod llegó antes de que Flutter estuviera listo
+      (cold start), la pantalla igual se abre al arrancar la app.
+
+  d) Nuevo tab en navigation bar (o submódulo dentro de Hábitos):
+    - Opción A: Agregar tab "💊" dedicado a medicamentos en la barra inferior.
+    - Opción B: Agregar como subsección dentro del tab de Hábitos.
+    - RECOMENDACIÓN: Opción A para mayor visibilidad.
+
+  e) _scheduleAllMedications():
+    - Carga medicamentos activos desde repo local.
+    - Para cada uno, calcula nextOccurrenceLocal().
+    - Compara con med.nextScheduledAtLocal; si difiere, upsert y reschedule.
+
+--------------------------------------------------------------------------------
+3.16 DART: pubspec.yaml  (MODIFICACIÓN)
+--------------------------------------------------------------------------------
+
+  Agregar en dependencies:
+    flutter_tts: ^4.2.0
+
+  Nota: flutter_tts requiere minSdkVersion 21 en Android, lo cual ya está
+  configurado en el proyecto (ver flutter_launcher_icons config: min_sdk_android: 21).
+
+  flutter_tts requiere minSdkVersion 24 y compileSdk 36 en Android.
+  Se actualizó android/app/build.gradle.kts:
+    minSdk = 24
+    compileSdk = 36
+
+--------------------------------------------------------------------------------
+TERMINADO 3.17 MEJORA: fullscreen intent directo (sin requerir toque en notificación)
+--------------------------------------------------------------------------------
+
+  Problema detectado: Al dispararse la alarma del medicamento, Android muestra una
+  notificación en la barra de estado. El usuario debe tocarla para ver la pantalla.
+  El comportamiento correcto es que la pantalla aparezca inmediatamente, igual que
+  una alarma normal.
+
+  Causa raíz: La notificación fullscreen en MedicationReceiver.kt no tenía
+  configurados correctamente los flags de ventana ni el intent flags para forzar
+  apertura inmediata de la actividad.
+
+  Solución implementada en MedicationReceiver.kt:
+    - FLAG_SHOW_WHEN_LOCKED + FLAG_TURN_SCREEN_ON en el Intent a MainActivity
+    - setFullScreenIntent(pendingIntent, true) en NotificationCompat.Builder
+    - FLAG_IMMUTABLE en PendingIntent
+    - Prioridad MAX en notificación (PRIORITY_MAX, no solo HIGH)
+    - Categoría CATEGORY_ALARM
+
+  Solución implementada en MainActivity.kt:
+    - En handleAlarmIntent() para "/medication" y "/medication_confirm":
+      window.addFlags(
+        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+      )
+    - Aplica tanto para MEDICATION_TRIGGERED como para MEDICATION_CONFIRMATION.
+
+  Solución complementaria para cold start (app completamente cerrada):
+    - En handleAlarmIntent(), al detectar un intent de medicamento válido,
+      se guarda un JSON en alarm_prefs["pending_medication_screen"] con todos
+      los datos necesarios (medicationId, occurrenceKey, scheduledAtLocalMillis,
+      title, dosageAmount, dosageUnit, isConfirmation, screenRoute, timestamp).
+    - El MethodChannel.invokeMethod sigue ejecutándose inmediatamente (funciona
+      para hot/warm start). El JSON en prefs sirve de fallback para cold start.
+    - Nuevo caso MethodChannel 'getPendingMedicationScreen': lee y borra el JSON
+      atómicamente desde alarm_prefs. Usado por Flutter en initState para consumir
+      el pending. Si el canal ya invocó showMedicationScreen antes de que Flutter
+      leyera el pending, Flutter lo descarta al limpiar el mismo pending en ambos
+      caminos (el handler del MethodChannel también llama getPendingMedicationScreen).
+
+--------------------------------------------------------------------------------
+TERMINADO 3.18 MEJORA: control de volumen con prioridad sobre sistema
+--------------------------------------------------------------------------------
+
+  Requerimiento: El usuario debe poder configurar el volumen del recordatorio.
+  Este volumen debe prevalecer por sobre la configuración de volumen del sistema.
+  Ejemplo: Si el usuario configura volumen máximo en el recordatorio pero el
+  celular tiene el volumen bajo, el recordatorio debe sonar al máximo de todos
+  modos.
+
+  Cambios en MedicationModel:
+    Nuevo campo: int ttsVolume  (0–100, default 80)
+    Representa el porcentaje del volumen máximo de STREAM_MUSIC.
+
+  Implementación en MedicationAlertScreen y MedicationConfirmScreen:
+    En _initTts() antes de speak():
+      1. Obtener AudioManager vía MethodChannel o SystemChannels
+      2. Guardar volumen actual del stream STREAM_MUSIC:
+         _savedVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+      3. Calcular volumen objetivo:
+         int maxVol = audioManager.getStreamMaxVolume(STREAM_MUSIC)
+         int targetVol = (maxVol * med.ttsVolume / 100).round()
+      4. Setear volumen: audioManager.setStreamVolume(STREAM_MUSIC, targetVol, 0)
+      5. Reproducir TTS
+      6. En dispose() / al cerrar pantalla: restaurar _savedVolume
+
+    Implementación vía MethodChannel case 'setMusicStreamVolume':
+      - Recibe: volumePercent (int 0-100)
+      - Calcula y setea AudioManager.STREAM_MUSIC
+      - Retorna volumen previo (int) para restaurar después
+    
+    Implementación vía 'restoreMusicStreamVolume':
+      - Recibe: savedVolume (int)
+      - Restaura AudioManager.STREAM_MUSIC al valor guardado
+
+  UI en MedicationEditScreen:
+    Sección 4 (Audio TTS) agrega:
+      Slider: Volumen del recordatorio (0–100%, step 5%, default 80%)
+      Label: "Este volumen prevalece sobre la configuración del sistema"
+
+--------------------------------------------------------------------------------
+TERMINADO 3.19 MEJORA: botones en Column con ancho completo
+--------------------------------------------------------------------------------
+
+  Problema: En MedicationAlertScreen y MedicationConfirmScreen los botones
+  estaban dispuestos en una Row, comprimiendo su texto en pantallas pequeñas
+  y dificultando la interacción táctil.
+
+  Solución:
+    - Reemplazar Row de botones por Column.
+    - Cada botón usa SizedBox(width: double.infinity) para ocupar todo el ancho.
+    - Tipo de botón: ElevatedButton con alto de al menos 52px (padding vertical 14).
+    - Orden vertical en MedicationAlertScreen:
+        1. [✓ Tomé el medicamento]      (color: verde)
+        2. [⏰ Recordar en X min]        (color: naranja/amber)
+        3. [✗ Omitir]                   (color: gris/rojo suave)
+    - Orden vertical en MedicationConfirmScreen:
+        Caso sin toma previa:
+          1. [✓ Sí, lo tomé]             (color: verde)
+          2. [✗ No lo tomé]              (color: rojo)
+        Caso con toma previa reconocida:
+          1. [✓ Sí, es correcto]         (color: verde)
+          2. [✗ No, no lo tomé]          (color: rojo)
+
+--------------------------------------------------------------------------------
+TERMINADO 3.20 MEJORA: TTS con índice de dosis del día
+--------------------------------------------------------------------------------
+
+  Requerimiento: Si el medicamento tiene múltiples horarios en el día (más de
+  una entrada en med.times), el TTS debe indicar cuál dosis es (primera,
+  segunda, tercera...).
+
+  Implementación en buildTtsReminderText(doseIndex):
+    - Si med.times.length > 1:
+        ordinals = ['primera','segunda','tercera','cuarta','quinta','sexta','séptima','octava']
+        Antepone: "Esta es la [ordinal] dosis del día. "
+    - Si solo hay una dosis, no agrega ese prefijo.
+
+  Cálculo de doseIndex en _MedicationAlertScreenState._init():
+    - Se ordenan med.times (hora, minuto) ascendentemente.
+    - Se busca el índice cuyo valor coincida con la hora/minuto de _scheduledAtLocal.
+    - El índice encontrado se almacena en _doseIndex (default 0).
+
+--------------------------------------------------------------------------------
+TERMINADO 3.21 MEJORA: TTS con historial de la última dosis
+--------------------------------------------------------------------------------
+
+  Requerimiento: El TTS del recordatorio debe informar el estado de la última
+  dosis tomada u omitida.
+
+  Implementación en _MedicationAlertScreenState._init():
+    - _repo.loadLocalCompletionsForMedication(med.id, limit: 20)
+    - Filtra: status != 'pending' y id != _occurrenceKey actual.
+    - Ordena descendente por scheduledAtLocal; toma el primero.
+    - Almacena: _lastDoseStatus (String?) y _lastDoseAt (DateTime?).
+
+  Implementación en buildTtsReminderText(lastDoseStatus, lastDoseAt):
+    - Si lastDoseStatus == 'taken': "La última dosis fue tomada correctamente"
+    - Si lastDoseStatus == 'skipped': "La última dosis fue omitida"
+    - Si lastDoseStatus == 'missed': "La última dosis no fue tomada"
+    - Si diff < 24h: "hace N horas"; si >= 24h: "ayer"
+    - Cierra con punto.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.22 MEJORA: TTS se repite automáticamente 3 veces
+--------------------------------------------------------------------------------
+
+  Requerimiento: El sonido del recordatorio debe repetirse al menos 3 veces
+  de forma automática sin interacción del usuario.
+
+  Implementación en MedicationAlertScreen y MedicationConfirmScreen:
+    - Variables de estado: int _ttsRepeatCount = 0; bool _ttsEnabled = true.
+    - Al llamar _speakReminder() / _speakConfirmation():
+        flutterTts.setCompletionHandler(() {
+          if (_ttsRepeatCount < 2 && _ttsEnabled && mounted) {
+            _ttsRepeatCount++;
+            _tts.speak(text);
+          }
+        });
+    - Resultado: el texto se reproduce en total 3 veces (1 inicial + 2 por handler).
+    - Si el usuario toca Mute antes de que finalicen las 3 repeticiones, el handler
+      verifica _ttsEnabled == false y no sigue.
+
+--------------------------------------------------------------------------------
+TERMINADO 3.23 MEJORA: botón mute en esquina superior derecha de la card
+--------------------------------------------------------------------------------
+
+  Requerimiento: La pantalla debe incluir un botón para silenciar el TTS,
+  posicionado en la esquina superior derecha de la tarjeta sobre la hora.
+
+  Implementación en MedicationAlertScreen:
+    - La fila de hora pasa a ser un Row:
+        [Spacer de 40px si enableTts] + [hora centrada (Expanded)] + [IconButton si enableTts]
+    - IconButton: Icons.volume_up (activo) / Icons.volume_off (silenciado).
+    - onPressed: setState(_ttsEnabled=false) + _stopTts().
+    - _ttsEnabled=false evita que setCompletionHandler reactive el TTS.
+
+  Implementación en MedicationConfirmScreen:
+    - El bloque de ícono+hora pasa a ser un Row:
+        [Spacer de 40px si enableTts] + [Column(ícono+hora) centrado (Expanded)] + [IconButton si enableTts]
+    - Misma lógica de mute.
+
+--------------------------------------------------------------------------------
+4. FLUJO COMPLETO DE LA FUNCIONALIDAD
+--------------------------------------------------------------------------------
+
+4.1 FLUJO: CREACIÓN DE RECORDATORIO
+  Usuario → MedicationsScreen → FAB
+  → MedicationEditScreen (rellena datos, configura horarios, activa TTS)
+  → [GUARDAR] → MedicationRepository.upsertMedication()
+                  → MedicationLocalService (Hive)
+                  → Si cloudSync: MedicationFirebaseService (Firestore)
+  → MedicationScheduler.scheduleOccurrence()
+                  → MethodChannel "setMedication"
+                  → Android AlarmManager.setExactAndAllowWhileIdle()
+  → Regresa a MedicationsScreen con nueva tarjeta visible
+
+4.2 FLUJO: DISPARO DEL RECORDATORIO
+  [Llega la hora]
+  → Android AlarmManager dispara BroadcastIntent
+  → MedicationReceiver.onReceive(MEDICATION_TRIGGERED)
+  → Crea notificación fullscreen → Abre MainActivity
+  → handleAlarmIntent() detecta screenRoute="/medication"
+  → invokeMethod("showMedicationScreen", {...})
+  → HomeShell escucha → Navigator.push(MedicationAlertScreen)
+  → MedicationAlertScreen.initState():
+      * Carga MedicationModel
+      * Si enableTts: FlutterTts.speak(med.buildTtsReminderText())
+        → "Es hora de tomar tu medicamento: Ibuprofeno. 
+           Dosis: 500 mg. Tomar con abundante agua."
+      * Si requireConfirmation: MedicationScheduler.scheduleConfirmation()
+        → MethodChannel "setMedicationConfirmation"
+        → AlarmManager programa MEDICATION_CONFIRMATION en N minutos
+  → Pantalla muestra toda la info del medicamento en tarjeta colorida
+
+4.3 FLUJO: CONFIRMACIÓN (siempre se envía, haya o no respondido el usuario)
+  [N minutos después, siempre]
+  → AlarmManager dispara MEDICATION_CONFIRMATION
+  → MedicationReceiver.onReceive(MEDICATION_CONFIRMATION)
+  → Crea notificación fullscreen → Abre MainActivity
+  → handleAlarmIntent() detecta screenRoute="/medication_confirm"
+  → invokeMethod("showMedicationConfirmScreen", {...})
+  → HomeShell → Navigator.push(MedicationConfirmScreen)
+  → MedicationConfirmScreen.initState():
+      * Verifica si existe completion previa para este occurrenceKey.
+      * Si existe con status="taken":
+          FlutterTts.speak("Ya confirmaste que tomaste [nombre]. ¿Es correcto?")
+          Muestra mensaje de reconocimiento + botones [Sí, correcto] / [No, no lo tomé]
+      * Si NO existe completion previa:
+          FlutterTts.speak(med.buildTtsConfirmationText())
+          → "¿Tomaste el Ibuprofeno? Por favor confirma si tomaste
+             500 mg de Ibuprofeno."
+  → Usuario toca "Sí" / "Sí, correcto":
+      * Upsert MedicationCompletionModel status="taken", confirmedAtLocal=now
+      * Navigator.pop()
+      * Programar siguiente ocurrencia del recordatorio
+  → Usuario toca "No" / "No, no lo tomé":
+      * Upsert MedicationCompletionModel status="missed"
+      * Navigator.pop()
+      * Programar siguiente ocurrencia del recordatorio
+
+4.4 FLUJO: USUARIO RESPONDE EN LA ALERTA ORIGINAL (cualquier acción)
+  → Usuario toca cualquier botón en MedicationAlertScreen
+  → Se registra o no la completion inicial (según botón)
+  → La alarma de confirmación PERMANECE programada en todos los casos
+  → N minutos después, MedicationConfirmScreen llegará de igual forma
+  → Si el usuario ya confirmó en la alerta original, la pantalla de
+    confirmación lo reconocerá y adaptará su mensaje y TTS.
+
+--------------------------------------------------------------------------------
+5. ESPECIFICACIONES TTS
+--------------------------------------------------------------------------------
+
+5.1 TEXTOS GENERADOS
+  Para la alerta inicial (buildTtsReminderText):
+  
+    Medicamento simple (1 dosis):
+      "Es hora de tomar tu medicamento. [Nombre]: [amount] [unit]. [instrucciones]."
+    
+    Con múltiples horarios en el día:
+      Usa el mismo texto (cada ocurrencia se dispara independientemente)
+    
+    Con notas:
+      "Es hora de tomar tu medicamento. [nombre]: [amount] [unit]. [instrucciones]. 
+       Nota: [notes]."
+
+  Para la confirmación (buildTtsConfirmationText):
+    "¿Ya tomaste [nombre]? Recuerda que debes tomar [amount] [unit]. 
+     Por favor confirma."
+
+5.2 CONFIGURACIÓN FLUTTER_TTS
+  await flutterTts.setLanguage("es-MX");   // o "es-ES" per preferencia
+  await flutterTts.setSpeechRate(0.45);    // un poco más lento que default (0.5)
+  await flutterTts.setVolume(1.0);
+  await flutterTts.setPitch(1.0);
+
+  Manejo de errores: Si el motor TTS no está disponible, la pantalla debe
+  mostrar igualmente la información visual. Usar try/catch en todas las
+  llamadas TTS.
+
+  Advertencia: El TTS usa el STREAM de voz (STREAM_MUSIC o STREAM_NOTIFICATION),
+  NO el STREAM_ALARM. Esto es importante porque el volumen de alarma puede ser
+  diferente al de multimedia. Verificar que el volumen medio del sistema sea 
+  audible al momento del recordatorio.
+
+5.3 ALTERNATIVA SI flutter_tts FALLA
+  Si el paquete no encuentra motor TTS en el dispositivo, mostrar un diálogo
+  ofreciendo descargar el motor TTS de Android desde configuración del sistema.
+  (method: flutterTts.getEngines() → si vacío, mostrar advertencia)
+
+--------------------------------------------------------------------------------
+6. ESTRUCTURA FIRESTORE PARA MEDICAMENTOS
+--------------------------------------------------------------------------------
+
+  Colección: usuarios/{uid}/medicamentos/{medicationId}
+  Campos en documento: todos los campos de MedicationModel + metadatos Firestore:
+    createdAt: Timestamp
+    updatedAt: Timestamp
+    deletedAt: Timestamp | null
+    revision: number
+    fieldUpdatedAt: { campo: Timestamp }
+    updatedByDevice: string
+  
+  Colección: usuarios/{uid}/medication_completions/{occurrenceKey}
+  Campos: id, medicationId, ownerUid, scheduledAtLocal, confirmedAtLocal,
+          status, note, createdAt, updatedAt
+
+  Reglas de Firestore (ajustar en firebase UI):
+    match /usuarios/{uid}/medicamentos/{docId} {
+      allow read, write: if request.auth.uid == uid;
+    }
+    match /usuarios/{uid}/medication_completions/{docId} {
+      allow read, write: if request.auth.uid == uid;
+    }
+
+--------------------------------------------------------------------------------
+7. ARCHIVOS EN ORDEN DE IMPLEMENTACIÓN
+--------------------------------------------------------------------------------
+
+PASO 1: pubspec.yaml
+  - Agregar: flutter_tts: ^4.2.0
+  - Ejecutar: flutter pub get
+
+PASO 2: lib/models/medication_models.dart  (CREAR)
+  - MedicationModel con toJson/fromJson/copyWith
+  - MedicationCompletionModel con toJson/fromJson/copyWith
+  - Métodos buildTtsReminderText() y buildTtsConfirmationText()
+
+PASO 3: lib/services/medication_local_service.dart  (CREAR)
+  - CRUD Hive para medications_box y medication_completions_box
+  - Lógica de dirty fields para sync
+
+PASO 4: lib/services/medication_firebase_service.dart  (CREAR)
+  - Operaciones CRUD sobre Firestore
+  - Streams para cloud sync
+
+PASO 5: lib/services/medication_repository.dart  (CREAR)
+  - Orquestador local + cloud
+  - reconcile(), startCloudSync()
+
+PASO 6: lib/services/medication_scheduler.dart  (CREAR)
+  - nextOccurrenceLocal()
+  - scheduleOccurrence() / cancelOccurrence()
+  - scheduleConfirmation() / cancelConfirmation()
+
+PASO 7: android/.../MedicationReceiver.kt  (CREAR)
+  - Manejo MEDICATION_TRIGGERED y MEDICATION_CONFIRMATION
+  - Canal de notificación dedicado
+
+PASO 8: android/.../MainActivity.kt  (MODIFICAR)
+  - Agregar casos setMedication, cancelMedication,
+    setMedicationConfirmation, cancelMedicationConfirmation,
+    clearMedicationScreenFlag
+  - Agregar handleAlarmIntent() para "/medication" y "/medication_confirm"
+  - Agregar métodos auxiliares de scheduling
+
+PASO 9: AndroidManifest.xml  (MODIFICAR)
+  - Registrar MedicationReceiver con ambas actions
+
+PASO 10: lib/main.dart  (MODIFICAR)
+  - Abrir 3 nuevas Hive boxes
+  - Registrar rutas /medication y /medication_confirm
+
+PASO 11: lib/screens/medication_alert_screen.dart  (CREAR)
+  - Pantalla fullscreen con info completa del medicamento
+  - TTS at init (si enableTts)
+  - Programar confirmación al mostrarse
+  - Botones: Tomé / Snooze / Omitir
+
+PASO 12: lib/screens/medication_confirm_screen.dart  (CREAR)
+  - Pantalla de confirmación con TTS
+  - Botones: Sí tomé / No tomé / Preguntar más tarde
+
+PASO 13: lib/screens/medication_edit_screen.dart  (CREAR)
+  - Formulario completo con todas las secciones
+  - Preview de texto TTS
+  - Botón "Probar audio"
+
+PASO 14: lib/screens/medications_screen.dart  (CREAR)
+  - Lista de medicamentos con tarjetas coloreadas
+  - FAB para crear
+  - _scheduleAll()
+
+PASO 15: lib/home_page.dart  (MODIFICAR)
+  - Inicializar MedicationRepository y MedicationScheduler
+  - Listener para showMedicationScreen y showMedicationConfirmScreen
+  - Agregar tab "Medicamentos" en NavigationBar
+  - _scheduleAllMedications()
+
+--------------------------------------------------------------------------------
+8. CONSIDERACIONES TÉCNICAS IMPORTANTES
+--------------------------------------------------------------------------------
+
+8.1 CONTEXTO ANDROID MIENTRAS LA APP ESTÁ CERRADA
+  El MedicationReceiver funciona aunque la app esté cerrada (igual que
+  HabitReceiver). Android despierta el proceso, ejecuta onReceive(), y lanza
+  MainActivity con fullscreen intent. El TTS se inicia en Flutter (en Dart),
+  por lo que requiere que la app esté en primer plano. Esto ya es el
+  comportamiento esperado con fullscreen intents.
+
+8.2 MÚLTIPLES HORARIOS POR MEDICAMENTO
+  Cada TimeOfDay en med.times genera una ocurrencia independiente con su
+  propio occurrenceKey. El scheduler itera sobre todos los times del próximo
+  día válido y programa cada uno por separado.
+
+8.3 PERSISTENCIA TRAS REBOOT
+  La clase BootReceiver.kt ya existe y restaura alarmas de hábitos/regular.
+  Se debe agregar la lógica para restaurar también los medicamentos:
+  - En BootReceiver, llamar a MedicationScheduler.scheduleAllFromHive()
+    o, consistente con el patrón actual, hacer que Flutter envíe los datos
+    vía MethodChannel "restoreMedicationsAfterBoot" (igual que alarmas regulares
+    con "restoreAlarmsAfterBoot").
+  
+  Opción recomendada: Seguir el mismo patrón de boot restore de alarmas 
+  existente (AlarmRepository._persistBootRestorePayload).
+
+8.4 TAMAÑO DEL PAYLOAD DE MEDICATIONJSON EN INTENTS
+  Los Intents de Android tienen un límite de ~500KB para los extras.
+  Si el campo notes/instrucciones es muy largo, truncar a 1000 caracteres.
+  El medicationJson en el Intent es solo un fallback; la fuente principal
+  es Hive local.
+
+8.5 COMPATIBILIDAD TTS CON ANDROID VERSIONS
+  flutter_tts soporta API 21+. La app ya tiene minSdkVersion 21.
+  En dispositivos sin motor TTS español instalado, el paquete intentará
+  usar el motor por defecto del dispositivo. El texto en español generalmente
+  se lee correctamente incluso con motores en inglés, pero con acento.
+  Sugerencia: Mostrar aviso la primera vez que se activa TTS para que el
+  usuario instale el paquete de voz español si no está disponible.
+
+8.6 CONSUMO DE BATERÍA
+  El uso de exactAlarm add. a los hábitos es mínimo impacto.
+  flutter_tts no tiene proceso en background; solo se activa cuando la
+  pantalla está activa.
+
+8.7 GESTIÓN DE PERMISOS EN ANDROID 13+
+  POST_NOTIFICATIONS ya está declarado en el manifiesto.
+  La app ya solicita este permiso en MainActivity.onCreate() para API 33+.
+  No se necesitan permisos adicionales.
+
+--------------------------------------------------------------------------------
+9. ESTIMACIÓN DE ARCHIVOS AFECTADOS
+--------------------------------------------------------------------------------
+
+  NUEVOS (14 archivos):
+    lib/models/medication_models.dart
+    lib/services/medication_local_service.dart
+    lib/services/medication_firebase_service.dart
+    lib/services/medication_repository.dart
+    lib/services/medication_scheduler.dart
+    lib/screens/medications_screen.dart
+    lib/screens/medication_edit_screen.dart
+    lib/screens/medication_alert_screen.dart
+    lib/screens/medication_confirm_screen.dart
+    android/.../MedicationReceiver.kt
+
+  MODIFICADOS (5 archivos):
+    pubspec.yaml                   (+1 dependencia)
+    lib/main.dart                  (+3 Hive boxes, +2 rutas)
+    lib/home_page.dart             (+tab, +listeners, +scheduler)
+    android/.../MainActivity.kt   (+5 MethodChannel cases, +intent handler)
+    android/.../AndroidManifest.xml (+1 receiver)
+
+  Total: 19 archivos involucrados
+
+--------------------------------------------------------------------------------
+10. RESUMEN EJECUTIVO
+--------------------------------------------------------------------------------
+
+La implementación de recordatorios de medicamentos en The Good Alarm es 
+COMPLETAMENTE FACTIBLE y se alinea perfectamente con la arquitectura existente.
+
+El sistema de Hábitos provee una plantilla de casi el 70% del código necesario.
+Los 30% restantes corresponden a:
+  - Los campos específicos del modelo médico (nombre, dosis, unidad, tipo, etc.)
+  - La integración con FlutterTts para audio generado dinámicamente
+  - La pantalla de alerta visual enriquecida con toda la info del medicamento
+  - La lógica de confirmación (scheduling de pantalla secundaria)
+  - El receiver Android para dos eventos (alerta inicial + confirmación)
+
+No se rompe ninguna funcionalidad existente ya que los cambios en archivos
+existentes son ADITIVOS (nuevas rutas, nuevas Hive boxes, nuevos cases en
+MethodChannel, nuevas secciones en home_page).
+
+La dependencia flutter_tts es la única adición externa y es un paquete estable,
+maduro y sin dependencias problemáticas para Android API 21+.
+
+================================================================================
+  FIN DEL INFORME
+================================================================================

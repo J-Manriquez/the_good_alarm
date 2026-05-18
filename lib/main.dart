@@ -11,6 +11,8 @@ import 'services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/app_theme_controller.dart';
 import 'widgets/app_theme_provider.dart';
+import 'screens/medication_alert_screen.dart';
+import 'screens/medication_confirm_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +22,9 @@ void main() async {
   await Hive.openBox('habits_box');
   await Hive.openBox('habit_completions_box');
   await Hive.openBox('habit_sync_box');
+  await Hive.openBox('medications_box');
+  await Hive.openBox('medication_completions_box');
+  await Hive.openBox('medication_sync_box');
   await Hive.openBox('calendars_box');
   await Hive.openBox('calendar_events_box');
   await Hive.openBox('calendar_overrides_box');
@@ -80,6 +85,14 @@ class _ThemedAppState extends State<_ThemedApp> {
               ),
               '/calendar': (context) => const HomeShell(initialTabIndex: 0),
               '/settings': (context) => const SettingsScreen(),
+              '/medication': (context) => MedicationAlertScreen(
+                arguments: ModalRoute.of(context)?.settings.arguments
+                    as Map<String, dynamic>?,
+              ),
+              '/medication_confirm': (context) => MedicationConfirmScreen(
+                arguments: ModalRoute.of(context)?.settings.arguments
+                    as Map<String, dynamic>?,
+              ),
             },
           );
         },

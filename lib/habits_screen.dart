@@ -30,6 +30,9 @@ class _HabitsScreenState extends State<HabitsScreen> {
   bool _cloudSyncEnabled = false;
   User? _user;
   List<HabitModel> _habits = const [];
+  Offset? _fabOffset;
+  static const double _fabSize = 56;
+  static const double _fabMargin = 16;
 
   @override
   void initState() {
@@ -283,18 +286,54 @@ class _HabitsScreenState extends State<HabitsScreen> {
               );
 
     if (widget.embedInShell) {
-      return Stack(
-        children: [
-          body,
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: FloatingActionButton(
-              onPressed: () => _openEditor(),
-              child: const Icon(Icons.add),
-            ),
-          ),
-        ],
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          final initial = Offset(
+            size.width - _fabSize - _fabMargin,
+            size.height - _fabSize - _fabMargin,
+          );
+          final current = _fabOffset ?? initial;
+          final clamped = Offset(
+            current.dx.clamp(_fabMargin, size.width - _fabSize - _fabMargin),
+            current.dy.clamp(_fabMargin, size.height - _fabSize - _fabMargin),
+          );
+          _fabOffset = clamped;
+
+          final fab = FloatingActionButton(
+            heroTag: 'habits_add_fab',
+            onPressed: () => _openEditor(),
+            child: const Icon(Icons.add),
+          );
+
+          return Stack(
+            children: [
+              body,
+              Positioned(
+                left: clamped.dx,
+                top: clamped.dy,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    final next = Offset(
+                      (_fabOffset!.dx + details.delta.dx).clamp(
+                        _fabMargin,
+                        size.width - _fabSize - _fabMargin,
+                      ),
+                      (_fabOffset!.dy + details.delta.dy).clamp(
+                        _fabMargin,
+                        size.height - _fabSize - _fabMargin,
+                      ),
+                    );
+                    setState(() {
+                      _fabOffset = next;
+                    });
+                  },
+                  child: fab,
+                ),
+              ),
+            ],
+          );
+        },
       );
     }
 

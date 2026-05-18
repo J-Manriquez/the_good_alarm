@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
@@ -9,8 +10,12 @@ import 'services/alarm_firebase_service.dart';
 import 'services/alarm_local_service.dart';
 import 'services/alarm_repository.dart';
 import 'services/auth_service.dart';
+import 'services/calendar_alarm_scheduler.dart';
+import 'services/calendar_local_service.dart';
+import 'services/calendar_repository.dart';
 import 'services/habit_repository.dart';
 import 'services/habit_scheduler.dart';
+import 'services/habit_local_service.dart';
 import 'services/sistema_firebase_service.dart';
 import 'widgets/device_name_modal.dart';
 
@@ -24,6 +29,11 @@ import 'alarm_edit_screen.dart';
 import 'widgets/volume_control_button.dart'; // Importar VolumeControlButton
 import 'widgets/synchronized_volume_control_button.dart'; // Importar SynchronizedVolumeControlButton
 import 'package:intl/intl.dart';
+import 'screens/medication_alert_screen.dart';
+import 'screens/medication_confirm_screen.dart';
+import 'screens/medications_screen.dart';
+import 'services/medication_repository.dart';
+import 'services/medication_scheduler.dart';
 
 class HomeShell extends StatefulWidget {
   final bool shouldSyncLocalAlarms;
@@ -43,11 +53,25 @@ class _HomeShellState extends State<HomeShell> {
   final GlobalKey<_HomePageState> _homeKey = GlobalKey<_HomePageState>();
   final HabitRepository _habitRepository = HabitRepository();
   final HabitScheduler _habitScheduler = HabitScheduler();
+  final CalendarAlarmScheduler _calendarAlarmScheduler = CalendarAlarmScheduler();
   StreamSubscription<User?>? _habitsAuthSub;
+  StreamSubscription<User?>? _calendarAuthSub;
+  StreamSubscription<User?>? _medicationsAuthSub;
   User? _habitsUser;
+  User? _calendarUser;
+  User? _medicationsUser;
   bool _habitsCloudSyncEnabled = false;
+  bool _calendarCloudSyncEnabled = false;
+  bool _medicationsCloudSyncEnabled = false;
+  final MedicationRepository _medicationRepository = MedicationRepository();
+  final MedicationScheduler _medicationScheduler = MedicationScheduler();
   late int _tabIndex;
+  String _leftScreen = 'habits';
+  late PageController _pageController;
   bool _calendarFabExpanded = false;
+  Offset? _fabOffset;
+  static const double _fabSize = 56;
+  static const double _fabMargin = 16;
 
   @override
   void initState() {
@@ -61,14 +85,24 @@ class _HomeShellState extends State<HomeShell> {
       _tabIndex = i;
     }
 
+    _loadLeftScreenPreference();
     _startHabitsBackground();
+    _startCalendarAlarmsBackground();
+    _startMedicationsBackground();
+    _pageController = PageController(initialPage: _tabIndex);
   }
 
   @override
   void dispose() {
     _habitsAuthSub?.cancel();
     _habitsAuthSub = null;
+    _calendarAuthSub?.cancel();
+    _calendarAuthSub = null;
+    _medicationsAuthSub?.cancel();
+    _medicationsAuthSub = null;
     _habitRepository.stopAllCloudSync();
+    _medicationRepository.stopAllCloudSync();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -77,6 +111,154 @@ class _HomeShellState extends State<HomeShell> {
       await _setupHabitsForUser(user);
     });
     unawaited(_setupHabitsForUser(FirebaseAuth.instance.currentUser));
+  }
+
+  void _startCalendarAlarmsBackground() {
+    _calendarAuthSub = FirebaseAuth.instance.authStateChanges().listen((user) async {
+      await _setupCalendarAlarmsForUser(user);
+    });
+    unawaited(_setupCalendarAlarmsForUser(FirebaseAuth.instance.currentUser));
+  }
+
+  void _startMedicationsBackground() {
+    _medicationsAuthSub = FirebaseAuth.instance.authStateChanges().listen((user) async {
+      await _setupMedicationsForUser(user);
+    });
+    unawaited(_setupMedicationsForUser(FirebaseAuth.instance.currentUser));
+  }
+
+  Future<void> _loadLeftScreenPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final leftScreen = prefs.getString(SettingsScreen.leftScreenSelectionKey) ?? 'habits';
+    print('[HomeShell] pantalla izquierda cargada: $leftScreen');
+    if (mounted) {
+      setState(() {
+        _leftScreen = leftScreen;
+      });
+    }
+  }
+
+  Widget _buildLeftScreenWidget(String screen) {
+    switch (screen) {
+      case 'calendar':
+        return const CalendarScreen(embedInShell: true);
+      case 'medications':
+        return const _MedicationsShellScreen();
+      case 'habits':
+      default:
+        return const HabitsScreen(embedInShell: true, manageCloudSync: false);
+    }
+  }
+
+  IconData _leftScreenIcon(String screen) {
+    switch (screen) {
+      case 'calendar':
+        return Icons.calendar_month;
+      case 'medications':
+        return Icons.medication;
+      case 'habits':
+      default:
+        return Icons.psychology;
+    }
+  }
+
+  String _leftScreenName(String screen) {
+    switch (screen) {
+      case 'calendar':
+        return 'Calendario';
+      case 'medications':
+        return 'Medicamentos';
+      case 'habits':
+      default:
+        return 'Hábitos';
+    }
+  }
+
+  Future<void> _setupMedicationsForUser(User? user) async {
+    await _medicationRepository.stopAllCloudSync();
+    _medicationsUser = user;
+
+    final userId = user?.uid;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    _medicationsCloudSyncEnabled = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+
+    if (_medicationsCloudSyncEnabled) {
+      await _medicationRepository.reconcile(userId: userId);
+      await _medicationRepository.startCloudSync(
+        userId: userId,
+        onMedicationsBatchApplied: (_) async {
+          await _scheduleMedicationsFromLocal();
+        },
+      );
+    }
+
+    await _scheduleMedicationsFromLocal();
+  }
+
+  Future<void> _scheduleMedicationsFromLocal() async {
+    final meds = await _medicationRepository.loadLocalMedications();
+    final now = DateTime.now();
+    final userId = _medicationsUser?.uid;
+    print('[HomeShell] scheduleMedicationsFromLocal count=${meds.length}');
+
+    for (final med in meds) {
+      final prev = med.nextScheduledAtLocal;
+
+      if (!med.isActive || med.deletedAt != null) {
+        if (prev != null) {
+          final prevKey = _medicationScheduler.occurrenceKeyFor(med.id, prev);
+          try {
+            await _medicationScheduler.cancelOccurrence(occurrenceKey: prevKey);
+          } catch (_) {}
+          await _medicationRepository.upsertMedication(
+            medication: med.copyWith(nextScheduledAtLocal: null),
+            cloudSyncEnabled: _medicationsCloudSyncEnabled,
+            userId: userId,
+          );
+        }
+        continue;
+      }
+
+      final next = _medicationScheduler.nextOccurrenceLocal(med, now);
+      if (next == null) {
+        if (prev != null) {
+          final prevKey = _medicationScheduler.occurrenceKeyFor(med.id, prev);
+          try {
+            await _medicationScheduler.cancelOccurrence(occurrenceKey: prevKey);
+          } catch (_) {}
+          await _medicationRepository.upsertMedication(
+            medication: med.copyWith(nextScheduledAtLocal: null),
+            cloudSyncEnabled: _medicationsCloudSyncEnabled,
+            userId: userId,
+          );
+        }
+        continue;
+      }
+
+      if (prev != null && prev != next) {
+        final prevKey = _medicationScheduler.occurrenceKeyFor(med.id, prev);
+        try {
+          await _medicationScheduler.cancelOccurrence(occurrenceKey: prevKey);
+        } catch (_) {}
+      }
+
+      if (prev == null || prev != next) {
+        await _medicationRepository.upsertMedication(
+          medication: med.copyWith(nextScheduledAtLocal: next),
+          cloudSyncEnabled: _medicationsCloudSyncEnabled,
+          userId: userId,
+        );
+      }
+
+      try {
+        await _medicationScheduler.scheduleOccurrence(med: med, whenLocal: next);
+        print('[HomeShell] programado: ${med.medicationName} -> ${next.toIso8601String()}');
+      } catch (e) {
+        print('[HomeShell] error programando ${med.id}: $e');
+      }
+    }
   }
 
   Future<void> _setupHabitsForUser(User? user) async {
@@ -101,6 +283,23 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     await _scheduleHabitsFromLocal();
+  }
+
+  Future<void> _setupCalendarAlarmsForUser(User? user) async {
+    _calendarUser = user;
+    final userId = user?.uid;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    _calendarCloudSyncEnabled = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+    try {
+      await _calendarAlarmScheduler.rescheduleAllForUser(
+        userId: userId,
+        cloudSyncEnabled: _calendarCloudSyncEnabled,
+      );
+    } catch (_) {}
+    _homeKey.currentState?._reloadNextCalendarAlarmFromPrefs(prefs: prefs);
+    _homeKey.currentState?._startOrUpdateCountdown();
   }
 
   Future<void> _scheduleHabitsFromLocal() async {
@@ -166,13 +365,27 @@ class _HomeShellState extends State<HomeShell> {
   String _currentTabName() {
     switch (_tabIndex) {
       case 0:
-        return 'Calendario';
+        return _leftScreenName(_leftScreen);
       case 1:
-        return 'Home';
+        return 'Alarmas';
       case 2:
-        return 'Hábitos';
+        return 'Más';
       default:
-        return 'Home';
+        return 'Alarmas';
+    }
+  }
+
+  void _goToTab(int index) {
+    print('[HomeShell] navegando al tab $index');
+    setState(() => _tabIndex = index);
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+    if (index == 1) {
+      _homeKey.currentState?._reloadNextCalendarAlarmFromPrefs();
+      _homeKey.currentState?._startOrUpdateCountdown();
     }
   }
 
@@ -207,6 +420,9 @@ class _HomeShellState extends State<HomeShell> {
                   await Navigator.pushNamed(context, '/settings');
                   _homeKey.currentState?._loadSettingsAndAlarms();
                   await _setupHabitsForUser(FirebaseAuth.instance.currentUser);
+                  await _setupCalendarAlarmsForUser(FirebaseAuth.instance.currentUser);
+                  await _loadLeftScreenPreference();
+                  print('[HomeShell] regresando de configuracion, pantalla izquierda: $_leftScreen');
                   break;
               }
             },
@@ -238,115 +454,82 @@ class _HomeShellState extends State<HomeShell> {
 
     return Scaffold(
       appBar: _buildHomeAppBar(context),
-      body: IndexedStack(
-        index: _tabIndex,
-        children: [
-          const CalendarScreen(embedInShell: true),
-          HomePage(
-            key: _homeKey,
-            shouldSyncLocalAlarms: widget.shouldSyncLocalAlarms,
-            embedInShell: true,
-          ),
-          const _ExtrasScreen(),
-        ],
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: _tabIndex != 1
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 48),
-              child: SizedBox(
-                width: 140,
-                height: _calendarFabExpanded ? 190 : 70,
-                child: Stack(
-                  alignment: Alignment.bottomRight,
-                  children: [
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: FloatingActionButton(
-                        heroTag: 'home_alarm_fab',
-                        onPressed: () => _homeKey.currentState?._setAlarm(),
-                        tooltip: 'Añadir alarma',
-                        focusColor: scheme.onPrimary,
-                        foregroundColor: scheme.onPrimary,
-                        backgroundColor: scheme.primary,
-                        child: const Icon(Icons.add),
-                      ),
-                    ),
-                    Positioned(
-                      right: 72,
-                      bottom: 0,
-                      child: FloatingActionButton(
-                        heroTag: 'home_calendar_fab',
-                        onPressed: () {
-                          setState(() {
-                            _calendarFabExpanded = !_calendarFabExpanded;
-                          });
-                        },
-                        tooltip: 'Calendario',
-                        focusColor: scheme.onPrimary,
-                        foregroundColor: scheme.onPrimary,
-                        backgroundColor: scheme.primary,
-                        child: Icon(
-                          _calendarFabExpanded ? Icons.close : Icons.calendar_month,
-                        ),
-                      ),
-                    ),
-                    if (_calendarFabExpanded) ...[
-                      Positioned(
-                        right: 72,
-                        bottom: 70,
-                        child: FloatingActionButton.small(
-                          heroTag: 'home_calendar_task_fab',
-                          onPressed: () async {
-                            setState(() {
-                              _calendarFabExpanded = false;
-                            });
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => CalendarEventEditorScreen(
-                                  initialDay: DateTime.now(),
-                                  initialKind: 'task',
-                                ),
-                              ),
-                            );
-                          },
-                          tooltip: 'Tarea',
-                          foregroundColor: scheme.onPrimary,
-                          backgroundColor: scheme.primary,
-                          child: const Icon(Icons.task_alt),
-                        ),
-                      ),
-                      Positioned(
-                        right: 72,
-                        bottom: 130,
-                        child: FloatingActionButton.small(
-                          heroTag: 'home_calendar_event_fab',
-                          onPressed: () async {
-                            setState(() {
-                              _calendarFabExpanded = false;
-                            });
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => CalendarEventEditorScreen(
-                                  initialDay: DateTime.now(),
-                                  initialKind: 'event',
-                                ),
-                              ),
-                            );
-                          },
-                          tooltip: 'Evento',
-                          foregroundColor: scheme.onPrimary,
-                          backgroundColor: scheme.primary,
-                          child: const Icon(Icons.event),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+          final initial = Offset(
+            size.width - _fabSize - _fabMargin,
+            size.height - _fabSize - _fabMargin,
+          );
+          final current = _fabOffset ?? initial;
+          final clamped = Offset(
+            current.dx.clamp(_fabMargin, size.width - _fabSize - _fabMargin),
+            current.dy.clamp(_fabMargin, size.height - _fabSize - _fabMargin),
+          );
+          _fabOffset = clamped;
+
+          final fab = FloatingActionButton(
+            heroTag: 'home_shell_add_alarm_fab',
+            onPressed: () {
+              _homeKey.currentState?._setAlarm();
+            },
+            tooltip: 'Añadir alarma',
+            focusColor: scheme.onPrimary,
+            foregroundColor: scheme.onPrimary,
+            backgroundColor: scheme.primary,
+            child: const Icon(Icons.add),
+          );
+
+          return Stack(
+            children: [
+              PageView(
+                controller: _pageController,
+                onPageChanged: (index) {
+                  if (_tabIndex == index) return;
+                  print('[HomeShell] swipe al tab $index');
+                  setState(() => _tabIndex = index);
+                  if (index == 1) {
+                    _homeKey.currentState?._reloadNextCalendarAlarmFromPrefs();
+                    _homeKey.currentState?._startOrUpdateCountdown();
+                  }
+                },
+                children: [
+                  _buildLeftScreenWidget(_leftScreen),
+                  HomePage(
+                    key: _homeKey,
+                    shouldSyncLocalAlarms: widget.shouldSyncLocalAlarms,
+                    embedInShell: true,
+                  ),
+                  _SecondaryMenuScreen(selectedLeftScreen: _leftScreen),
+                ],
               ),
-            ),
+              if (_tabIndex == 1)
+                Positioned(
+                  left: clamped.dx,
+                  top: clamped.dy,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final next = Offset(
+                        (_fabOffset!.dx + details.delta.dx).clamp(
+                          _fabMargin,
+                          size.width - _fabSize - _fabMargin,
+                        ),
+                        (_fabOffset!.dy + details.delta.dy).clamp(
+                          _fabMargin,
+                          size.height - _fabSize - _fabMargin,
+                        ),
+                      );
+                      setState(() {
+                        _fabOffset = next;
+                      });
+                    },
+                    child: fab,
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
@@ -359,10 +542,10 @@ class _HomeShellState extends State<HomeShell> {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               IconButton(
-                onPressed: () => setState(() => _tabIndex = 0),
+                onPressed: () => _goToTab(0),
                 iconSize: 36,
                 icon: Icon(
-                  Icons.calendar_month,
+                  _leftScreenIcon(_leftScreen),
                   color: _tabIndex == 0 ? scheme.primary : scheme.onSurface,
                 ),
               ),
@@ -370,7 +553,7 @@ class _HomeShellState extends State<HomeShell> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    onPressed: () => setState(() => _tabIndex = 1),
+                    onPressed: () => _goToTab(1),
                     iconSize: 36,
                     icon: Icon(
                       Icons.home,
@@ -388,10 +571,10 @@ class _HomeShellState extends State<HomeShell> {
                 ],
               ),
               IconButton(
-                onPressed: () => setState(() => _tabIndex = 2),
+                onPressed: () => _goToTab(2),
                 iconSize: 36,
                 icon: Icon(
-                  Icons.extension,
+                  Icons.apps,
                   color: _tabIndex == 2 ? scheme.primary : scheme.onSurface,
                 ),
               ),
@@ -412,6 +595,149 @@ class _ExtrasScreen extends StatelessWidget {
   }
 }
 
+class _MedicationsShellScreen extends StatelessWidget {
+  const _MedicationsShellScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MedicationsScreen(embedInShell: true, manageCloudSync: false);
+  }
+}
+
+class _SecondaryMenuScreen extends StatelessWidget {
+  final String selectedLeftScreen;
+
+  const _SecondaryMenuScreen({required this.selectedLeftScreen});
+
+  List<String> _remainingScreens() {
+    const ordered = ['calendar', 'habits', 'medications'];
+    return ordered.where((s) => s != selectedLeftScreen).toList();
+  }
+
+  String _screenTitle(String screen) {
+    switch (screen) {
+      case 'habits':
+        return 'Hábitos';
+      case 'calendar':
+        return 'Calendario';
+      case 'medications':
+        return 'Medicamentos';
+      default:
+        return '';
+    }
+  }
+
+  String _screenSubtitle(String screen) {
+    switch (screen) {
+      case 'habits':
+        return 'Gestiona tus rutinas y hábitos diarios';
+      case 'calendar':
+        return 'Organiza tus eventos y alarmas del calendario';
+      case 'medications':
+        return 'Controla tus recordatorios de medicamentos';
+      default:
+        return '';
+    }
+  }
+
+  IconData _screenIcon(String screen) {
+    switch (screen) {
+      case 'habits':
+        return Icons.psychology;
+      case 'calendar':
+        return Icons.calendar_month;
+      case 'medications':
+        return Icons.medication;
+      default:
+        return Icons.apps;
+    }
+  }
+
+  Widget _buildFullScreen(String screen) {
+    switch (screen) {
+      case 'habits':
+        return const HabitsScreen(embedInShell: false, manageCloudSync: false);
+      case 'calendar':
+        return const CalendarScreen(embedInShell: false);
+      case 'medications':
+        return const MedicationsScreen(embedInShell: false, manageCloudSync: false);
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = _remainingScreens();
+    final scheme = Theme.of(context).colorScheme;
+    print('[SecondaryMenuScreen] pantallas disponibles: ${screens.join(", ")}');
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      children: [
+        for (final screen in screens) ...[
+          Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: scheme.primary.withOpacity(0.4), width: 1),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                print('[SecondaryMenuScreen] abriendo pantalla: $screen');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _buildFullScreen(screen),
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: scheme.primary.withOpacity(0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(_screenIcon(screen), size: 36, color: scheme.primary),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _screenTitle(screen),
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _screenSubtitle(screen),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurface.withOpacity(0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: scheme.primary),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ],
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   final bool shouldSyncLocalAlarms;
   final bool embedInShell;
@@ -428,7 +754,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final List<Alarm> _alarms = [];
-  static const platform = MethodChannel('com.example.the_good_alarm/alarm');
+  static const platform = MethodChannel('com.andodevs.the_good_alarm/alarm');
 
   AlarmGroupingOption _currentGroupingOption = AlarmGroupingOption.none;
   Map<String, bool> _groupExpansionState =
@@ -469,6 +795,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final SistemaFirebaseService _sistemaFirebaseService =
       SistemaFirebaseService();
+  final CalendarRepository _calendarRepository = CalendarRepository();
+  final CalendarLocalService _calendarLocalService = CalendarLocalService();
+  final HabitRepository _habitRepository = HabitRepository();
+  final HabitLocalService _habitLocalService = HabitLocalService();
   User? _currentUser;
   bool _isAlarmCloudSyncing = false;
   bool _cloudSyncEnabled = false;
@@ -485,6 +815,59 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     platform.setMethodCallHandler(_handleNativeCalls);
     _loadSettingsAndAlarms(); // Cargar configuración primero
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPendingMedicationScreen();
+    });
+  }
+
+  Future<void> _checkPendingMedicationScreen() async {
+    try {
+      final raw = await platform.invokeMethod<String>('getPendingMedicationScreen');
+      if (raw == null || raw.isEmpty) return;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final timestamp = (data['timestamp'] as num?)?.toInt() ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      // Ignorar pending si tiene más de 1 hora (dato obsoleto)
+      if (now - timestamp > 60 * 60 * 1000) {
+        print('[HomePage] pending_medication_screen obsoleto (${(now - timestamp) ~/ 60000} min), ignorando');
+        return;
+      }
+      final medicationId = data['medicationId'] as String?;
+      final occurrenceKey = data['occurrenceKey'] as String?;
+      if (medicationId == null || occurrenceKey == null) return;
+      final scheduledAtLocalMillis =
+          (data['scheduledAtLocalMillis'] as num?)?.toInt() ??
+              DateTime.now().millisecondsSinceEpoch;
+      final isConfirmation = data['isConfirmation'] as bool? ?? false;
+      final screenRoute = data['screenRoute'] as String? ?? '/medication';
+      print('[HomePage] checkPending: medicationId=$medicationId screen=$screenRoute isConfirmation=$isConfirmation');
+      if (!mounted) return;
+      if (isConfirmation || screenRoute == '/medication_confirm') {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (context) => MedicationConfirmScreen(
+            arguments: {
+              'medicationId': medicationId,
+              'occurrenceKey': occurrenceKey,
+              'scheduledAtLocalMillis': scheduledAtLocalMillis,
+              ...Map<String, dynamic>.from(data),
+            },
+          ),
+        ));
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (context) => MedicationAlertScreen(
+            arguments: {
+              'medicationId': medicationId,
+              'occurrenceKey': occurrenceKey,
+              'scheduledAtLocalMillis': scheduledAtLocalMillis,
+              ...Map<String, dynamic>.from(data),
+            },
+          ),
+        ));
+      }
+    } catch (e) {
+      print('[HomePage] checkPendingMedicationScreen error: $e');
+    }
   }
 
   @override
@@ -499,6 +882,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _consumeNativeAlarmEvents();
+      _reloadNextCalendarAlarmFromPrefs();
     }
   }
 
@@ -595,7 +979,58 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
 
     if (mounted) setState(() {});
+    _reloadNextCalendarAlarmFromPrefs(prefs: prefs);
     _startOrUpdateCountdown();
+  }
+
+  void _reloadNextCalendarAlarmFromPrefs({SharedPreferences? prefs}) {
+    final effectivePrefs = prefs;
+    if (effectivePrefs == null) {
+      SharedPreferences.getInstance().then((value) {
+        if (!mounted) return;
+        _reloadNextCalendarAlarmFromPrefs(prefs: value);
+      });
+      return;
+    }
+
+    final raw = effectivePrefs.getString('calendarAlarms');
+    if (raw == null || raw.trim().isEmpty) {
+      setState(() {
+        _nextCalendarAlarmTimeLocal = null;
+        _nextCalendarAlarmTitle = '';
+        _nextCalendarAlarmMessage = '';
+      });
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      int? bestMillis;
+      String bestTitle = '';
+      String bestMessage = '';
+
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final map = Map<String, dynamic>.from(item);
+        final millis = (map['timeInMillis'] as num?)?.toInt();
+        if (millis == null) continue;
+        if (millis <= now) continue;
+        if (bestMillis == null || millis < bestMillis) {
+          bestMillis = millis;
+          bestTitle = (map['title'] as String?) ?? '';
+          bestMessage = (map['message'] as String?) ?? '';
+        }
+      }
+
+      setState(() {
+        _nextCalendarAlarmTimeLocal =
+            bestMillis == null ? null : DateTime.fromMillisecondsSinceEpoch(bestMillis);
+        _nextCalendarAlarmTitle = bestTitle;
+        _nextCalendarAlarmMessage = bestMessage;
+      });
+    } catch (_) {}
   }
 
   void _initializeGroupStates() {
@@ -664,6 +1099,122 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           }
         },
       );
+    }
+
+    await _promptLocalCalendarsAndHabitsSyncIfNeeded();
+  }
+
+  Future<void> _promptLocalCalendarsAndHabitsSyncIfNeeded() async {
+    if (!mounted) return;
+    final user = _currentUser;
+    if (user == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final deviceName = prefs.getString('device_name');
+    if (deviceName == null || deviceName.trim().isEmpty) return;
+
+    final key = 'local_data_sync_decision_${user.uid}';
+    if (prefs.containsKey(key)) return;
+
+    final shouldUploadLocal = await _showLocalDataSyncDecisionDialog();
+    if (!mounted) return;
+
+    await prefs.setBool(key, shouldUploadLocal);
+    await _runPostLoginCloudPrefetch(uploadLocalToCloud: shouldUploadLocal);
+  }
+
+  Future<bool> _showLocalDataSyncDecisionDialog() async {
+    final scheme = Theme.of(context).colorScheme;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Sincronización de calendarios'),
+          content: const Text(
+            '¿Quieres sincronizar tus calendarios y hábitos locales con tu cuenta?\n\n'
+            'Si eliges "Sí", se subirán tus datos locales a Firebase y se descargará tu información de la nube.\n'
+            'Si eliges "No", se descargará tu información de la nube sin subir lo local.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('No', style: TextStyle(color: scheme.onSurface)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Sí'),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<void> _runPostLoginCloudPrefetch({required bool uploadLocalToCloud}) async {
+    final userId = _currentUser?.uid;
+    if (userId == null) return;
+
+    try {
+      if (uploadLocalToCloud) {
+        final localCalendars = await _calendarRepository.loadLocalCalendars(includeDeleted: true);
+        for (final calendar in localCalendars) {
+          if (calendar.ownerUid.trim().isNotEmpty && calendar.ownerUid == userId) continue;
+          await _calendarRepository.upsertCalendar(
+            calendar: calendar.copyWith(ownerUid: userId),
+            cloudSyncEnabled: false,
+            userId: null,
+          );
+        }
+
+        final localHabits = await _habitRepository.loadLocalHabits(includeDeleted: true);
+        for (final habit in localHabits) {
+          final needsOwner = habit.ownerUid.trim().isEmpty || habit.ownerUid != userId;
+          final needsSyncToCloud = !habit.syncToCloud;
+          if (!needsOwner && !needsSyncToCloud) continue;
+          await _habitRepository.upsertHabit(
+            habit: habit.copyWith(ownerUid: userId, syncToCloud: true),
+            cloudSyncEnabled: false,
+            userId: null,
+          );
+        }
+
+        await _calendarRepository.pushPendingChanges(userId: userId);
+        await _habitRepository.pushPendingChanges(userId: userId);
+      } else {
+        for (final id in await _calendarLocalService.getEntityIdsWithDirtyFields('calendar')) {
+          await _calendarLocalService.clearDirty('calendar', id);
+        }
+        for (final id in await _calendarLocalService.getEntityIdsWithDirtyFields('event')) {
+          await _calendarLocalService.clearDirty('event', id);
+        }
+        for (final id in await _calendarLocalService.getEntityIdsWithDirtyFields('override')) {
+          await _calendarLocalService.clearDirty('override', id);
+        }
+
+        final localHabits = await _habitRepository.loadLocalHabits(includeDeleted: true);
+        for (final habit in localHabits) {
+          if (habit.ownerUid.trim().isNotEmpty) continue;
+          if (!habit.syncToCloud) continue;
+          await _habitRepository.upsertHabit(
+            habit: habit.copyWith(syncToCloud: false),
+            cloudSyncEnabled: false,
+            userId: null,
+          );
+        }
+        for (final id in await _habitLocalService.getEntityIdsWithDirtyFields('habit')) {
+          await _habitLocalService.clearDirty('habit', id);
+        }
+        for (final id in await _habitLocalService.getEntityIdsWithDirtyFields('completion')) {
+          await _habitLocalService.clearDirty('completion', id);
+        }
+      }
+
+      await _calendarRepository.pullOnce(userId: userId);
+      await _habitRepository.pullOnce(userId: userId);
+    } catch (e) {
+      print('Error al sincronizar datos post-login: $e');
     }
   }
 
@@ -1032,18 +1583,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _ringingAlarmMessage = message;
         });
 
-        // Encontrar la alarma para obtener sus configuraciones
-        final alarm = _alarms.firstWhere(
-          (alarm) => alarm.id == alarmId,
-          orElse: () => Alarm(
-            id: alarmId,
-            time: DateTime.now(),
-            title: title,
-            message: message,
-          ),
-        );
+        final maxSnoozesArg = (call.arguments['maxSnoozes'] as num?)?.toInt() ?? 3;
+        final snoozeDurationArg =
+            (call.arguments['snoozeDurationMinutes'] as num?)?.toInt() ?? 5;
+        final snoozeCountArg = (call.arguments['snoozeCount'] as num?)?.toInt() ?? 0;
+        final maxVolumePercentArg =
+            (call.arguments['maxVolumePercent'] as num?)?.toInt() ?? 100;
+        final volumeRampUpDurationSecondsArg =
+            (call.arguments['volumeRampUpDurationSeconds'] as num?)?.toInt() ?? 30;
+        final tempVolumeReductionPercentArg =
+            (call.arguments['tempVolumeReductionPercent'] as num?)?.toInt() ?? 30;
+        final tempVolumeReductionDurationSecondsArg =
+            (call.arguments['tempVolumeReductionDurationSeconds'] as num?)?.toInt() ?? 60;
 
-        // NUEVO: Actualizar configuraciones de snooze
+        final index = _alarms.indexWhere((a) => a.id == alarmId);
+        final alarm = index != -1
+            ? _alarms[index]
+            : Alarm(
+                id: alarmId,
+                time: DateTime.now(),
+                title: title,
+                message: message,
+                snoozeCount: snoozeCountArg,
+                maxSnoozes: maxSnoozesArg,
+                snoozeDurationMinutes: snoozeDurationArg,
+                maxVolumePercent: maxVolumePercentArg,
+                volumeRampUpDurationSeconds: volumeRampUpDurationSecondsArg,
+                tempVolumeReductionPercent: tempVolumeReductionPercentArg,
+                tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSecondsArg,
+              );
+
         setState(() {
           _ringingAlarmSnoozeCount = alarm.snoozeCount;
           _ringingAlarmMaxSnoozes = alarm.maxSnoozes;
@@ -1086,6 +1655,54 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 habitId: habitId,
                 occurrenceKey: occurrenceKey,
                 scheduledAtLocalMillis: scheduledAtLocalMillis,
+              ),
+            ),
+          );
+        }
+        break;
+      case 'showMedicationScreen':
+        final medId = call.arguments['medicationId'] as String;
+        final medOccurrenceKey = call.arguments['occurrenceKey'] as String;
+        final medScheduledMillis =
+            (call.arguments['scheduledAtLocalMillis'] as num?)?.toInt() ??
+                DateTime.now().millisecondsSinceEpoch;
+        print('[HomePage] showMedicationScreen medId=$medId occurrenceKey=$medOccurrenceKey');
+        // Limpiar pending de prefs nativas para evitar doble navegación en próximo inicio
+        platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => MedicationAlertScreen(
+                arguments: {
+                  'medicationId': medId,
+                  'occurrenceKey': medOccurrenceKey,
+                  'scheduledAtLocalMillis': medScheduledMillis,
+                  ...Map<String, dynamic>.from(call.arguments as Map),
+                },
+              ),
+            ),
+          );
+        }
+        break;
+      case 'showMedicationConfirmScreen':
+        final medConfirmId = call.arguments['medicationId'] as String;
+        final medConfirmKey = call.arguments['occurrenceKey'] as String;
+        final medConfirmMillis =
+            (call.arguments['scheduledAtLocalMillis'] as num?)?.toInt() ??
+                DateTime.now().millisecondsSinceEpoch;
+        print('[HomePage] showMedicationConfirmScreen medId=$medConfirmId occurrenceKey=$medConfirmKey');
+        // Limpiar pending de prefs nativas para evitar doble navegación en próximo inicio
+        platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => MedicationConfirmScreen(
+                arguments: {
+                  'medicationId': medConfirmId,
+                  'occurrenceKey': medConfirmKey,
+                  'scheduledAtLocalMillis': medConfirmMillis,
+                  ...Map<String, dynamic>.from(call.arguments as Map),
+                },
               ),
             ),
           );
@@ -1802,6 +2419,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Timer? _countdownTimer;
   Duration _timeUntilNextAlarm = Duration.zero;
   Alarm? _currentNextAlarmForCountdown;
+  DateTime? _nextCalendarAlarmTimeLocal;
+  String _nextCalendarAlarmTitle = '';
+  String _nextCalendarAlarmMessage = '';
 
   // In initState or a method called when alarms/settings change:
   void _startOrUpdateCountdown() {
@@ -1842,9 +2462,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final now = DateTime.now();
     final activeAlarms = _alarms.where((alarm) => alarm.isActive).toList();
 
-    if (activeAlarms.isEmpty) return null;
-
-    // Encontrar la próxima alarma activa
     Alarm? nextAlarm;
     Duration? shortestDuration;
 
@@ -1892,6 +2509,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           requireGame: alarm.requireGame,
           gameConfig: alarm.gameConfig,
           syncToCloud: alarm.syncToCloud,
+        );
+      }
+    }
+
+    final nextCalendar = _nextCalendarAlarmTimeLocal;
+    if (nextCalendar != null) {
+      final calendarDuration = nextCalendar.difference(now);
+      if (!calendarDuration.isNegative &&
+          (shortestDuration == null || calendarDuration < shortestDuration)) {
+        nextAlarm = Alarm(
+          id: -1,
+          time: nextCalendar,
+          title: _nextCalendarAlarmTitle.isNotEmpty ? _nextCalendarAlarmTitle : 'Calendario',
+          message: _nextCalendarAlarmMessage,
+          isActive: true,
         );
       }
     }
@@ -2572,23 +3204,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final scheme = Theme.of(context).colorScheme;
     // Verificar si hay alarmas activas
     final hasActiveAlarms = _alarms.any((alarm) => alarm.isActive);
+    final hasNextCalendarAlarm = _nextCalendarAlarmTimeLocal != null;
     final nextAlarm = _getNextActiveAlarm();
 
     final body = SingleChildScrollView(
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (hasActiveAlarms) ...[
+            if (hasActiveAlarms || hasNextCalendarAlarm) ...[
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
-                color: hasActiveAlarms ? scheme.primary : scheme.surface,
+                color: (hasActiveAlarms || hasNextCalendarAlarm) ? scheme.primary : scheme.surface,
                 child: Text(
-                  hasActiveAlarms
+                  (hasActiveAlarms || hasNextCalendarAlarm)
                       ? 'Próxima alarma en: ${_formatDuration(_timeUntilNextAlarm)}'
                       : 'No hay alarmas activas',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: hasActiveAlarms ? scheme.onPrimary : scheme.onSurface,
+                    color: (hasActiveAlarms || hasNextCalendarAlarm)
+                        ? scheme.onPrimary
+                        : scheme.onSurface,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -2838,13 +3473,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
     );
 
-    if (widget.embedInShell) {
-      return Container(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: body,
-      );
-    }
-
     final fab = FloatingActionButton(
       onPressed: _setAlarm,
       tooltip: 'Añadir alarma',
@@ -2853,6 +3481,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       backgroundColor: scheme.primary,
       child: const Icon(Icons.add),
     );
+
+    if (widget.embedInShell) {
+      return Container(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: body,
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(

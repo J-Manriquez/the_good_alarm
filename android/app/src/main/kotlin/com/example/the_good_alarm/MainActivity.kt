@@ -1,4 +1,4 @@
-package com.example.the_good_alarm
+package com.andodevs.the_good_alarm
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -52,9 +52,9 @@ data class AlarmData(
 )
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.example.the_good_alarm/alarm"
-    private val ALARM_ACTION = "com.example.the_good_alarm.ALARM_TRIGGERED"
-    private val HABIT_ACTION = "com.example.the_good_alarm.HABIT_TRIGGERED"
+    private val CHANNEL = "com.andodevs.the_good_alarm/alarm"
+    private val ALARM_ACTION = "com.andodevs.the_good_alarm.ALARM_TRIGGERED"
+    private val HABIT_ACTION = "com.andodevs.the_good_alarm.HABIT_TRIGGERED"
     private val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
     private val SNOOZE_REQUEST_CODE_OFFSET = 1000000
     private lateinit var alarmManager: AlarmManager
@@ -314,6 +314,69 @@ class MainActivity : FlutterActivity() {
                         result.error("HABIT_ERROR", e.localizedMessage, null)
                     }
                 }
+                "setCalendarAlarm" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val timeInMillis = call.argument<Long>("timeInMillis") ?: return@setMethodCallHandler
+                    val title = call.argument<String>("title") ?: "Calendario"
+                    val message = call.argument<String>("message") ?: ""
+                    val hour = call.argument<Int>("hour") ?: -1
+                    val minute = call.argument<Int>("minute") ?: -1
+                    val maxSnoozes = call.argument<Int>("maxSnoozes") ?: 3
+                    val snoozeDurationMinutes = call.argument<Int>("snoozeDurationMinutes") ?: 5
+                    val maxVolumePercent = call.argument<Int>("maxVolumePercent") ?: 100
+                    val volumeRampUpDurationSeconds = call.argument<Int>("volumeRampUpDurationSeconds") ?: 30
+                    val tempVolumeReductionPercent = call.argument<Int>("tempVolumeReductionPercent") ?: 30
+                    val tempVolumeReductionDurationSeconds = call.argument<Int>("tempVolumeReductionDurationSeconds") ?: 60
+
+                    if (timeInMillis <= System.currentTimeMillis()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (!alarmManager.canScheduleExactAlarms()) {
+                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                startActivity(intent)
+                                result.error("PERMISSION_DENIED", "Se requiere permiso para programar alarmas exactas", null)
+                                return@setMethodCallHandler
+                            }
+                        }
+
+                        val alarmId = calendarAlarmId(occurrenceKey)
+                        setAlarm(
+                            timeInMillis = timeInMillis,
+                            alarmId = alarmId,
+                            requestCode = alarmId,
+                            title = title,
+                            message = message,
+                            screenRoute = "/alarm",
+                            repeatDays = emptyList(),
+                            isDaily = false,
+                            isWeekly = false,
+                            isWeekend = false,
+                            maxSnoozes = maxSnoozes,
+                            snoozeDurationMinutes = snoozeDurationMinutes,
+                            hour = hour,
+                            minute = minute,
+                            isSnooze = false,
+                            maxVolumePercent = maxVolumePercent,
+                            volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
+                            tempVolumeReductionPercent = tempVolumeReductionPercent,
+                            tempVolumeReductionDurationSeconds = tempVolumeReductionDurationSeconds
+                        )
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("CALENDAR_ALARM_ERROR", e.localizedMessage, null)
+                    }
+                }
+                "cancelCalendarAlarm" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val alarmId = calendarAlarmId(occurrenceKey)
+                    cancelAlarm(alarmId, cancelBase = true, cancelSnooze = true)
+                    result.success(true)
+                }
                 "cancelHabit" -> {
                     val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
                     cancelHabitOccurrence(occurrenceKey)
@@ -323,6 +386,81 @@ class MainActivity : FlutterActivity() {
                     val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
                     val key = "habit_screen_shown_$occurrenceKey"
                     getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE).edit().remove(key).apply()
+                    result.success(true)
+                }
+                "setMedication" -> {
+                    val medicationId = call.argument<String>("medicationId") ?: return@setMethodCallHandler
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val timeInMillis = call.argument<Long>("timeInMillis") ?: return@setMethodCallHandler
+                    val title = call.argument<String>("title") ?: ""
+                    val message = call.argument<String>("message") ?: ""
+                    val dosageAmount = call.argument<String>("dosageAmount") ?: ""
+                    val dosageUnit = call.argument<String>("dosageUnit") ?: ""
+                    setMedicationOccurrence(timeInMillis, medicationId, occurrenceKey, title, message, dosageAmount, dosageUnit)
+                    result.success(true)
+                }
+                "cancelMedication" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    cancelMedicationOccurrence(occurrenceKey)
+                    result.success(true)
+                }
+                "setMedicationConfirmation" -> {
+                    val medicationId = call.argument<String>("medicationId") ?: return@setMethodCallHandler
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val timeInMillis = call.argument<Long>("timeInMillis") ?: return@setMethodCallHandler
+                    val title = call.argument<String>("title") ?: ""
+                    setMedicationConfirmationOccurrence(timeInMillis, medicationId, occurrenceKey, title)
+                    result.success(true)
+                }
+                "cancelMedicationConfirmation" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    cancelMedicationConfirmationOccurrence(occurrenceKey)
+                    result.success(true)
+                }
+                "clearMedicationScreenFlag" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val keyMain = "medication_screen_shown_$occurrenceKey"
+                    val keyConfirm = "medication_confirm_screen_shown_$occurrenceKey"
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().remove(keyMain).remove(keyConfirm).apply()
+                    result.success(true)
+                }
+                "getPendingMedicationScreen" -> {
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    val pending = prefs.getString("pending_medication_screen", null)
+                    prefs.edit().remove("pending_medication_screen").apply()
+                    Log.d("MainActivity", "getPendingMedicationScreen: ${if (pending != null) "encontrado" else "vacío"}")
+                    result.success(pending)
+                }
+                "dismissMedicationNotification" -> {
+                    val occurrenceKey = call.argument<String>("occurrenceKey") ?: return@setMethodCallHandler
+                    val isConfirmation = call.argument<Boolean>("isConfirmation") ?: false
+                    val key = if (isConfirmation) "confirm|$occurrenceKey" else occurrenceKey
+                    val h = key.hashCode().toLong()
+                    val notifId = (Math.abs(h) % 2147483647L).toInt()
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.cancel(notifId)
+                    Log.d("MainActivity", "dismissMedicationNotification key=$key notifId=$notifId")
+                    result.success(true)
+                }
+                "setMusicStreamVolume" -> {
+                    val volumePercent = call.argument<Int>("volumePercent") ?: 80
+                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val savedVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    val targetVol = ((maxVol * volumePercent) / 100).coerceIn(0, maxVol)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+                    Log.d("MainActivity", "setMusicStreamVolume: $volumePercent% -> $targetVol/$maxVol (saved=$savedVol)")
+                    result.success(savedVol)
+                }
+                "restoreMusicStreamVolume" -> {
+                    val savedVol = call.argument<Int>("savedVolume") ?: -1
+                    if (savedVol >= 0) {
+                        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, savedVol.coerceIn(0, maxVol), 0)
+                        Log.d("MainActivity", "restoreMusicStreamVolume: $savedVol")
+                    }
                     result.success(true)
                 }
                 "stopAlarm" -> {
@@ -686,6 +824,74 @@ class MainActivity : FlutterActivity() {
                         }, 300)
                     }
                 }
+
+                val medicationIdFromIntent = intent.getStringExtra("medicationId")
+                val medOccurrenceKeyFromIntent = intent.getStringExtra("occurrenceKey")
+                val medScheduledAtLocalMillis = intent.getLongExtra("scheduledAtLocalMillis", -1L)
+                val medTitle = intent.getStringExtra("title") ?: ""
+                val medMessage = intent.getStringExtra("message") ?: ""
+                val medDosageAmount = intent.getStringExtra("dosageAmount") ?: ""
+                val medDosageUnit = intent.getStringExtra("dosageUnit") ?: ""
+                val isConfirmation = intent.getBooleanExtra("isConfirmation", false)
+
+                if ((screenRoute == "/medication" || screenRoute == "/medication_confirm") &&
+                    autoShow &&
+                    !medicationIdFromIntent.isNullOrBlank() &&
+                    !medOccurrenceKeyFromIntent.isNullOrBlank()
+                ) {
+                    val medScreenKey = if (screenRoute == "/medication_confirm")
+                        "medication_confirm_screen_shown_$medOccurrenceKeyFromIntent"
+                    else
+                        "medication_screen_shown_$medOccurrenceKeyFromIntent"
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    val alreadyShown = prefs.getBoolean(medScreenKey, false)
+
+                    if (!alreadyShown) {
+                        try {
+                            window.addFlags(
+                                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                            )
+                        } catch (_: Exception) {}
+
+                        prefs.edit().putBoolean(medScreenKey, true).apply()
+
+                        // Guardar como pending en prefs para cold start (Flutter no listo aún)
+                        val pendingJson = JSONObject().apply {
+                            put("medicationId", medicationIdFromIntent)
+                            put("occurrenceKey", medOccurrenceKeyFromIntent)
+                            put("scheduledAtLocalMillis", medScheduledAtLocalMillis)
+                            put("title", medTitle)
+                            put("message", medMessage)
+                            put("dosageAmount", medDosageAmount)
+                            put("dosageUnit", medDosageUnit)
+                            put("isConfirmation", isConfirmation)
+                            put("screenRoute", screenRoute)
+                            put("timestamp", System.currentTimeMillis())
+                        }
+                        prefs.edit().putString("pending_medication_screen", pendingJson.toString()).apply()
+                        Log.d("MainActivity", "Guardado pending_medication_screen en alarm_prefs")
+
+                        val methodName = if (screenRoute == "/medication_confirm") "showMedicationConfirmScreen" else "showMedicationScreen"
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            methodChannel?.invokeMethod(
+                                methodName,
+                                mapOf(
+                                    "medicationId" to medicationIdFromIntent,
+                                    "occurrenceKey" to medOccurrenceKeyFromIntent,
+                                    "scheduledAtLocalMillis" to medScheduledAtLocalMillis,
+                                    "title" to medTitle,
+                                    "message" to medMessage,
+                                    "dosageAmount" to medDosageAmount,
+                                    "dosageUnit" to medDosageUnit,
+                                    "isConfirmation" to isConfirmation
+                                )
+                            )
+                        }, 300)
+                    }
+                }
             }
         }
     }
@@ -825,6 +1031,99 @@ class MainActivity : FlutterActivity() {
         val h = key.hashCode().toLong()
         val abs = kotlin.math.abs(h)
         return (abs % 2147483647L).toInt()
+    }
+
+    // ─── MEDICATION ─────────────────────────────────────────────────────────────
+
+    private fun setMedicationOccurrence(
+        timeInMillis: Long,
+        medicationId: String,
+        occurrenceKey: String,
+        title: String,
+        message: String,
+        dosageAmount: String,
+        dosageUnit: String
+    ) {
+        val intent = Intent(this, MedicationReceiver::class.java).apply {
+            action = MedicationReceiver.MEDICATION_ACTION
+            putExtra("medicationId", medicationId)
+            putExtra("occurrenceKey", occurrenceKey)
+            putExtra("title", title)
+            putExtra("message", message)
+            putExtra("dosageAmount", dosageAmount)
+            putExtra("dosageUnit", dosageUnit)
+            putExtra("scheduledAtLocalMillis", timeInMillis)
+        }
+        val requestCode = stableRequestCode(occurrenceKey)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+        Log.d("MainActivity", "Medication occurrence set: key=$occurrenceKey time=${java.util.Date(timeInMillis)}")
+    }
+
+    private fun setMedicationConfirmationOccurrence(
+        timeInMillis: Long,
+        medicationId: String,
+        occurrenceKey: String,
+        title: String
+    ) {
+        val intent = Intent(this, MedicationReceiver::class.java).apply {
+            action = MedicationReceiver.MEDICATION_CONFIRM_ACTION
+            putExtra("medicationId", medicationId)
+            putExtra("occurrenceKey", occurrenceKey)
+            putExtra("title", title)
+            putExtra("scheduledAtLocalMillis", timeInMillis)
+            putExtra("isConfirmation", true)
+        }
+        val confirmationOffset = 2_000_000
+        val requestCode = stableRequestCode(occurrenceKey) + confirmationOffset
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+        Log.d("MainActivity", "Medication confirmation set: key=$occurrenceKey time=${java.util.Date(timeInMillis)}")
+    }
+
+    private fun cancelMedicationOccurrence(occurrenceKey: String) {
+        val intent = Intent(this, MedicationReceiver::class.java).apply {
+            action = MedicationReceiver.MEDICATION_ACTION
+            putExtra("occurrenceKey", occurrenceKey)
+        }
+        val requestCode = stableRequestCode(occurrenceKey)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, requestCode, intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
+    private fun cancelMedicationConfirmationOccurrence(occurrenceKey: String) {
+        val intent = Intent(this, MedicationReceiver::class.java).apply {
+            action = MedicationReceiver.MEDICATION_CONFIRM_ACTION
+            putExtra("occurrenceKey", occurrenceKey)
+        }
+        val confirmationOffset = 2_000_000
+        val requestCode = stableRequestCode(occurrenceKey) + confirmationOffset
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, requestCode, intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
+    private fun calendarAlarmId(occurrenceKey: String): Int {
+        val base = stableRequestCode("calendar|$occurrenceKey")
+        val mod = base % 1000000000
+        return 1000000000 + mod
     }
 
     private fun checkDoNotDisturbPermission(): Boolean {

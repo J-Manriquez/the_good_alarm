@@ -36,7 +36,7 @@ E/Gralloc4(24550): isSupported(1, 1, 59, 1, ...) failed with 1
 E/GraphicBufferAllocator(24550): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1       
 E/AHardwareBuffer(24550): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
 D/VRI[MainActivity](24550): vri.reportNextDraw android.view.ViewRootImpl.performTraversals:4360 android.view.ViewRootImpl.doTraversal:2989 android.view.ViewRootImpl$TraversalRunnable.run:10304 android.view.Choreographer$CallbackRecord.run:1594 android.view.Choreographer$CallbackRecord.run:1603
-D/SurfaceView(24550): UPDATE Surface(name=SurfaceView[com.example.the_good_alarm/com.example.the_good_alarm.MainActivity]#44757)/@0xc50a5b3, mIsProjectionMode = false
+D/SurfaceView(24550): UPDATE Surface(name=SurfaceView[com.andodevs.the_good_alarm/com.andodevs.the_good_alarm.MainActivity]#44757)/@0xc50a5b3, mIsProjectionMode = false
 E/LB      (24550): fail to open node: No such file or directory
 D/VRI[MainActivity](24550): vri.Setup new sync=wmsSync-VRI[MainActivity]#3
 D/OpenGLRenderer(24550): makeCurrent grContext:0xb400007868f09220 reset mTextureAvailable
@@ -47,16 +47,16 @@ I/HandWritingStubImpl(24550): refreshLastKeyboardType: 1
 I/HandWritingStubImpl(24550): getCurrentKeyboardType: 1
 I/HandWritingStubImpl(24550): getCurrentKeyboardType: 1
 I/MiInputConsumer(24550): optimized resample latency: 8690898 ns
-I/ImeTracker(24550): com.example.the_good_alarm:c8f8bd2: onRequestShow at ORIGIN_CLIENT_SHOW_SOFT_INPUT reason SHOW_SOFT_INPUT
+I/ImeTracker(24550): com.andodevs.the_good_alarm:c8f8bd2: onRequestShow at ORIGIN_CLIENT_SHOW_SOFT_INPUT reason SHOW_SOFT_INPUT
 I/HandWritingStubImpl(24550): refreshLastKeyboardType: 1
 I/HandWritingStubImpl(24550): getCurrentKeyboardType: 1
 D/InputMethodManager(24550): showSoftInput() view=io.flutter.embedding.android.FlutterView{59681dc VFED..... .F....ID 0,0-1080,2400 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
 D/InsetsController(24550): show(ime(), fromIme=true)
-I/ImeTracker(24550): com.example.the_good_alarm:c8f8bd2: onShown
-I/ImeTracker(24550): com.example.the_good_alarm:3229f7f6: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT
+I/ImeTracker(24550): com.andodevs.the_good_alarm:c8f8bd2: onShown
+I/ImeTracker(24550): com.andodevs.the_good_alarm:3229f7f6: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT
 W/WindowOnBackDispatcher(24550): sendCancelIfRunning: isInProgress=falsecallback=ImeCallback=ImeOnBackInvokedCallback@221194043 Callback=android.window.IOnBackInvokedCallback$Stub$Proxy@1879b92
-I/ImeTracker(24550): com.example.the_good_alarm:23ca1a74: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT_BY_INSETS_API
-I/ImeTracker(24550): com.example.the_good_alarm:3229f7f6: onHidden
+I/ImeTracker(24550): com.andodevs.the_good_alarm:23ca1a74: onRequestHide at ORIGIN_CLIENT_HIDE_SOFT_INPUT reason HIDE_SOFT_INPUT_BY_INSETS_API
+I/ImeTracker(24550): com.andodevs.the_good_alarm:3229f7f6: onHidden
 D/MainActivity(24550): MethodChannel call: setAlarm
 D/MainActivity(24550): Calculating alarm time - Current: Sat Jul 12 19:04:56 GMT-04:00 2025, Target hour: 19:5
 D/MainActivity(24550): One-time alarm: scheduling for today
@@ -71,7 +71,7 @@ W/RemoteInputConnectionImpl(24550): getTextAfterCursor on inactive InputConnecti
 W/RemoteInputConnectionImpl(24550): getTextAfterCursor on inactive InputConnection
 I/Choreographer(24550): Skipped 38 frames!  The application may be doing too much work on its main thread.
 W/Looper  (24550): PerfMonitor doFrame : time=31ms vsyncFrame=9169308 latency=320ms procState=-1 historyMsgCount=3 (msgIndex=1 wall=324ms seq=330 late=6ms h=android.app.ActivityThread$H w=159)
-D/AlarmReceiver(24550): onReceive called with action: com.example.the_good_alarm.ALARM_TRIGGERED
+D/AlarmReceiver(24550): onReceive called with action: com.andodevs.the_good_alarm.ALARM_TRIGGERED
 D/AlarmReceiver(24550): Default alarm trigger action
 D/AlarmReceiver(24550): handleAlarmTrigger called
 D/AlarmReceiver(24550): Alarm details - ID: 96260, Title: Alarma, Message: ¡Es hora de despertar!     
@@ -140,14 +140,14 @@ D/MainActivity(24550): Scheduling delayed call to show alarm screen
 D/AppScoutStateMachine(24550): 24550-ScoutStateMachinecreated
 W/libc    (24550): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
 E/OpenGLRenderer(24550): Unable to match the desired swap behavior.
-W/.the_good_alarm(24550): type=1400 audit(0.0:779515): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13236 scontext=u:r:untrusted_app:s0:c76,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm
+W/.the_good_alarm(24550): type=1400 audit(0.0:779515): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13236 scontext=u:r:untrusted_app:s0:c76,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.andodevs.the_good_alarm
 W/libc    (24550): Access denied finding property "vendor.display.enable_optimal_refresh_rate"        
 E/qdgralloc(24550): GetGpuPixelFormat: No map for format: 0x38
 E/AdrenoUtils(24550): <validate_memory_layout_input_parmas:1970>: Unknown Format 0
 E/AdrenoUtils(24550): <adreno_init_memory_layout:4720>: Memory Layout input parameter validation failed!
 E/qdgralloc(24550): GetGpuResourceSizeAndDimensions Graphics metadata init failed
 E/Gralloc4(24550): isSupported(1, 1, 56, 1, ...) failed with 1
-W/.the_good_alarm(24550): type=1400 audit(0.0:779516): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13236 scontext=u:r:untrusted_app:s0:c76,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.example.the_good_alarm
+W/.the_good_alarm(24550): type=1400 audit(0.0:779516): avc:  denied  { read } for  name="u:object_r:vendor_display_prop:s0" dev="tmpfs" ino=13236 scontext=u:r:untrusted_app:s0:c76,c258,c512,c768 tcontext=u:object_r:vendor_display_prop:s0 tclass=file permissive=0 app=com.andodevs.the_good_alarm
 E/GraphicBufferAllocator(24550): Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1       
 E/AHardwareBuffer(24550): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
 E/qdgralloc(24550): GetGpuPixelFormat: No map for format: 0x3b
@@ -171,10 +171,10 @@ E/qdgralloc(24550): GetGpuResourceSizeAndDimensions Graphics metadata init faile
 E/Gralloc4(24550): isSupported(1, 1, 59, 1, ...) failed with 1
 E/GraphicBufferAllocator(24550): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 1       
 E/AHardwareBuffer(24550): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
-I/flutter (11476): Received notification: {id: 1752361501911, packageName: com.example.the_good_alarm, appName: The Good Alarm, title: Alarma, text: ¡Es hora de despertar!, time: 1752361501911}
-I/flutter (11476): Notificación filtrada, no se guarda en Firebase: com.example.the_good_alarm        
+I/flutter (11476): Received notification: {id: 1752361501911, packageName: com.andodevs.the_good_alarm, appName: The Good Alarm, title: Alarma, text: ¡Es hora de despertar!, time: 1752361501911}
+I/flutter (11476): Notificación filtrada, no se guarda en Firebase: com.andodevs.the_good_alarm        
 D/VRI[MainActivity](24550): vri.reportNextDraw android.view.ViewRootImpl.performTraversals:4360 android.view.ViewRootImpl.doTraversal:2989 android.view.ViewRootImpl$TraversalRunnable.run:10304 android.view.Choreographer$CallbackRecord.run:1594 android.view.Choreographer$CallbackRecord.run:1603
-D/SurfaceView(24550): UPDATE Surface(name=SurfaceView[com.example.the_good_alarm/com.example.the_good_alarm.MainActivity]#44775)/@0x3aaf94d, mIsProjectionMode = false
+D/SurfaceView(24550): UPDATE Surface(name=SurfaceView[com.andodevs.the_good_alarm/com.andodevs.the_good_alarm.MainActivity]#44775)/@0x3aaf94d, mIsProjectionMode = false
 D/VRI[MainActivity](24550): vri.Setup new sync=wmsSync-VRI[MainActivity]#6
 D/VRI[MainActivity](24550): vri.reportDrawFinished
 D/VRI[MainActivity](24550): vri.reportNextDraw android.view.ViewRootImpl.handleResized:2297 android.view.ViewRootImpl.-$$Nest$mhandleResized:0 android.view.ViewRootImpl$ViewRootHandler.handleMessageImpl:6693 android.view.ViewRootImpl$ViewRootHandler.handleMessage:6662 android.os.Handler.dispatchMessage:106

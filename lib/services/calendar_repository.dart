@@ -399,6 +399,11 @@ class CalendarRepository {
         baseFieldUpdatedAt: baseFieldUpdatedAt,
         deviceId: deviceId,
       );
+      await _cloud.ensureCalendarLinkedToUser(
+        userId: userId,
+        calendarId: calendarId,
+        deviceId: deviceId,
+      );
       await _local.clearDirty('calendar', calendarId);
     }
 

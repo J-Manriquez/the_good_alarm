@@ -35,6 +35,7 @@ class SettingsScreen extends StatefulWidget {
   static const String defaultVolumeRampUpKey = 'default_volume_ramp_up_seconds';
   static const String defaultTempVolumeReductionKey = 'default_temp_volume_reduction_percent';
   static const String defaultTempVolumeReductionDurationKey = 'default_temp_volume_reduction_duration_seconds';
+  static const String leftScreenSelectionKey = 'left_screen_selection';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -52,6 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultVolumeRampUpDurationSeconds = 30;
   int _defaultTempVolumeReductionPercent = 30;
   int _defaultTempVolumeReductionDurationSeconds = 60;
+  String _leftScreen = 'habits';
 
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
   final AlarmLocalService _alarmLocalService = AlarmLocalService();
@@ -90,6 +92,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
     final maxSnoozes = prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
     final cloudSync = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
+    final leftScreen = prefs.getString(SettingsScreen.leftScreenSelectionKey) ?? 'habits';
     
     // Cargar configuraciones de volumen
     final maxVolumePercent = prefs.getInt(SettingsScreen.defaultMaxVolumeKey) ?? 100;
@@ -119,9 +122,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _defaultVolumeRampUpDurationSeconds = volumeRampUpDuration;
         _defaultTempVolumeReductionPercent = tempVolumeReduction;
         _defaultTempVolumeReductionDurationSeconds = tempVolumeReductionDuration;
+        _leftScreen = leftScreen;
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
+  }
+
+  Future<void> _saveLeftScreen(String screen) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(SettingsScreen.leftScreenSelectionKey, screen);
+    print('[SettingsScreen] pantalla izquierda guardada: $screen');
+    if (mounted) {
+      setState(() {
+        _leftScreen = screen;
+      });
+    }
   }
 
   Future<void> _loadSistemaData() async {
@@ -961,6 +976,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _saveDefaultTempVolumeReductionDuration(value.toInt());
                           },
                           activeColor: scheme.tertiary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Card para selección de pantalla izquierda del menú
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Pantalla del menú izquierdo',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Selecciona qué pantalla se muestra a la izquierda del menú principal. Las dos pantallas restantes aparecerán juntas en la vista dual del lado derecho.',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+                        ),
+                        const SizedBox(height: 8),
+                        RadioListTile<String>(
+                          title: const Text('Hábitos'),
+                          value: 'habits',
+                          groupValue: _leftScreen,
+                          activeColor: scheme.primary,
+                          onChanged: (v) {
+                            if (v != null) _saveLeftScreen(v);
+                          },
+                        ),
+                        RadioListTile<String>(
+                          title: const Text('Calendario'),
+                          value: 'calendar',
+                          groupValue: _leftScreen,
+                          activeColor: scheme.primary,
+                          onChanged: (v) {
+                            if (v != null) _saveLeftScreen(v);
+                          },
+                        ),
+                        RadioListTile<String>(
+                          title: const Text('Medicamentos'),
+                          value: 'medications',
+                          groupValue: _leftScreen,
+                          activeColor: scheme.primary,
+                          onChanged: (v) {
+                            if (v != null) _saveLeftScreen(v);
+                          },
                         ),
                       ],
                     ),

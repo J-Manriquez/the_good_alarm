@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.the_good_alarm">
+    package="com.andodevs.the_good_alarm">
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -52,9 +52,9 @@
             android:enabled="true" 
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.the_good_alarm.ALARM_TRIGGERED" />
-                <action android:name="com.example.the_good_alarm.STOP_ALARM_ACTION" />
-                <action android:name="com.example.the_good_alarm.SNOOZE_ALARM_ACTION" />
+                <action android:name="com.andodevs.the_good_alarm.ALARM_TRIGGERED" />
+                <action android:name="com.andodevs.the_good_alarm.STOP_ALARM_ACTION" />
+                <action android:name="com.andodevs.the_good_alarm.SNOOZE_ALARM_ACTION" />
             </intent-filter>
         </receiver>
 
@@ -63,7 +63,17 @@
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.the_good_alarm.HABIT_TRIGGERED" />
+                <action android:name="com.andodevs.the_good_alarm.HABIT_TRIGGERED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".MedicationReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.andodevs.the_good_alarm.MEDICATION_TRIGGERED" />
+                <action android:name="com.andodevs.the_good_alarm.MEDICATION_CONFIRMATION" />
             </intent-filter>
         </receiver>
         

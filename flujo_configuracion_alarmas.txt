@@ -41,7 +41,7 @@ suena y se apaga, incluyendo toda la comunicación con los scripts nativos de An
 ================================================================================
 
 ### 2.1 Method Channel Principal
-- Canal: "com.example.the_good_alarm/alarm"
+- Canal: "com.andodevs.the_good_alarm/alarm"
 - Ubicación en Flutter: Llamadas desde alarm_edit_screen.dart y alarm_screen.dart
 - Ubicación en Android: MainActivity.kt (método configureFlutterEngine)
 

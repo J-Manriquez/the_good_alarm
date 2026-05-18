@@ -1,4 +1,4 @@
-package com.example.the_good_alarm // Asegúrate de que este sea tu paquete correcto
+package com.andodevs.the_good_alarm // Asegúrate de que este sea tu paquete correcto
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -29,6 +29,8 @@ class BootReceiver : BroadcastReceiver() {
             // Restaurar todas las alarmas desde SharedPreferences
             restoreAlarmsFromPreferences(context)
             restoreHabitsFromPreferences(context)
+            restoreCalendarAlarmsFromPreferences(context)
+            restoreMedicationsFromPreferences(context)
         }
     }
     
@@ -140,6 +142,56 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun restoreCalendarAlarmsFromPreferences(context: Context) {
+        try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val raw = prefs.getString("flutter.calendarAlarms", null)
+            if (raw.isNullOrBlank()) return
+
+            val array = JSONArray(raw)
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+
+                val occurrenceKey = item.optString("occurrenceKey", "").trim()
+                val timeInMillis = item.optLong("timeInMillis", -1L)
+                val title = item.optString("title", "Calendario")
+                val message = item.optString("message", "")
+                val hour = item.optInt("hour", -1)
+                val minute = item.optInt("minute", -1)
+
+                val maxSnoozes = item.optInt("maxSnoozes", 3)
+                val snoozeDurationMinutes = item.optInt("snoozeDurationMinutes", 5)
+                val maxVolumePercent = item.optInt("maxVolumePercent", 100)
+                val volumeRampUpDurationSeconds = item.optInt("volumeRampUpDurationSeconds", 30)
+                val tempVolumeReductionPercent = item.optInt("tempVolumeReductionPercent", 30)
+                val tempVolumeReductionDurationSeconds = item.optInt("tempVolumeReductionDurationSeconds", 60)
+
+                if (occurrenceKey.isEmpty() || timeInMillis <= System.currentTimeMillis()) continue
+
+                val alarmId = calendarAlarmId(occurrenceKey)
+                scheduleCalendarAlarm(
+                    context = context,
+                    timeInMillis = timeInMillis,
+                    alarmId = alarmId,
+                    title = title,
+                    message = message,
+                    hour = hour,
+                    minute = minute,
+                    maxSnoozes = maxSnoozes,
+                    snoozeDurationMinutes = snoozeDurationMinutes,
+                    maxVolumePercent = maxVolumePercent,
+                    volumeRampUpDurationSeconds = volumeRampUpDurationSeconds,
+                    tempVolumeReductionPercent = tempVolumeReductionPercent,
+                    tempVolumeReductionDurationSeconds = tempVolumeReductionDurationSeconds
+                )
+
+                Log.d("BootReceiver", "Restored calendar occurrenceKey=$occurrenceKey alarmId=$alarmId for ${Date(timeInMillis)}")
+            }
+        } catch (e: Exception) {
+            Log.e("BootReceiver", "Error restoring calendar alarms", e)
+        }
+    }
+
     private fun parseRepeatDays(jsonArray: JSONArray?): List<Int> {
         if (jsonArray == null) return emptyList()
         val result = mutableListOf<Int>()
@@ -247,7 +299,7 @@ class BootReceiver : BroadcastReceiver() {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         val triggerIntent = Intent(context, AlarmReceiver::class.java).apply {
-            action = "com.example.the_good_alarm.ALARM_TRIGGERED"
+            action = "com.andodevs.the_good_alarm.ALARM_TRIGGERED"
             putExtra("alarmId", alarmId)
             putExtra("title", title)
             putExtra("message", message)
@@ -342,5 +394,165 @@ class BootReceiver : BroadcastReceiver() {
         val h = key.hashCode().toLong()
         val abs = kotlin.math.abs(h)
         return (abs % 2147483647L).toInt()
+    }
+
+    private fun calendarAlarmId(occurrenceKey: String): Int {
+        val base = stableRequestCode("calendar|$occurrenceKey")
+        val mod = base % 1000000000
+        return 1000000000 + mod
+    }
+
+    private fun restoreMedicationsFromPreferences(context: Context) {
+        try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val medicationsJson = prefs.getString("flutter.medications", null)
+            if (medicationsJson.isNullOrBlank()) return
+
+            val array = JSONArray(medicationsJson)
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+
+                val medicationId = item.optString("medicationId", "").trim()
+                val occurrenceKey = item.optString("occurrenceKey", "").trim()
+                val title = item.optString("title", "Medicamento")
+                val message = item.optString("message", "")
+                val timeInMillis = item.optLong("timeInMillis", -1L)
+                val dosageAmount = item.optString("dosageAmount", "")
+                val dosageUnit = item.optString("dosageUnit", "")
+
+                if (medicationId.isEmpty() || occurrenceKey.isEmpty() || timeInMillis <= System.currentTimeMillis()) {
+                    continue
+                }
+
+                scheduleMedication(
+                    context = context,
+                    timeInMillis = timeInMillis,
+                    medicationId = medicationId,
+                    occurrenceKey = occurrenceKey,
+                    title = title,
+                    message = message,
+                    dosageAmount = dosageAmount,
+                    dosageUnit = dosageUnit
+                )
+                Log.d("BootReceiver", "Restored medicationId=$medicationId occurrenceKey=$occurrenceKey for ${Date(timeInMillis)}")
+            }
+        } catch (e: Exception) {
+            Log.e("BootReceiver", "Error restoring medications", e)
+        }
+    }
+
+    private fun scheduleMedication(
+        context: Context,
+        timeInMillis: Long,
+        medicationId: String,
+        occurrenceKey: String,
+        title: String,
+        message: String,
+        dosageAmount: String,
+        dosageUnit: String
+    ) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val triggerIntent = Intent(context, MedicationReceiver::class.java).apply {
+            action = MedicationReceiver.MEDICATION_ACTION
+            putExtra("medicationId", medicationId)
+            putExtra("occurrenceKey", occurrenceKey)
+            putExtra("title", title)
+            putExtra("message", message)
+            putExtra("dosageAmount", dosageAmount)
+            putExtra("dosageUnit", dosageUnit)
+            putExtra("scheduledAtLocalMillis", timeInMillis)
+            putExtra("screenRoute", "/medication")
+            putExtra("autoShowAlarm", true)
+        }
+
+        val requestCode = stableRequestCode(occurrenceKey)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            triggerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    timeInMillis,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            }
+        } catch (security: SecurityException) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            }
+        }
+    }
+
+    private fun scheduleCalendarAlarm(
+        context: Context,
+        timeInMillis: Long,
+        alarmId: Int,
+        title: String,
+        message: String,
+        hour: Int,
+        minute: Int,
+        maxSnoozes: Int,
+        snoozeDurationMinutes: Int,
+        maxVolumePercent: Int,
+        volumeRampUpDurationSeconds: Int,
+        tempVolumeReductionPercent: Int,
+        tempVolumeReductionDurationSeconds: Int
+    ) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val triggerIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "com.andodevs.the_good_alarm.ALARM_TRIGGERED"
+            putExtra("alarmId", alarmId)
+            putExtra("title", title)
+            putExtra("message", message)
+            putExtra("screenRoute", "/alarm")
+            putExtra("repeatDays", intArrayOf())
+            putExtra("isDaily", false)
+            putExtra("isWeekly", false)
+            putExtra("isWeekend", false)
+            putExtra("maxSnoozes", maxSnoozes)
+            putExtra("snoozeDurationMinutes", snoozeDurationMinutes)
+            putExtra("hour", hour)
+            putExtra("minute", minute)
+            putExtra("maxVolumePercent", maxVolumePercent)
+            putExtra("volumeRampUpDurationSeconds", volumeRampUpDurationSeconds)
+            putExtra("tempVolumeReductionPercent", tempVolumeReductionPercent)
+            putExtra("tempVolumeReductionDurationSeconds", tempVolumeReductionDurationSeconds)
+        }
+
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            alarmId,
+            triggerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    timeInMillis,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            }
+        } catch (security: SecurityException) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+            }
+        }
     }
 }

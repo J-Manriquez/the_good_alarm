@@ -23,7 +23,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
   int snoozeCount = 0;
   int maxSnoozes = 3;
   int snoozeDurationMinutes = 5; // Valor por defecto
-  static const platform = MethodChannel('com.example.the_good_alarm/alarm');
+  static const platform = MethodChannel('com.andodevs.the_good_alarm/alarm');
 
   // Agregar estas variables para manejar los juegos
   bool requireGame = false;

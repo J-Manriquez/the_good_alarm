@@ -1,4 +1,4 @@
-package com.example.the_good_alarm
+package com.andodevs.the_good_alarm
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,7 +13,7 @@ import android.util.Log
 
 class HabitReceiver : BroadcastReceiver() {
     companion object {
-        const val HABIT_ACTION = "com.example.the_good_alarm.HABIT_TRIGGERED"
+        const val HABIT_ACTION = "com.andodevs.the_good_alarm.HABIT_TRIGGERED"
         const val HABIT_NOTIFICATION_CHANNEL_ID = "habit_notification_channel"
     }
 

@@ -1,4 +1,4 @@
-package com.example.the_good_alarm
+package com.andodevs.the_good_alarm
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

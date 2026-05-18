@@ -15,7 +15,11 @@ dependencies:
   flutter:
     sdk: flutter
   intl: ^0.20.2
+  google_sign_in: ^6.3.0
+  googleapis: ^13.2.0
+  http: ^1.2.2
   shared_preferences: ^2.5.3
+  flutter_tts: ^4.2.0
 
 dev_dependencies:
   flutter_test:

@@ -110,6 +110,32 @@ class CalendarFirebaseService {
     return snap.docs.map((d) => d.id).toList();
   }
 
+  Future<void> ensureCalendarLinkedToUser({
+    required String userId,
+    required String calendarId,
+    required String deviceId,
+    String role = 'owner',
+  }) async {
+    await _calendarsCollection.doc(calendarId).collection('miembros').doc(userId).set({
+      'uid': userId,
+      'role': role,
+      'status': 'active',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'deletedAt': null,
+    }, SetOptions(merge: true));
+
+    await _userCalendarRefs(userId).doc(calendarId).set({
+      'calendarId': calendarId,
+      'role': role,
+      'status': 'active',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'deletedAt': null,
+      'updatedByDevice': deviceId,
+    }, SetOptions(merge: true));
+  }
+
   Future<List<CalendarModel>> getCalendarsByIds(List<String> ids) async {
     if (ids.isEmpty) return [];
     final calendars = <CalendarModel>[];
@@ -251,4 +277,3 @@ class CalendarFirebaseService {
     });
   }
 }
-

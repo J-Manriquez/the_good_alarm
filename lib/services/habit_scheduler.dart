@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/habit_models.dart';
 
 class HabitScheduler {
-  static const MethodChannel _platform = MethodChannel('com.example.the_good_alarm/alarm');
+  static const MethodChannel _platform = MethodChannel('com.andodevs.the_good_alarm/alarm');
 
   DateTime? nextOccurrenceLocal(HabitModel habit, DateTime nowLocal) {
     if (!habit.isActive) return null;

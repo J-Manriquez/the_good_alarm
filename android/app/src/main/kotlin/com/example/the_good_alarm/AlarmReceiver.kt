@@ -1,4 +1,4 @@
-package com.example.the_good_alarm
+package com.andodevs.the_good_alarm
 
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -237,9 +237,9 @@ class AlarmReceiver : BroadcastReceiver() {
         var currentRingtone: Ringtone? = null
         var currentVibrator: Vibrator? = null
         const val NOTIFICATION_CHANNEL_ID = "alarm_notification_channel"
-        private const val ALARM_ACTION = "com.example.the_good_alarm.ALARM_TRIGGERED"
-        private const val STOP_ACTION = "com.example.the_good_alarm.STOP_ALARM_ACTION"
-        private const val SNOOZE_ACTION = "com.example.the_good_alarm.SNOOZE_ALARM_ACTION"
+        private const val ALARM_ACTION = "com.andodevs.the_good_alarm.ALARM_TRIGGERED"
+        private const val STOP_ACTION = "com.andodevs.the_good_alarm.STOP_ALARM_ACTION"
+        private const val SNOOZE_ACTION = "com.andodevs.the_good_alarm.SNOOZE_ALARM_ACTION"
         private const val SNOOZE_REQUEST_CODE_OFFSET = 1000000
         
         fun stopAlarmSound() {
