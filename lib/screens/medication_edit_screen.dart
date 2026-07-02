@@ -1,12 +1,16 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/medication_models.dart';
+import '../models/piper_voice_catalog.dart';
 import '../services/medication_repository.dart';
 import '../services/medication_scheduler.dart';
+import '../services/piper_tts_service.dart';
 import '../settings_screen.dart';
+import '../widgets/voices_manager_modal.dart';
 
 class MedicationEditScreen extends StatefulWidget {
   final MedicationModel? medication;
@@ -21,6 +25,7 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
   final MedicationRepository _repo = MedicationRepository();
   final MedicationScheduler _scheduler = MedicationScheduler();
   final FlutterTts _tts = FlutterTts();
+  AudioPlayer? _previewPlayer;
 
   final TextEditingController _nameCtrl = TextEditingController();
   final TextEditingController _dosageAmountCtrl = TextEditingController();
@@ -40,6 +45,10 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
   bool _enableTts = true;
   String _ttsLanguage = 'es-MX';
   int _ttsVolume = 80; // 0-100
+  double _ttsPitch = 1.0;
+  int _ttsRepeatCount = 3;
+  int _ttsRepeatDelaySeconds = 1;
+  String? _piperVoice;
   String _colorHex = '#4CAF50';
   String _repeatMode = 'daily';
   Set<int> _weekdays = {1, 2, 3, 4, 5, 6, 7};
@@ -69,6 +78,10 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
       _enableTts = med.enableTts;
       _ttsLanguage = med.ttsLanguage;
       _ttsVolume = med.ttsVolume;
+      _ttsPitch = med.ttsPitch;
+      _ttsRepeatCount = med.ttsRepeatCount;
+      _ttsRepeatDelaySeconds = med.ttsRepeatDelaySeconds;
+      _piperVoice = med.piperVoice;
       _colorHex = med.colorHex.isEmpty ? '#4CAF50' : med.colorHex;
       _repeatMode = med.repeatMode;
       _weekdays = med.weekdays.toSet();
@@ -92,6 +105,8 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
     _snoozeCtrl.dispose();
     _confirmDelayCtrl.dispose();
     _tts.stop();
+    _previewPlayer?.stop();
+    _previewPlayer?.dispose();
     super.dispose();
   }
 
@@ -101,7 +116,17 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
     if (!mounted) return;
     setState(() {
       _cloudSyncEnabled = cloudSync;
-      if (widget.medication == null) _syncToCloud = cloudSync;
+      if (widget.medication == null) {
+        _syncToCloud = cloudSync;
+        // Cargar defaults TTS globales para nuevos medicamentos
+        final ttsVoice = prefs.getString(SettingsScreen.defaultTtsPiperVoiceKey);
+        if (ttsVoice != null) _piperVoice = ttsVoice;
+        _ttsLanguage = prefs.getString(SettingsScreen.defaultTtsLanguageKey) ?? 'es-MX';
+        _ttsPitch = prefs.getDouble(SettingsScreen.defaultTtsPitchKey) ?? 1.0;
+        _ttsVolume = prefs.getInt(SettingsScreen.defaultTtsVolumeKey) ?? 80;
+        _ttsRepeatCount = prefs.getInt(SettingsScreen.defaultTtsRepeatCountKey) ?? 3;
+        _ttsRepeatDelaySeconds = prefs.getInt(SettingsScreen.defaultTtsRepeatDelayKey) ?? 1;
+      }
     });
   }
 
@@ -125,6 +150,29 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
     }
   }
 
+  Future<void> _openVoicesManager() async {
+    final result = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => VoicesManagerModal(selectedVoiceId: _piperVoice),
+    );
+    if (!mounted) return;
+    setState(() => _piperVoice = result);
+  }
+
+  String _piperVoiceName(String voiceId) {
+    try {
+      final v = piperVoiceCatalog.firstWhere((v) => v.id == voiceId);
+      return '${v.displayName} · ${v.locale} · ${v.qualityLabel}';
+    } catch (_) {
+      return voiceId;
+    }
+  }
+
   Future<void> _previewTts() async {
     final med = _buildModel();
     if (med == null) {
@@ -132,10 +180,41 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
           .showSnackBar(const SnackBar(content: Text('Ingresa el nombre del medicamento primero')));
       return;
     }
+
+    // Si hay voz Piper configurada, usarla en el preview
+    if (_piperVoice != null) {
+      try {
+        await _tts.stop();
+        await _previewPlayer?.stop();
+        await _previewPlayer?.dispose();
+        _previewPlayer = null;
+
+        final wavPath = await PiperTtsService.instance.synthesizeToWav(
+          med.buildTtsReminderText(),
+          _piperVoice!,
+        );
+        if (wavPath == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('El modelo Piper no está descargado aún')),
+            );
+          }
+          return;
+        }
+        _previewPlayer = AudioPlayer();
+        await _previewPlayer!.play(DeviceFileSource(wavPath));
+      } catch (e) {
+        print('[MedicationEditScreen] Piper preview error: $e');
+      }
+      return;
+    }
+
+    // Sin voz Piper: usar flutter_tts
     try {
       await _tts.stop();
       await _tts.setLanguage(_ttsLanguage);
       await _tts.setSpeechRate(0.5);
+      await _tts.setPitch(_ttsPitch);
       await _tts.speak(med.buildTtsReminderText());
     } catch (e) {
       print('[MedicationEditScreen] TTS preview error: $e');
@@ -171,6 +250,10 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
       enableTts: _enableTts,
       ttsLanguage: _ttsLanguage,
       ttsVolume: _ttsVolume,
+      ttsPitch: _ttsPitch,
+      ttsRepeatCount: _ttsRepeatCount,
+      ttsRepeatDelaySeconds: _ttsRepeatDelaySeconds,
+      piperVoice: _piperVoice,
       nextScheduledAtLocal: existing?.nextScheduledAtLocal,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -470,7 +553,16 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
           const SizedBox(height: 12),
 
           // ─── Sección 4: Voz (TTS) ────────────────────────────────────────
-          _sectionHeader('Voz (TTS)', scheme),
+          Row(
+            children: [
+              Expanded(child: _sectionHeader('Voz (TTS)', scheme)),
+              IconButton(
+                icon: const Icon(Icons.settings_voice, size: 20),
+                tooltip: 'Gestionar voces Piper',
+                onPressed: _openVoicesManager,
+              ),
+            ],
+          ),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -483,6 +575,42 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
                     contentPadding: EdgeInsets.zero,
                   ),
                   if (_enableTts) ...[
+                    // Indicador de voz Piper activa
+                    if (_piperVoice != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.record_voice_over,
+                                size: 16, color: scheme.onPrimaryContainer),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Voz Piper: ${_piperVoiceName(_piperVoice!)}',
+                                style: TextStyle(
+                                    color: scheme.onPrimaryContainer,
+                                    fontSize: 13),
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close,
+                                  size: 16, color: scheme.onPrimaryContainer),
+                              tooltip: 'Quitar voz Piper',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () =>
+                                  setState(() => _piperVoice = null),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _ttsLanguage,
@@ -525,6 +653,62 @@ class _MedicationEditScreenState extends State<MedicationEditScreen> {
                       onPressed: _previewTts,
                       icon: const Icon(Icons.volume_up_outlined),
                       label: const Text('Probar audio'),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Tono de voz', style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<double>(
+                      value: _ttsPitch,
+                      decoration: const InputDecoration(
+                        labelText: 'Tono',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 0.5, child: Text('Grave')),
+                        DropdownMenuItem(value: 1.0, child: Text('Normal')),
+                        DropdownMenuItem(value: 1.5, child: Text('Aguda')),
+                        DropdownMenuItem(value: 2.0, child: Text('Muy aguda')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setState(() => _ttsPitch = v);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Repeticiones', style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final entry in const [
+                          (1, '1 vez'),
+                          (3, '3 veces'),
+                          (5, '5 veces'),
+                          (-1, 'Indefinido'),
+                        ])
+                          ChoiceChip(
+                            label: Text(entry.$2),
+                            selected: _ttsRepeatCount == entry.$1,
+                            onSelected: (_) =>
+                                setState(() => _ttsRepeatCount = entry.$1),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Pausa entre repeticiones',
+                        style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final s in const [1, 3, 5, 10, 15])
+                          ChoiceChip(
+                            label: Text('${s}s'),
+                            selected: _ttsRepeatDelaySeconds == s,
+                            onSelected: (_) =>
+                                setState(() => _ttsRepeatDelaySeconds = s),
+                          ),
+                      ],
                     ),
                   ],
                 ],

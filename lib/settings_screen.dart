@@ -9,8 +9,10 @@ import 'services/sistema_firebase_service.dart';
 import 'models/sistema_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'models/app_theme_model.dart';
+import 'models/piper_voice_catalog.dart';
 import 'widgets/app_theme_provider.dart';
 import 'widgets/color_input_widget.dart';
+import 'widgets/voices_manager_modal.dart';
 import 'services/app_theme_controller.dart';
 
 enum AlarmGroupingOption {
@@ -29,13 +31,24 @@ class SettingsScreen extends StatefulWidget {
   static const String snoozeDurationKey = 'snooze_duration_minutes';
   static const String maxSnoozesKey = 'max_snoozes';
   static const String cloudSyncKey = 'cloud_sync_enabled';
-  
+
   // Nuevas claves para configuraciones de volumen
   static const String defaultMaxVolumeKey = 'default_max_volume_percent';
   static const String defaultVolumeRampUpKey = 'default_volume_ramp_up_seconds';
-  static const String defaultTempVolumeReductionKey = 'default_temp_volume_reduction_percent';
-  static const String defaultTempVolumeReductionDurationKey = 'default_temp_volume_reduction_duration_seconds';
+  static const String defaultTempVolumeReductionKey =
+      'default_temp_volume_reduction_percent';
+  static const String defaultTempVolumeReductionDurationKey =
+      'default_temp_volume_reduction_duration_seconds';
   static const String leftScreenSelectionKey = 'left_screen_selection';
+
+  // Claves para configuración global TTS
+  static const String defaultTtsPiperVoiceKey = 'default_tts_piper_voice';
+  static const String defaultTtsLanguageKey = 'default_tts_language';
+  static const String defaultTtsPitchKey = 'default_tts_pitch';
+  static const String defaultTtsVolumeKey = 'default_tts_volume';
+  static const String defaultTtsRepeatCountKey = 'default_tts_repeat_count';
+  static const String defaultTtsRepeatDelayKey =
+      'default_tts_repeat_delay_seconds';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -47,7 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultSnoozeDuration = 5;
   int _defaultMaxSnoozes = 3;
   bool _cloudSyncEnabled = false;
-  
+
   // Nuevas variables para configuraciones de volumen
   int _defaultMaxVolumePercent = 100;
   int _defaultVolumeRampUpDurationSeconds = 30;
@@ -55,13 +68,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultTempVolumeReductionDurationSeconds = 60;
   String _leftScreen = 'habits';
 
+  // Variables para configuración global TTS
+  String? _defaultTtsPiperVoice;
+  String _defaultTtsLanguage = 'es-MX';
+  double _defaultTtsPitch = 1.0;
+  int _defaultTtsVolume = 80;
+  int _defaultTtsRepeatCount = 3;
+  int _defaultTtsRepeatDelay = 1;
+
   final AlarmFirebaseService _alarmFirebaseService = AlarmFirebaseService();
   final AlarmLocalService _alarmLocalService = AlarmLocalService();
   late final AlarmRepository _alarmRepository = AlarmRepository(
     local: _alarmLocalService,
     cloud: _alarmFirebaseService,
   );
-  final SistemaFirebaseService _sistemaFirebaseService = SistemaFirebaseService();
+  final SistemaFirebaseService _sistemaFirebaseService =
+      SistemaFirebaseService();
   User? _currentUser;
   SistemaModel? _sistemaModel;
 
@@ -70,6 +92,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Duration _timeUntilNextAlarm = Duration.zero;
   Alarm? _currentNextAlarmForCountdown;
   List<Alarm> _alarms = []; // To find the next alarm
+  AppTypographyScale? _typographyDraft;
+  String? _typographyDraftThemeId;
+
   @override
   void initState() {
     super.initState();
@@ -92,17 +117,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final snoozeDuration = prefs.getInt(SettingsScreen.snoozeDurationKey) ?? 5;
     final maxSnoozes = prefs.getInt(SettingsScreen.maxSnoozesKey) ?? 3;
     final cloudSync = prefs.getBool(SettingsScreen.cloudSyncKey) ?? false;
-    final leftScreen = prefs.getString(SettingsScreen.leftScreenSelectionKey) ?? 'habits';
-    
+    final leftScreen =
+        prefs.getString(SettingsScreen.leftScreenSelectionKey) ?? 'habits';
+
     // Cargar configuraciones de volumen
-    final maxVolumePercent = prefs.getInt(SettingsScreen.defaultMaxVolumeKey) ?? 100;
-    final volumeRampUpDuration = prefs.getInt(SettingsScreen.defaultVolumeRampUpKey) ?? 30;
-    final tempVolumeReduction = prefs.getInt(SettingsScreen.defaultTempVolumeReductionKey) ?? 30;
-    final tempVolumeReductionDuration = prefs.getInt(SettingsScreen.defaultTempVolumeReductionDurationKey) ?? 60;
+    final maxVolumePercent =
+        prefs.getInt(SettingsScreen.defaultMaxVolumeKey) ?? 100;
+    final volumeRampUpDuration =
+        prefs.getInt(SettingsScreen.defaultVolumeRampUpKey) ?? 30;
+    final tempVolumeReduction =
+        prefs.getInt(SettingsScreen.defaultTempVolumeReductionKey) ?? 30;
+    final tempVolumeReductionDuration =
+        prefs.getInt(SettingsScreen.defaultTempVolumeReductionDurationKey) ??
+        60;
+
+    // Cargar configuración global TTS
+    final defaultTtsPiperVoice = prefs.getString(
+      SettingsScreen.defaultTtsPiperVoiceKey,
+    );
+    final defaultTtsLanguage =
+        prefs.getString(SettingsScreen.defaultTtsLanguageKey) ?? 'es-MX';
+    final defaultTtsPitch =
+        prefs.getDouble(SettingsScreen.defaultTtsPitchKey) ?? 1.0;
+    final defaultTtsVolume =
+        prefs.getInt(SettingsScreen.defaultTtsVolumeKey) ?? 80;
+    final defaultTtsRepeatCount =
+        prefs.getInt(SettingsScreen.defaultTtsRepeatCountKey) ?? 3;
+    final defaultTtsRepeatDelay =
+        prefs.getInt(SettingsScreen.defaultTtsRepeatDelayKey) ?? 1;
 
     // Verificar estado de autenticación
     _currentUser = FirebaseAuth.instance.currentUser;
-    
+
     // Cargar datos del sistema si hay usuario autenticado
     if (_currentUser != null) {
       await _loadSistemaData();
@@ -121,8 +167,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _defaultMaxVolumePercent = maxVolumePercent;
         _defaultVolumeRampUpDurationSeconds = volumeRampUpDuration;
         _defaultTempVolumeReductionPercent = tempVolumeReduction;
-        _defaultTempVolumeReductionDurationSeconds = tempVolumeReductionDuration;
+        _defaultTempVolumeReductionDurationSeconds =
+            tempVolumeReductionDuration;
         _leftScreen = leftScreen;
+        _defaultTtsPiperVoice = defaultTtsPiperVoice;
+        _defaultTtsLanguage = defaultTtsLanguage;
+        _defaultTtsPitch = defaultTtsPitch;
+        _defaultTtsVolume = defaultTtsVolume;
+        _defaultTtsRepeatCount = defaultTtsRepeatCount;
+        _defaultTtsRepeatDelay = defaultTtsRepeatDelay;
       });
     }
     _startOrUpdateCountdown(); // Start countdown after loading alarms
@@ -141,15 +194,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSistemaData() async {
     if (_currentUser == null) return;
-    
+
     try {
-      _sistemaModel = await _sistemaFirebaseService.getSistema(_currentUser!.uid);
-      
+      _sistemaModel = await _sistemaFirebaseService.getSistema(
+        _currentUser!.uid,
+      );
+
       // Inicializar el estado de sincronización de alarmas si no existe
       final prefs = await SharedPreferences.getInstance();
       if (!prefs.containsKey('alarm_sync_enabled')) {
         // Buscar el dispositivo actual y usar su estado como valor inicial
-        final currentDeviceName = prefs.getString('device_name') ?? 'Dispositivo';
+        final currentDeviceName =
+            prefs.getString('device_name') ?? 'Dispositivo';
         final currentDevice = _sistemaModel?.usuarios.firstWhere(
           (user) => user['usuario'] == currentDeviceName,
           orElse: () => {'isActive': false},
@@ -157,7 +213,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final isCurrentDeviceActive = currentDevice?['isActive'] ?? false;
         await prefs.setBool('alarm_sync_enabled', isCurrentDeviceActive);
       }
-      
+
       if (mounted) {
         setState(() {});
       }
@@ -212,7 +268,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveDefaultTempVolumeReduction(int tempReduction) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(SettingsScreen.defaultTempVolumeReductionKey, tempReduction);
+    await prefs.setInt(
+      SettingsScreen.defaultTempVolumeReductionKey,
+      tempReduction,
+    );
     if (mounted) {
       setState(() {
         _defaultTempVolumeReductionPercent = tempReduction;
@@ -222,7 +281,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveDefaultTempVolumeReductionDuration(int duration) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(SettingsScreen.defaultTempVolumeReductionDurationKey, duration);
+    await prefs.setInt(
+      SettingsScreen.defaultTempVolumeReductionDurationKey,
+      duration,
+    );
     if (mounted) {
       setState(() {
         _defaultTempVolumeReductionDurationSeconds = duration;
@@ -230,14 +292,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  // ── Guardar configuración global TTS ──────────────────────────────────────
+
+  Future<void> _saveTtsPiperVoice(String? voiceId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (voiceId == null) {
+      await prefs.remove(SettingsScreen.defaultTtsPiperVoiceKey);
+    } else {
+      await prefs.setString(SettingsScreen.defaultTtsPiperVoiceKey, voiceId);
+    }
+    if (mounted) setState(() => _defaultTtsPiperVoice = voiceId);
+  }
+
+  Future<void> _saveTtsLanguage(String language) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(SettingsScreen.defaultTtsLanguageKey, language);
+    if (mounted) setState(() => _defaultTtsLanguage = language);
+  }
+
+  Future<void> _saveTtsPitch(double pitch) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(SettingsScreen.defaultTtsPitchKey, pitch);
+    if (mounted) setState(() => _defaultTtsPitch = pitch);
+  }
+
+  Future<void> _saveTtsVolume(int volume) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultTtsVolumeKey, volume);
+    if (mounted) setState(() => _defaultTtsVolume = volume);
+  }
+
+  Future<void> _saveTtsRepeatCount(int count) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultTtsRepeatCountKey, count);
+    if (mounted) setState(() => _defaultTtsRepeatCount = count);
+  }
+
+  Future<void> _saveTtsRepeatDelay(int delay) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsScreen.defaultTtsRepeatDelayKey, delay);
+    if (mounted) setState(() => _defaultTtsRepeatDelay = delay);
+  }
+
+  Future<void> _openTtsVoicesManager() async {
+    final result = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) =>
+          VoicesManagerModal(selectedVoiceId: _defaultTtsPiperVoice),
+    );
+    if (!mounted) return;
+    // result puede ser: String (voz seleccionada), '' (quitar), null (sin cambios)
+    await _saveTtsPiperVoice(result?.isEmpty ?? false ? null : result);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  String _piperVoiceDisplayName(String voiceId) {
+    try {
+      final v = piperVoiceCatalog.firstWhere((v) => v.id == voiceId);
+      return '${v.displayName} · ${v.locale} · ${v.qualityLabel}';
+    } catch (_) {
+      return voiceId;
+    }
+  }
+
+  String _ttsLanguageLabel(String locale) {
+    const names = {
+      'es-MX': 'Español (México)',
+      'es-ES': 'Español (España)',
+      'es-US': 'Español (EE.UU.)',
+      'en-US': 'English (US)',
+      'en-GB': 'English (UK)',
+      'pt-BR': 'Português (Brasil)',
+      'fr-FR': 'Français',
+      'de-DE': 'Deutsch',
+      'it-IT': 'Italiano',
+    };
+    return names[locale] ?? locale;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _saveCloudSyncOption(bool value) async {
     if (_currentUser == null) return;
-    
+
     try {
       // Actualizar localmente
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(SettingsScreen.cloudSyncKey, value);
-      
+
       // Actualizar en Firebase para el dispositivo actual
       final currentDeviceName = prefs.getString('device_name') ?? 'Dispositivo';
       await _sistemaFirebaseService.updateDeviceCloudSync(
@@ -259,12 +407,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (value) {
         await _syncAllAlarmsToCloud();
       }
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            value 
+            value
                 ? 'Sincronización de alarmas activada'
                 : 'Sincronización de alarmas desactivada',
           ),
@@ -289,7 +437,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_currentUser == null) return;
       await _alarmRepository.ensureMigrated();
       await _alarmRepository.pullOnce(userId: _currentUser!.uid);
-      final alarms = await _alarmRepository.loadLocalAlarms(includeDeleted: true);
+      final alarms = await _alarmRepository.loadLocalAlarms(
+        includeDeleted: true,
+      );
 
       for (final alarm in alarms) {
         final updated = alarm.copyWith(syncToCloud: true);
@@ -577,9 +727,218 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (context) => ThemeEditorScreen(
-          controller: controller,
-          theme: theme,
+        builder: (context) =>
+            ThemeEditorScreen(controller: controller, theme: theme),
+      ),
+    );
+  }
+
+  AppTypographyScale _effectiveTypography(AppThemeModel activeTheme) {
+    final source =
+        (_typographyDraftThemeId == activeTheme.id && _typographyDraft != null)
+        ? _typographyDraft!
+        : activeTheme.typography;
+    return source.normalized();
+  }
+
+  void _updateTypographyDraft({
+    required AppThemeModel activeTheme,
+    required AppTypographyScale typography,
+  }) {
+    setState(() {
+      _typographyDraftThemeId = activeTheme.id;
+      _typographyDraft = typography.normalized();
+    });
+  }
+
+  Future<void> _persistTypographyDraft({
+    required AppThemeController controller,
+    required AppThemeModel activeTheme,
+    required AppTypographyScale typography,
+  }) async {
+    final normalized = typography.normalized();
+    if (normalized.toMap().toString() ==
+        activeTheme.typography.normalized().toMap().toString()) {
+      return;
+    }
+    await controller.updateTheme(activeTheme.copyWith(typography: normalized));
+    if (!mounted) return;
+    setState(() {
+      _typographyDraftThemeId = activeTheme.id;
+      _typographyDraft = normalized;
+    });
+  }
+
+  Widget _buildTypographyCard(
+    BuildContext context,
+    AppThemeController controller,
+    AppThemeModel activeTheme,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final typography = _effectiveTypography(activeTheme);
+    final previewTheme = activeTheme
+        .copyWith(typography: typography)
+        .toThemeData();
+    final previewScaler = AppTypographyTextScaler(
+      typography: typography,
+      textScale: activeTheme.textScale,
+    );
+
+    Widget buildSlider({
+      required String label,
+      required double value,
+      required double min,
+      required double max,
+      required int divisions,
+      required AppTypographyScale Function(double value) update,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label: ${value.round()} pt',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: '${value.round()} pt',
+            activeColor: scheme.primary,
+            onChanged: (nextValue) {
+              _updateTypographyDraft(
+                activeTheme: activeTheme,
+                typography: update(nextValue),
+              );
+            },
+            onChangeEnd: (nextValue) {
+              _persistTypographyDraft(
+                controller: controller,
+                activeTheme: activeTheme,
+                typography: update(nextValue),
+              );
+            },
+          ),
+        ],
+      );
+    }
+
+    return Card(
+      elevation: 2.0,
+      margin: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Tipografía', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text(
+              'Toda la app se unifica en 5 tamaños globales. Ajusta estos valores y verás la vista previa en tiempo real.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            buildSlider(
+              label: 'Pequeño',
+              value: typography.small,
+              min: 10,
+              max: 16,
+              divisions: 6,
+              update: (value) => typography.copyWith(small: value),
+            ),
+            buildSlider(
+              label: 'Cuerpo',
+              value: typography.body,
+              min: typography.small + 1,
+              max: 20,
+              divisions: (20 - (typography.small + 1)).round().clamp(1, 20),
+              update: (value) => typography.copyWith(body: value),
+            ),
+            buildSlider(
+              label: 'Mediano',
+              value: typography.medium,
+              min: typography.body + 1,
+              max: 24,
+              divisions: (24 - (typography.body + 1)).round().clamp(1, 20),
+              update: (value) => typography.copyWith(medium: value),
+            ),
+            buildSlider(
+              label: 'Título',
+              value: typography.title,
+              min: typography.medium + 1,
+              max: 36,
+              divisions: (36 - (typography.medium + 1)).round().clamp(1, 20),
+              update: (value) => typography.copyWith(title: value),
+            ),
+            buildSlider(
+              label: 'Display',
+              value: typography.display,
+              min: typography.title + 1,
+              max: 60,
+              divisions: (60 - (typography.title + 1)).round().clamp(1, 24),
+              update: (value) => typography.copyWith(display: value),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outline),
+              ),
+              child: MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: previewScaler),
+                child: Theme(
+                  data: previewTheme,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Display para alertas importantes',
+                        style: TextStyle(
+                          fontSize: typography.display,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Título de pantalla o sección',
+                        style: TextStyle(
+                          fontSize: typography.title,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Texto mediano para botones y datos destacados',
+                        style: TextStyle(
+                          fontSize: typography.medium,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Texto de cuerpo para la mayoría del contenido',
+                        style: TextStyle(fontSize: typography.body),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Texto pequeño para ayudas, chips y detalles secundarios',
+                        style: TextStyle(
+                          fontSize: typography.small,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -591,7 +950,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context, _) {
         final scheme = Theme.of(context).colorScheme;
         final themes = controller.themes;
-        final activeId = controller.activeThemeId ?? (themes.isNotEmpty ? themes.first.id : null);
+        final activeId =
+            controller.activeThemeId ??
+            (themes.isNotEmpty ? themes.first.id : null);
         final activeTheme = controller.activeTheme;
 
         return Card(
@@ -613,7 +974,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: activeId,
                   decoration: const InputDecoration(labelText: 'Tema activo'),
                   items: themes
-                      .map((t) => DropdownMenuItem(value: t.id, child: Text(t.name)))
+                      .map(
+                        (t) =>
+                            DropdownMenuItem(value: t.id, child: Text(t.name)),
+                      )
                       .toList(),
                   onChanged: (v) {
                     if (v == null) return;
@@ -626,8 +990,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: () async {
-                          final created = await controller.createTheme(name: 'Nuevo tema');
-                          await _openThemeEditorScreen(controller: controller, theme: created);
+                          final created = await controller.createTheme(
+                            name: 'Nuevo tema',
+                          );
+                          await _openThemeEditorScreen(
+                            controller: controller,
+                            theme: created,
+                          );
                         },
                         style: FilledButton.styleFrom(
                           backgroundColor: scheme.primary,
@@ -639,7 +1008,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: (activeTheme.id == AppThemeModel.defaultDark().id)
+                        onPressed:
+                            (activeTheme.id == AppThemeModel.defaultDark().id)
                             ? null
                             : () => controller.deleteTheme(activeTheme.id),
                         style: OutlinedButton.styleFrom(
@@ -669,9 +1039,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onPressed: activeId == null
                             ? null
                             : () async {
-                                final duplicated = await controller.duplicateTheme(activeId);
+                                final duplicated = await controller
+                                    .duplicateTheme(activeId);
                                 if (duplicated == null) return;
-                                await _openThemeEditorScreen(controller: controller, theme: duplicated);
+                                await _openThemeEditorScreen(
+                                  controller: controller,
+                                  theme: duplicated,
+                                );
                               },
                         style: FilledButton.styleFrom(
                           backgroundColor: scheme.primary,
@@ -684,19 +1058,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 if (_currentUser != null && _sistemaModel != null) ...[
                   const SizedBox(height: 16),
-                  Text('Asignación por dispositivo', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Asignación por dispositivo',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 8),
                   ..._sistemaModel!.usuarios.map((u) {
-                    final deviceName = (u['usuario'] as String?) ?? 'Dispositivo';
-                    final deviceThemeId = (u['activeThemeId'] as String?)?.trim();
-                    final selected = (deviceThemeId != null && deviceThemeId.isNotEmpty) ? deviceThemeId : activeId;
+                    final deviceName =
+                        (u['usuario'] as String?) ?? 'Dispositivo';
+                    final deviceThemeId = (u['activeThemeId'] as String?)
+                        ?.trim();
+                    final selected =
+                        (deviceThemeId != null && deviceThemeId.isNotEmpty)
+                        ? deviceThemeId
+                        : activeId;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: DropdownButtonFormField<String>(
                         value: selected,
                         decoration: InputDecoration(labelText: deviceName),
                         items: themes
-                            .map((t) => DropdownMenuItem(value: t.id, child: Text(t.name)))
+                            .map(
+                              (t) => DropdownMenuItem(
+                                value: t.id,
+                                child: Text(t.name),
+                              ),
+                            )
                             .toList(),
                         onChanged: (v) async {
                           if (v == null || _currentUser == null) return;
@@ -733,14 +1120,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final nextAlarm = _getNextActiveAlarm();
 
     return Scaffold(
-        appBar: AppBar(
-          title: const Padding(
-            padding: EdgeInsets.only(left: 45),
-            child: Text('Configuración'),
-          ),
+      appBar: AppBar(
+        title: const Padding(
+          padding: EdgeInsets.only(left: 45),
+          child: Text('Configuración'),
         ),
-        body: Column(
-          children: [
+      ),
+      body: Column(
+        children: [
           if (_showNextAlarmSection &&
               _currentNextAlarmForCountdown !=
                   null) // Show only if enabled and an alarm exists
@@ -760,32 +1147,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           Expanded(
             child: ListView(
-                padding: const EdgeInsets.all(16.0),
-                children: <Widget>[
-                  Card(
-                    elevation: 2.0,
-                    margin: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: SwitchListTile(
-                      title: const Text(
-                        'Mostrar sección "Próxima Alarma" en Inicio',
-                      ),
-                      subtitle: const Text(
-                        'Permite ver detalles de la siguiente alarma programada en la pantalla principal.',
-                      ),
-                      value: _showNextAlarmSection,
-                      activeColor: scheme.primary,
-                      inactiveThumbColor: scheme.onSurface,
-                      onChanged: (bool value) {
-                        _saveShowNextAlarmOption(value);
-                      },
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16.0,
-                        vertical: 8.0,
-                      ),
+              padding: const EdgeInsets.all(16.0),
+              children: <Widget>[
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: SwitchListTile(
+                    title: const Text(
+                      'Mostrar sección "Próxima Alarma" en Inicio',
+                    ),
+                    subtitle: const Text(
+                      'Permite ver detalles de la siguiente alarma programada en la pantalla principal.',
+                    ),
+                    value: _showNextAlarmSection,
+                    activeColor: scheme.primary,
+                    inactiveThumbColor: scheme.onSurface,
+                    onChanged: (bool value) {
+                      _saveShowNextAlarmOption(value);
+                    },
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16.0,
+                      vertical: 8.0,
                     ),
                   ),
+                ),
                 const SizedBox(height: 16),
                 _buildThemesCard(themeController),
+                const SizedBox(height: 16),
+                _buildTypographyCard(
+                  context,
+                  themeController,
+                  themeController.activeTheme,
+                ),
                 const SizedBox(height: 16),
                 Card(
                   elevation: 2.0,
@@ -903,7 +1296,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Configuraciones predeterminadas para el control de volumen de las alarmas',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: scheme.onSurface),
                         ),
                         const SizedBox(height: 16),
 
@@ -967,15 +1361,250 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Slider(
-                          value: _defaultTempVolumeReductionDurationSeconds.toDouble(),
+                          value: _defaultTempVolumeReductionDurationSeconds
+                              .toDouble(),
                           min: 15,
                           max: 300,
                           divisions: 19,
-                          label: '$_defaultTempVolumeReductionDurationSeconds s',
+                          label:
+                              '$_defaultTempVolumeReductionDurationSeconds s',
                           onChanged: (double value) {
-                            _saveDefaultTempVolumeReductionDuration(value.toInt());
+                            _saveDefaultTempVolumeReductionDuration(
+                              value.toInt(),
+                            );
                           },
                           activeColor: scheme.tertiary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Card para configuración global TTS
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Configuración TTS por defecto',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Valores predeterminados para el texto a voz en alarmas y recordatorios. Cada alarma o recordatorio puede sobrescribir esta configuración.',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: scheme.onSurface),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Voz Piper
+                        Text(
+                          'Voz Piper',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        if (_defaultTtsPiperVoice != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: scheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.record_voice_over,
+                                  size: 18,
+                                  color: scheme.primary,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _piperVoiceDisplayName(
+                                      _defaultTtsPiperVoice!,
+                                    ),
+                                    style: TextStyle(
+                                      color: scheme.onPrimaryContainer,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close,
+                                    size: 16,
+                                    color: scheme.error,
+                                  ),
+                                  tooltip: 'Quitar voz',
+                                  onPressed: () => _saveTtsPiperVoice(null),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          Text(
+                            'Sin voz Piper — se usará la voz del sistema',
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _openTtsVoicesManager,
+                          icon: const Icon(Icons.library_music, size: 18),
+                          label: const Text('Gestionar voces Piper'),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Idioma (solo si no hay voz Piper)
+                        if (_defaultTtsPiperVoice == null) ...[
+                          Text(
+                            'Idioma: ${_ttsLanguageLabel(_defaultTtsLanguage)}',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          DropdownButton<String>(
+                            value: _defaultTtsLanguage,
+                            isExpanded: true,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'es-MX',
+                                child: Text('Español (México)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'es-ES',
+                                child: Text('Español (España)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'es-US',
+                                child: Text('Español (EE.UU.)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'en-US',
+                                child: Text('English (US)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'en-GB',
+                                child: Text('English (UK)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'pt-BR',
+                                child: Text('Português (Brasil)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'fr-FR',
+                                child: Text('Français'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'de-DE',
+                                child: Text('Deutsch'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'it-IT',
+                                child: Text('Italiano'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) _saveTtsLanguage(v);
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Tono
+                        Text(
+                          'Tono: ${_defaultTtsPitch.toStringAsFixed(1)}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultTtsPitch,
+                          min: 0.5,
+                          max: 2.0,
+                          divisions: 15,
+                          label: _defaultTtsPitch.toStringAsFixed(1),
+                          onChanged: (v) =>
+                              _saveTtsPitch(double.parse(v.toStringAsFixed(1))),
+                          activeColor: scheme.primary,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Volumen TTS
+                        Text(
+                          'Volumen TTS: $_defaultTtsVolume%',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Slider(
+                          value: _defaultTtsVolume.toDouble(),
+                          min: 10,
+                          max: 100,
+                          divisions: 18,
+                          label: '$_defaultTtsVolume%',
+                          onChanged: (v) => _saveTtsVolume(v.toInt()),
+                          activeColor: scheme.secondary,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Repeticiones
+                        Text(
+                          'Repeticiones',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final entry in const [
+                              (1, '1 vez'),
+                              (3, '3 veces'),
+                              (5, '5 veces'),
+                              (-1, 'Indefinido'),
+                            ])
+                              ChoiceChip(
+                                label: Text(entry.$2),
+                                selected: _defaultTtsRepeatCount == entry.$1,
+                                selectedColor: scheme.tertiary,
+                                labelStyle: TextStyle(
+                                  color: _defaultTtsRepeatCount == entry.$1
+                                      ? scheme.onTertiary
+                                      : scheme.onSurface,
+                                ),
+                                onSelected: (_) =>
+                                    _saveTtsRepeatCount(entry.$1),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Pausa entre repeticiones
+                        Text(
+                          'Pausa entre repeticiones',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final s in const [1, 3, 5, 10, 15])
+                              ChoiceChip(
+                                label: Text('${s}s'),
+                                selected: _defaultTtsRepeatDelay == s,
+                                selectedColor: scheme.tertiary,
+                                labelStyle: TextStyle(
+                                  color: _defaultTtsRepeatDelay == s
+                                      ? scheme.onTertiary
+                                      : scheme.onSurface,
+                                ),
+                                onSelected: (_) => _saveTtsRepeatDelay(s),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -998,7 +1627,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Selecciona qué pantalla se muestra a la izquierda del menú principal. Las dos pantallas restantes aparecerán juntas en la vista dual del lado derecho.',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: scheme.onSurface),
                         ),
                         const SizedBox(height: 8),
                         RadioListTile<String>(
@@ -1047,11 +1677,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         padding: const EdgeInsets.all(16.0),
                         child: Row(
                           children: [
-                            Icon(
-                              Icons.login,
-                              color: scheme.primary,
-                              size: 28,
-                            ),
+                            Icon(Icons.login, color: scheme.primary, size: 28),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Column(
@@ -1172,18 +1798,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ?.copyWith(color: scheme.onSurface),
                           ),
                           const SizedBox(height: 16),
-                          if (_sistemaModel != null && _sistemaModel!.usuarios.isNotEmpty) ...
-                            _sistemaModel!.usuarios.map((user) {
-                              final deviceName = user['usuario'] as String? ?? 'Dispositivo sin nombre';
-                              final isActive = user['isActive'] as bool? ?? true;
-                              final cloudSyncEnabled = user['_cloudSyncEnabled'] as bool? ?? false;
-                              
+                          if (_sistemaModel != null &&
+                              _sistemaModel!.usuarios.isNotEmpty)
+                            ..._sistemaModel!.usuarios.map((user) {
+                              final deviceName =
+                                  user['usuario'] as String? ??
+                                  'Dispositivo sin nombre';
+                              final isActive =
+                                  user['isActive'] as bool? ?? true;
+                              final cloudSyncEnabled =
+                                  user['_cloudSyncEnabled'] as bool? ?? false;
+
                               return FutureBuilder<String?>(
-                                future: SharedPreferences.getInstance().then((prefs) => prefs.getString('device_name')),
+                                future: SharedPreferences.getInstance().then(
+                                  (prefs) => prefs.getString('device_name'),
+                                ),
                                 builder: (context, snapshot) {
-                                  final currentDeviceName = snapshot.data ?? 'Dispositivo';
-                                  final isCurrentDevice = deviceName == currentDeviceName;
-                                  
+                                  final currentDeviceName =
+                                      snapshot.data ?? 'Dispositivo';
+                                  final isCurrentDevice =
+                                      deviceName == currentDeviceName;
+
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 8.0),
                                     decoration: BoxDecoration(
@@ -1193,34 +1828,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     child: ListTile(
                                       leading: Icon(
                                         Icons.phone_android,
-                                        color: (isCurrentDevice ? cloudSyncEnabled : isActive)
+                                        color:
+                                            (isCurrentDevice
+                                                ? cloudSyncEnabled
+                                                : isActive)
                                             ? scheme.primary
                                             : scheme.onSurface,
                                       ),
                                       title: Text(
-                                        deviceName + (isCurrentDevice ? ' (Este dispositivo)' : ''),
+                                        deviceName +
+                                            (isCurrentDevice
+                                                ? ' (Este dispositivo)'
+                                                : ''),
                                         style: TextStyle(
                                           fontWeight: FontWeight.w500,
                                           color: scheme.onSurface,
                                         ),
                                       ),
                                       subtitle: Text(
-                                        (isCurrentDevice ? cloudSyncEnabled : isActive) 
-                                            ? 'Sincronización activada' 
+                                        (isCurrentDevice
+                                                ? cloudSyncEnabled
+                                                : isActive)
+                                            ? 'Sincronización activada'
                                             : 'Sincronización desactivada',
-                                        style: TextStyle(color: scheme.onSurface),
+                                        style: TextStyle(
+                                          color: scheme.onSurface,
+                                        ),
                                       ),
                                       trailing: Switch(
-                                        value: _cloudSyncEnabled && _currentUser != null,
+                                        value:
+                                            _cloudSyncEnabled &&
+                                            _currentUser != null,
                                         activeColor: scheme.primary,
-                                        onChanged: isCurrentDevice ? (bool value) {
-                                          _saveCloudSyncOption(value);
-                                        } : null, // Solo el dispositivo actual puede cambiar
-                                       ),
-                                     ),
-                                   );
-                                 },
-                               );
+                                        onChanged: isCurrentDevice
+                                            ? (bool value) {
+                                                _saveCloudSyncOption(value);
+                                              }
+                                            : null, // Solo el dispositivo actual puede cambiar
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
                             })
                           else
                             Container(
@@ -1305,12 +1954,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ],
+                // ── Módulo IA ────────────────────────────────────────────
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2.0,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: InkWell(
+                    onTap: () => Navigator.of(context).pushNamed('/ai'),
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.smart_toy_outlined, color: scheme.tertiary, size: 28),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Módulo IA Local',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Descarga y gestiona modelos de lenguaje 100 % locales',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(color: scheme.onSurface),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios, color: scheme.onSurface, size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 // Add more settings here in separate Cards if needed
-                ],
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1380,9 +2071,7 @@ class _ThemeEditorScreenState extends State<ThemeEditorScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tema'),
-      ),
+      appBar: AppBar(title: const Text('Tema')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(

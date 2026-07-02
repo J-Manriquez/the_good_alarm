@@ -20,6 +20,17 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.5.3
   flutter_tts: ^4.2.0
+  sherpa_onnx: ^1.13.2
+  path_provider: ^2.1.5
+  audioplayers: ^6.0.0
+  archive: ^4.0.7
+  flutter_gemma: ^0.16.1
+  flutter_secure_storage: ^9.2.2
+  crypto: ^3.0.6
+  file_picker: ^8.3.7
+  permission_handler: ^11.3.1
+  url_launcher: ^6.3.1
+  speech_to_text: ^7.0.0
 
 dev_dependencies:
   flutter_test:

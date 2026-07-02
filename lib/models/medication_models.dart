@@ -65,6 +65,10 @@ class MedicationModel {
   final bool enableTts;
   final String ttsLanguage;
   final int ttsVolume; // 0-100, porcentaje del volúmen máximo de STREAM_MUSIC
+  final double ttsPitch; // 0.5-2.0
+  final int ttsRepeatCount; // 1, 3, 5 o -1=indefinido
+  final int ttsRepeatDelaySeconds; // segundos entre repeticiones
+  final String? piperVoice; // ID de voz Piper descargada (null = usar flutter_tts)
   final DateTime? nextScheduledAtLocal;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -96,6 +100,10 @@ class MedicationModel {
     this.enableTts = true,
     this.ttsLanguage = 'es-MX',
     this.ttsVolume = 80,
+    this.ttsPitch = 1.0,
+    this.ttsRepeatCount = 3,
+    this.ttsRepeatDelaySeconds = 1,
+    this.piperVoice,
     this.nextScheduledAtLocal,
     this.createdAt,
     this.updatedAt,
@@ -185,7 +193,7 @@ class MedicationModel {
   String buildTtsAlreadyConfirmedText(String hora, {String? scheduledTimeText}) {
     final name = medicationName.trim();
     final buffer = StringBuffer();
-    buffer.write('Ya confirmaste que tomaste $name a las $hora. ¿Es correcto?');
+    buffer.write('¿Puedes confirmar que tomaste $name a las $hora?');
     if (scheduledTimeText != null && scheduledTimeText.isNotEmpty) {
       buffer.write(' La dosis estaba programada para las $scheduledTimeText.');
     }
@@ -220,6 +228,10 @@ class MedicationModel {
         'enableTts': enableTts,
         'ttsLanguage': ttsLanguage,
         'ttsVolume': ttsVolume,
+        'ttsPitch': ttsPitch,
+        'ttsRepeatCount': ttsRepeatCount,
+        'ttsRepeatDelaySeconds': ttsRepeatDelaySeconds,
+        if (piperVoice != null) 'piperVoice': piperVoice,
         'nextScheduledAtLocal': nextScheduledAtLocal?.toIso8601String(),
         'createdAt': createdAt?.toIso8601String(),
         'updatedAt': updatedAt?.toIso8601String(),
@@ -237,7 +249,7 @@ class MedicationModel {
       'medicationType', 'instructions', 'prescribedBy', 'purpose', 'notes',
       'colorHex', 'isActive', 'syncToCloud', 'repeatMode', 'weekdays', 'times',
       'requireConfirmation', 'confirmationDelayMinutes', 'defaultSnoozeMinutes',
-      'enableTts', 'ttsLanguage', 'ttsVolume', 'nextScheduledAtLocal',
+      'enableTts', 'ttsLanguage', 'ttsVolume', 'ttsPitch', 'ttsRepeatCount', 'ttsRepeatDelaySeconds', 'piperVoice', 'nextScheduledAtLocal',
       'createdAt', 'updatedAt', 'deletedAt', 'revision', 'fieldUpdatedAt',
     }) {
       extras.remove(key);
@@ -285,6 +297,10 @@ class MedicationModel {
       enableTts: json['enableTts'] as bool? ?? true,
       ttsLanguage: json['ttsLanguage'] as String? ?? 'es-MX',
       ttsVolume: (json['ttsVolume'] as num?)?.toInt() ?? 80,
+      ttsPitch: (json['ttsPitch'] as num?)?.toDouble() ?? 1.0,
+      ttsRepeatCount: (json['ttsRepeatCount'] as num?)?.toInt() ?? 3,
+      ttsRepeatDelaySeconds: (json['ttsRepeatDelaySeconds'] as num?)?.toInt() ?? 5,
+      piperVoice: json['piperVoice'] as String?,
       nextScheduledAtLocal: _parseDate(json['nextScheduledAtLocal']),
       createdAt: _parseDate(json['createdAt']),
       updatedAt: _parseDate(json['updatedAt']),
@@ -318,6 +334,10 @@ class MedicationModel {
     bool? enableTts,
     String? ttsLanguage,
     int? ttsVolume,
+    double? ttsPitch,
+    int? ttsRepeatCount,
+    int? ttsRepeatDelaySeconds,
+    String? piperVoice,
     DateTime? nextScheduledAtLocal,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -350,6 +370,10 @@ class MedicationModel {
       enableTts: enableTts ?? this.enableTts,
       ttsLanguage: ttsLanguage ?? this.ttsLanguage,
       ttsVolume: ttsVolume ?? this.ttsVolume,
+      ttsPitch: ttsPitch ?? this.ttsPitch,
+      ttsRepeatCount: ttsRepeatCount ?? this.ttsRepeatCount,
+      ttsRepeatDelaySeconds: ttsRepeatDelaySeconds ?? this.ttsRepeatDelaySeconds,
+      piperVoice: piperVoice ?? this.piperVoice,
       nextScheduledAtLocal: nextScheduledAtLocal ?? this.nextScheduledAtLocal,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

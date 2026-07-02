@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity() {
     
     // Volume control variables
     private lateinit var audioManager: AudioManager
+    private var savedRingerMode = AudioManager.RINGER_MODE_NORMAL
     
     private fun checkDndPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -449,8 +450,21 @@ class MainActivity : FlutterActivity() {
                     val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     val savedVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                     val targetVol = ((maxVol * volumePercent) / 100).coerceIn(0, maxVol)
-                    am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
-                    Log.d("MainActivity", "setMusicStreamVolume: $volumePercent% -> $targetVol/$maxVol (saved=$savedVol)")
+                    // Guardar modo de sonido y activar modo normal para garantizar que STREAM_MUSIC suene
+                    savedRingerMode = am.ringerMode
+                    try {
+                        if (am.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+                            am.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        }
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "setMusicStreamVolume: no se pudo cambiar ringerMode (DND activo?): ${e.message}")
+                    }
+                    try {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "setMusicStreamVolume: setStreamVolume falló: ${e.message}")
+                    }
+                    Log.d("MainActivity", "setMusicStreamVolume: $volumePercent% -> $targetVol/$maxVol (saved=$savedVol, ringerMode=${savedRingerMode})")
                     result.success(savedVol)
                 }
                 "restoreMusicStreamVolume" -> {
@@ -458,8 +472,18 @@ class MainActivity : FlutterActivity() {
                     if (savedVol >= 0) {
                         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        am.setStreamVolume(AudioManager.STREAM_MUSIC, savedVol.coerceIn(0, maxVol), 0)
-                        Log.d("MainActivity", "restoreMusicStreamVolume: $savedVol")
+                        try {
+                            am.setStreamVolume(AudioManager.STREAM_MUSIC, savedVol.coerceIn(0, maxVol), 0)
+                        } catch (e: Exception) {
+                            Log.w("MainActivity", "restoreMusicStreamVolume: setStreamVolume falló: ${e.message}")
+                        }
+                        // Restaurar el modo de sonido guardado
+                        try {
+                            am.ringerMode = savedRingerMode
+                        } catch (e: Exception) {
+                            Log.w("MainActivity", "restoreMusicStreamVolume: no se pudo restaurar ringerMode: ${e.message}")
+                        }
+                        Log.d("MainActivity", "restoreMusicStreamVolume: $savedVol, ringerMode restored to $savedRingerMode")
                     }
                     result.success(true)
                 }
@@ -839,58 +863,48 @@ class MainActivity : FlutterActivity() {
                     !medicationIdFromIntent.isNullOrBlank() &&
                     !medOccurrenceKeyFromIntent.isNullOrBlank()
                 ) {
-                    val medScreenKey = if (screenRoute == "/medication_confirm")
-                        "medication_confirm_screen_shown_$medOccurrenceKeyFromIntent"
-                    else
-                        "medication_screen_shown_$medOccurrenceKeyFromIntent"
-                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
-                    val alreadyShown = prefs.getBoolean(medScreenKey, false)
+                    try {
+                        window.addFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        )
+                    } catch (_: Exception) {}
 
-                    if (!alreadyShown) {
-                        try {
-                            window.addFlags(
-                                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                            )
-                        } catch (_: Exception) {}
-
-                        prefs.edit().putBoolean(medScreenKey, true).apply()
-
-                        // Guardar como pending en prefs para cold start (Flutter no listo aún)
-                        val pendingJson = JSONObject().apply {
-                            put("medicationId", medicationIdFromIntent)
-                            put("occurrenceKey", medOccurrenceKeyFromIntent)
-                            put("scheduledAtLocalMillis", medScheduledAtLocalMillis)
-                            put("title", medTitle)
-                            put("message", medMessage)
-                            put("dosageAmount", medDosageAmount)
-                            put("dosageUnit", medDosageUnit)
-                            put("isConfirmation", isConfirmation)
-                            put("screenRoute", screenRoute)
-                            put("timestamp", System.currentTimeMillis())
-                        }
-                        prefs.edit().putString("pending_medication_screen", pendingJson.toString()).apply()
-                        Log.d("MainActivity", "Guardado pending_medication_screen en alarm_prefs")
-
-                        val methodName = if (screenRoute == "/medication_confirm") "showMedicationConfirmScreen" else "showMedicationScreen"
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            methodChannel?.invokeMethod(
-                                methodName,
-                                mapOf(
-                                    "medicationId" to medicationIdFromIntent,
-                                    "occurrenceKey" to medOccurrenceKeyFromIntent,
-                                    "scheduledAtLocalMillis" to medScheduledAtLocalMillis,
-                                    "title" to medTitle,
-                                    "message" to medMessage,
-                                    "dosageAmount" to medDosageAmount,
-                                    "dosageUnit" to medDosageUnit,
-                                    "isConfirmation" to isConfirmation
-                                )
-                            )
-                        }, 300)
+                    // Guardar como pending en prefs para cold start (Flutter no listo aún)
+                    val pendingJson = JSONObject().apply {
+                        put("medicationId", medicationIdFromIntent)
+                        put("occurrenceKey", medOccurrenceKeyFromIntent)
+                        put("scheduledAtLocalMillis", medScheduledAtLocalMillis)
+                        put("title", medTitle)
+                        put("message", medMessage)
+                        put("dosageAmount", medDosageAmount)
+                        put("dosageUnit", medDosageUnit)
+                        put("isConfirmation", isConfirmation)
+                        put("screenRoute", screenRoute)
+                        put("timestamp", System.currentTimeMillis())
                     }
+                    val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().putString("pending_medication_screen", pendingJson.toString()).apply()
+                    Log.d("MainActivity", "Guardado pending_medication_screen en alarm_prefs")
+
+                    val methodName = if (screenRoute == "/medication_confirm") "showMedicationConfirmScreen" else "showMedicationScreen"
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        methodChannel?.invokeMethod(
+                            methodName,
+                            mapOf(
+                                "medicationId" to medicationIdFromIntent,
+                                "occurrenceKey" to medOccurrenceKeyFromIntent,
+                                "scheduledAtLocalMillis" to medScheduledAtLocalMillis,
+                                "title" to medTitle,
+                                "message" to medMessage,
+                                "dosageAmount" to medDosageAmount,
+                                "dosageUnit" to medDosageUnit,
+                                "isConfirmation" to isConfirmation
+                            )
+                        )
+                    }, 800)
                 }
             }
         }

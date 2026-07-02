@@ -16,7 +16,7 @@ class MedicationReceiver : BroadcastReceiver() {
     companion object {
         const val MEDICATION_ACTION = "com.andodevs.the_good_alarm.MEDICATION_TRIGGERED"
         const val MEDICATION_CONFIRM_ACTION = "com.andodevs.the_good_alarm.MEDICATION_CONFIRMATION"
-        const val MEDICATION_NOTIFICATION_CHANNEL_ID = "medication_notification_channel"
+        const val MEDICATION_NOTIFICATION_CHANNEL_ID = "medication_notification_channel_v2"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -111,7 +111,7 @@ class MedicationReceiver : BroadcastReceiver() {
         val channel = NotificationChannel(
             MEDICATION_NOTIFICATION_CHANNEL_ID,
             "Medicamentos",
-            NotificationManager.IMPORTANCE_HIGH  // HIGH es suficiente para fullscreen
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             setSound(null, null)
             enableVibration(false)

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'firebase_options.dart';
 import 'home_page.dart';
 import 'alarm_screen.dart';
@@ -8,14 +10,19 @@ import 'calendar_screen.dart';
 import 'settings_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/auth_service.dart';
+import 'services/device_capability_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'models/app_theme_model.dart';
 import 'services/app_theme_controller.dart';
 import 'widgets/app_theme_provider.dart';
 import 'screens/medication_alert_screen.dart';
 import 'screens/medication_confirm_screen.dart';
+import 'modules/ai/screens/ai_model_manager_screen.dart';
+import 'screens/ai_voice_assistant_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  sherpa_onnx.initBindings();
   await Hive.initFlutter();
   await Hive.openBox('alarms_box');
   await Hive.openBox('alarm_sync_box');
@@ -31,6 +38,9 @@ void main() async {
   await Hive.openBox('calendar_occurrences_box');
   await Hive.openBox('calendar_sync_box');
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  if (await DeviceCapabilityService.instance.supportsLocalAi()) {
+    await FlutterGemma.initialize();
+  }
   runApp(const MainApp());
 }
 
@@ -70,10 +80,23 @@ class _ThemedAppState extends State<_ThemedApp> {
       child: AnimatedBuilder(
         animation: _themeController,
         builder: (context, _) {
+          final activeTheme = _themeController.activeTheme;
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             title: 'The Good Alarm',
             theme: _themeController.themeData,
+            builder: (context, child) {
+              final mediaQuery = MediaQuery.of(context);
+              return MediaQuery(
+                data: mediaQuery.copyWith(
+                  textScaler: AppTypographyTextScaler(
+                    typography: activeTheme.typography.normalized(),
+                    textScale: activeTheme.textScale,
+                  ),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              );
+            },
             initialRoute: '/home',
             routes: {
               '/home': (context) => const HomeShell(),
@@ -86,13 +109,17 @@ class _ThemedAppState extends State<_ThemedApp> {
               '/calendar': (context) => const HomeShell(initialTabIndex: 0),
               '/settings': (context) => const SettingsScreen(),
               '/medication': (context) => MedicationAlertScreen(
-                arguments: ModalRoute.of(context)?.settings.arguments
-                    as Map<String, dynamic>?,
+                arguments:
+                    ModalRoute.of(context)?.settings.arguments
+                        as Map<String, dynamic>?,
               ),
               '/medication_confirm': (context) => MedicationConfirmScreen(
-                arguments: ModalRoute.of(context)?.settings.arguments
-                    as Map<String, dynamic>?,
+                arguments:
+                    ModalRoute.of(context)?.settings.arguments
+                        as Map<String, dynamic>?,
               ),
+              '/ai': (context) => const AiModelManagerScreen(),
+              '/ai_assistant': (context) => const AiVoiceAssistantScreen(),
             },
           );
         },

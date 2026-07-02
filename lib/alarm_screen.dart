@@ -1,9 +1,14 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
-import 'package:the_good_alarm/settings_screen.dart'; // Necesario para MethodChannel y PlatformException
-import 'games/alarm_game_wrapper.dart'; // Agregar esta importación
+import 'package:the_good_alarm/settings_screen.dart';
+import 'games/alarm_game_wrapper.dart';
+import 'services/piper_tts_service.dart';
 import 'services/volume_service.dart';
 import 'widgets/volume_control_button.dart';
 import 'widgets/synchronized_volume_control_button.dart';
@@ -37,6 +42,25 @@ class _AlarmScreenState extends State<AlarmScreen> {
   int tempVolumeReductionDurationSeconds = 30;
   bool _isVolumeReductionActive = false;
 
+  // Variables para TTS
+  final FlutterTts _tts = FlutterTts();
+  bool enableTts = true;
+  String ttsLanguage = 'es-MX';
+  int ttsVolume = 80;
+  double ttsPitch = 1.0;
+  int ttsRepeatCount = 3;    // 1, 3, 5 o -1=indefinido
+  int ttsRepeatDelaySeconds = 5;
+  int _ttsRepeatCount = 0;
+  bool _ttsEnabled = true;
+  int _savedMusicVolume = -1;
+  bool ttsUsePrefix = false;
+  String? ttsVoice;
+  String? piperVoice;
+
+  // Audioplayer para Piper TTS
+  AudioPlayer? _piperPlayer;
+  StreamSubscription? _piperSub;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +84,17 @@ class _AlarmScreenState extends State<AlarmScreen> {
       tempVolumeReductionPercent = widget.arguments!['tempVolumeReductionPercent'] ?? 50;
       tempVolumeReductionDurationSeconds = widget.arguments!['tempVolumeReductionDurationSeconds'] ?? 30;
 
+      // Cargar configuraciones de TTS
+      enableTts = widget.arguments!['enableTts'] as bool? ?? true;
+      ttsLanguage = widget.arguments!['ttsLanguage'] as String? ?? 'es-MX';
+      ttsVolume = widget.arguments!['ttsVolume'] as int? ?? 80;
+      ttsPitch = (widget.arguments!['ttsPitch'] as num?)?.toDouble() ?? 1.0;
+      ttsRepeatCount = widget.arguments!['ttsRepeatCount'] as int? ?? 3;
+      ttsRepeatDelaySeconds = widget.arguments!['ttsRepeatDelaySeconds'] as int? ?? 1;
+      ttsUsePrefix = widget.arguments!['ttsUsePrefix'] as bool? ?? false;
+      ttsVoice = widget.arguments!['ttsVoice'] as String?;
+      piperVoice = widget.arguments!['piperVoice'] as String?;
+
       // AGREGAR LOGS DE DEPURACIÓN
       print('=== ALARM SCREEN INIT DEBUG ===');
       print('AlarmId: $alarmId');
@@ -73,7 +108,93 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
       _notifyAlarmRinging();
       _startVolumeControl();
+      if (enableTts) {
+        _speakAlarm();
+      }
     }
+  }
+
+  Future<void> _speakAlarm() async {
+    try {
+      final saved = await platform.invokeMethod<int>('setMusicStreamVolume', {'volumePercent': ttsVolume});
+      if (saved != null) _savedMusicVolume = saved;
+      final prefix = ttsUsePrefix ? 'Alarma: ' : '';
+      final text = '$prefix$title.${message.isNotEmpty ? ' $message.' : ''}';
+      _ttsRepeatCount = 0;
+      _ttsEnabled = true;
+
+      if (piperVoice != null) {
+        await _speakAlarmPiper(text);
+      } else {
+        if (ttsVoice != null) {
+          await _tts.setLanguage(ttsLanguage);
+          await _tts.setVoice({'name': ttsVoice!, 'locale': ttsLanguage});
+        } else {
+          await _tts.setLanguage(ttsLanguage);
+        }
+        await _tts.setVolume(1.0);
+        await _tts.setSpeechRate(0.5);
+        await _tts.setPitch(ttsPitch);
+        _tts.setCompletionHandler(() async {
+          if (!_ttsEnabled || !mounted) return;
+          final shouldRepeat = ttsRepeatCount == -1 || _ttsRepeatCount < (ttsRepeatCount - 1);
+          if (shouldRepeat) {
+            _ttsRepeatCount++;
+            if (ttsRepeatDelaySeconds > 0) {
+              await Future.delayed(Duration(seconds: ttsRepeatDelaySeconds));
+            }
+            if (_ttsEnabled && mounted) {
+              _tts.speak(text);
+            }
+          }
+        });
+        print('[AlarmScreen] TTS: $text (repeat=$ttsRepeatCount, delay=${ttsRepeatDelaySeconds}s, pitch=$ttsPitch)');
+        await _tts.speak(text);
+      }
+    } catch (e) {
+      print('[AlarmScreen] TTS error: $e');
+    }
+  }
+
+  Future<void> _speakAlarmPiper(String text) async {
+    final wav = await PiperTtsService.instance.synthesizeToWav(text, piperVoice!);
+    if (wav == null || !_ttsEnabled || !mounted) return;
+
+    await _piperSub?.cancel();
+    await _piperPlayer?.dispose();
+    _piperPlayer = AudioPlayer();
+
+    _piperSub = _piperPlayer!.onPlayerComplete.listen((_) async {
+      await _piperSub?.cancel();
+      _piperSub = null;
+      if (!_ttsEnabled || !mounted) return;
+      final shouldRepeat = ttsRepeatCount == -1 || _ttsRepeatCount < (ttsRepeatCount - 1);
+      if (shouldRepeat) {
+        _ttsRepeatCount++;
+        if (ttsRepeatDelaySeconds > 0) {
+          await Future.delayed(Duration(seconds: ttsRepeatDelaySeconds));
+        }
+        if (_ttsEnabled && mounted) _speakAlarmPiper(text);
+      }
+    });
+    await _piperPlayer!.play(DeviceFileSource(wav));
+  }
+
+  Future<void> _stopTts() async {
+    try {
+      _ttsEnabled = false;
+      await _tts.stop();
+      await _piperSub?.cancel();
+      _piperSub = null;
+      await _piperPlayer?.stop();
+      await _piperPlayer?.dispose();
+      _piperPlayer = null;
+      if (_savedMusicVolume >= 0) {
+        await platform.invokeMethod('restoreMusicStreamVolume', {'savedVolume': _savedMusicVolume});
+        print('[AlarmScreen] volumen TTS restaurado a $_savedMusicVolume');
+        _savedMusicVolume = -1;
+      }
+    } catch (_) {}
   }
 
   // NUEVO: Método para notificar que la alarma está sonando
@@ -175,6 +296,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _actuallyStopAlarm() async {
+    // Detener TTS
+    await _stopTts();
     // Detener el control de volumen
     try {
       await _volumeService.stopVolumeControl();
@@ -207,6 +330,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
       return;
     }
 
+    await _stopTts();
+
     try {
       await platform.invokeMethod('snoozeAlarm', {
         'alarmId': alarmId,
@@ -226,7 +351,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
   @override
   void dispose() {
-    // Detener el control de volumen al salir de la pantalla
+    // Detener TTS y control de volumen al salir de la pantalla
+    _tts.stop().catchError((_) {});
     _volumeService.stopVolumeControl().catchError((e) {
       print('Error stopping volume control in dispose: $e');
     });

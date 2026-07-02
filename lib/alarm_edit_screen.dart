@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:the_good_alarm/modelo_alarm.dart';
 import 'package:the_good_alarm/games/modelo_juegos.dart';
@@ -6,6 +8,9 @@ import 'services/game_service.dart';
 import 'games/alarm_game_wrapper.dart';
 import 'settings_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'models/piper_voice_catalog.dart';
+import 'services/piper_tts_service.dart';
+import 'widgets/voices_manager_modal.dart';
 
 class AlarmEditScreen extends StatefulWidget {
   final Alarm? alarm; // null para crear nueva alarma, Alarm para editar
@@ -40,6 +45,22 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
   bool _isSnoozeExpanded = false;
   bool _isVolumeExpanded = false;
   bool _isGameExpanded = false;
+  bool _isTtsExpanded = false;
+
+  // Variables para TTS
+  final FlutterTts _tts = FlutterTts();
+  AudioPlayer? _previewPlayer;
+  bool _enableTts = true;
+  String _ttsLanguage = 'es-MX';
+  int _ttsVolume = 80;
+  double _ttsPitch = 1.0;
+  int _ttsRepeatCount = 3;
+  int _ttsRepeatDelaySeconds = 1;
+  bool _ttsUsePrefix = false;
+  String? _ttsVoice;
+  String? _piperVoice;
+  List<Map<dynamic, dynamic>> _availableVoices = [];
+  List<String> _availableLocales = ['es-MX', 'es-ES', 'en-US'];
 
   final List<String> _daysOfWeek = [
     'Lunes',
@@ -63,6 +84,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
   void initState() {
     super.initState();
     _loadDefaultSettings(); // Agregar esta línea
+    _loadVoices();
 
     // Inicializar controladores y valores
     if (widget.alarm != null) {
@@ -82,6 +104,15 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       _volumeRampUpDurationSeconds = widget.alarm!.volumeRampUpDurationSeconds;
       _tempVolumeReductionPercent = widget.alarm!.tempVolumeReductionPercent;
       _tempVolumeReductionDurationSeconds = widget.alarm!.tempVolumeReductionDurationSeconds;
+      _enableTts = widget.alarm!.enableTts;
+      _ttsLanguage = widget.alarm!.ttsLanguage;
+      _ttsVolume = widget.alarm!.ttsVolume;
+      _ttsPitch = widget.alarm!.ttsPitch;
+      _ttsRepeatCount = widget.alarm!.ttsRepeatCount;
+      _ttsRepeatDelaySeconds = widget.alarm!.ttsRepeatDelaySeconds;
+      _ttsUsePrefix = widget.alarm!.ttsUsePrefix;
+      _ttsVoice = widget.alarm!.ttsVoice;
+      _piperVoice = widget.alarm!.piperVoice;
 
       // Configurar repetición
       if (widget.alarm!.isDaily) {
@@ -119,12 +150,24 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
         _volumeRampUpDurationSeconds = prefs.getInt(SettingsScreen.defaultVolumeRampUpKey) ?? 30;
         _tempVolumeReductionPercent = prefs.getInt(SettingsScreen.defaultTempVolumeReductionKey) ?? 30;
         _tempVolumeReductionDurationSeconds = prefs.getInt(SettingsScreen.defaultTempVolumeReductionDurationKey) ?? 60;
+
+        // Cargar configuraciones predeterminadas de TTS
+        final ttsVoice = prefs.getString(SettingsScreen.defaultTtsPiperVoiceKey);
+        if (ttsVoice != null) _piperVoice = ttsVoice;
+        _ttsLanguage = prefs.getString(SettingsScreen.defaultTtsLanguageKey) ?? 'es-MX';
+        _ttsPitch = prefs.getDouble(SettingsScreen.defaultTtsPitchKey) ?? 1.0;
+        _ttsVolume = prefs.getInt(SettingsScreen.defaultTtsVolumeKey) ?? 80;
+        _ttsRepeatCount = prefs.getInt(SettingsScreen.defaultTtsRepeatCountKey) ?? 3;
+        _ttsRepeatDelaySeconds = prefs.getInt(SettingsScreen.defaultTtsRepeatDelayKey) ?? 1;
       }
     });
   }
 
   @override
   void dispose() {
+    _tts.stop();
+    _previewPlayer?.stop();
+    _previewPlayer?.dispose();
     _titleController.dispose();
     _messageController.dispose();
     super.dispose();
@@ -136,6 +179,7 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     required bool isExpanded,
     required VoidCallback onTap,
     required List<Widget> children,
+    Widget? headerAction,
   }) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
@@ -155,10 +199,22 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            trailing: Icon(
-              isExpanded ? Icons.expand_less : Icons.expand_more,
-              color: scheme.primary,
-            ),
+            trailing: headerAction != null
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      headerAction,
+                      const SizedBox(width: 4),
+                      Icon(
+                        isExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: scheme.primary,
+                      ),
+                    ],
+                  )
+                : Icon(
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: scheme.primary,
+                  ),
             onTap: onTap,
           ),
           if (isExpanded) ...[
@@ -306,6 +362,150 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
     });
   }
 
+  Future<void> _openVoicesManager() async {
+    final result = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => VoicesManagerModal(selectedVoiceId: _piperVoice),
+    );
+    // result == null significa que se cerró sin cambios (no se tocó ningún botón)
+    // Si el usuario pulsó "Quitar voz Piper" devuelve null explícito
+    // distinguimos con la bandera devuelta por el modal
+    if (!mounted) return;
+    // showModalBottomSheet retorna el valor de Navigator.pop, que puede ser
+    // String (voz seleccionada), null (cerrado sin acción) o '' (quitar)
+    setState(() => _piperVoice = result);
+  }
+
+  Future<void> _loadVoices() async {
+    try {
+      final voices = await _tts.getVoices;
+      if (voices != null && mounted) {
+        final list = List<Map<dynamic, dynamic>>.from(voices);
+        // Extraer locales únicos y ordenarlos
+        final localeSet = <String>{};
+        for (final v in list) {
+          final locale = v['locale'] as String?;
+          if (locale != null && locale.isNotEmpty) localeSet.add(locale);
+        }
+        final locales = localeSet.toList()..sort();
+        setState(() {
+          _availableVoices = list;
+          if (locales.isNotEmpty) {
+            _availableLocales = locales;
+            // Si el idioma actual no existe entre los disponibles, usar el primero
+            if (!_availableLocales.contains(_ttsLanguage)) {
+              _ttsLanguage = _availableLocales.first;
+              _ttsVoice = null;
+            }
+          }
+        });
+      }
+    } catch (e) {
+      print('[AlarmEditScreen] Error al cargar voces: $e');
+    }
+  }
+
+  String _piperVoiceName(String voiceId) {
+    try {
+      final v = piperVoiceCatalog.firstWhere((v) => v.id == voiceId);
+      return '${v.displayName} · ${v.locale} · ${v.qualityLabel}';
+    } catch (_) {
+      return voiceId;
+    }
+  }
+
+  String _localeDisplayName(String locale) {
+    const names = {
+      'es-MX': 'Español (México)',
+      'es-ES': 'Español (España)',
+      'es-US': 'Español (EE.UU.)',
+      'es-419': 'Español (Latinoamérica)',
+      'es': 'Español',
+      'en-US': 'English (US)',
+      'en-GB': 'English (UK)',
+      'en-AU': 'English (Australia)',
+      'en-IN': 'English (India)',
+      'en': 'English',
+      'fr-FR': 'Français (France)',
+      'fr': 'Français',
+      'pt-BR': 'Português (Brasil)',
+      'pt-PT': 'Português (Portugal)',
+      'pt': 'Português',
+      'de-DE': 'Deutsch',
+      'de': 'Deutsch',
+      'it-IT': 'Italiano',
+      'it': 'Italiano',
+      'ja-JP': '日本語',
+      'ko-KR': '한국어',
+      'zh-CN': '中文 (简体)',
+      'zh-TW': '中文 (繁體)',
+      'ru-RU': 'Русский',
+      'ar': 'العربية',
+    };
+    return names[locale] ?? locale;
+  }
+
+  Future<void> _previewTts() async {
+    final name = _titleController.text.trim().isNotEmpty
+        ? _titleController.text.trim()
+        : 'Alarma';
+    final desc = _messageController.text.trim();
+    final prefix = _ttsUsePrefix ? 'Alarma: ' : '';
+    final text = '$prefix$name.${desc.isNotEmpty ? ' $desc.' : ''}';
+
+    // Si hay voz Piper configurada, usarla en el preview
+    if (_piperVoice != null) {
+      try {
+        await _tts.stop();
+        await _previewPlayer?.stop();
+        await _previewPlayer?.dispose();
+        _previewPlayer = null;
+
+        final wavPath = await PiperTtsService.instance.synthesizeToWav(text, _piperVoice!);
+        if (wavPath == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('El modelo Piper no está descargado aún')),
+            );
+          }
+          return;
+        }
+        _previewPlayer = AudioPlayer();
+        await _previewPlayer!.play(DeviceFileSource(wavPath));
+      } catch (e) {
+        print('[AlarmEditScreen] Piper preview error: $e');
+      }
+      return;
+    }
+
+    // Sin voz Piper: usar flutter_tts
+    try {
+      await _tts.stop();
+      if (_ttsVoice != null) {
+        final voiceMap = _availableVoices.firstWhere(
+          (v) => v['name'] == _ttsVoice,
+          orElse: () => <dynamic, dynamic>{},
+        );
+        final voiceLocale = voiceMap['locale'] as String? ?? _ttsLanguage;
+        await _tts.setLanguage(voiceLocale);
+        await _tts.setVoice({'name': _ttsVoice!, 'locale': voiceLocale});
+      } else {
+        await _tts.setLanguage(_ttsLanguage);
+      }
+      await _tts.setVolume(_ttsVolume / 100.0);
+      await _tts.setSpeechRate(0.5);
+      await _tts.setPitch(_ttsPitch);
+      await _tts.speak(text);
+    } catch (e) {
+      print('[AlarmEditScreen] TTS preview error: $e');
+    }
+  }
+
   void _saveAlarm() {
     if (_repetitionType == 'custom' && _selectedDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -331,6 +531,15 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
       'volumeRampUpDurationSeconds': _volumeRampUpDurationSeconds,
       'tempVolumeReductionPercent': _tempVolumeReductionPercent,
       'tempVolumeReductionDurationSeconds': _tempVolumeReductionDurationSeconds,
+      'enableTts': _enableTts,
+      'ttsLanguage': _ttsLanguage,
+      'ttsVolume': _ttsVolume,
+      'ttsPitch': _ttsPitch,
+      'ttsRepeatCount': _ttsRepeatCount,
+      'ttsRepeatDelaySeconds': _ttsRepeatDelaySeconds,
+      'ttsUsePrefix': _ttsUsePrefix,
+      'ttsVoice': _ttsVoice,
+      'piperVoice': _piperVoice,
     };
 
     Navigator.pop(context, result);
@@ -776,6 +985,300 @@ class _AlarmEditScreenState extends State<AlarmEditScreen> {
                 ),
               ),
             ],
+
+            const SizedBox(height: 20),
+
+            // Tarjeta de Lectura en voz alta (TTS)
+            _buildCollapsibleCard(
+              title: 'Lectura en voz alta (TTS)',
+              isExpanded: _isTtsExpanded,
+              onTap: () {
+                setState(() {
+                  _isTtsExpanded = !_isTtsExpanded;
+                });
+              },
+              headerAction: IconButton(
+                icon: const Icon(Icons.settings_voice, size: 20),
+                tooltip: 'Gestionar voces Piper',
+                onPressed: _openVoicesManager,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              children: [
+                SwitchListTile(
+                  title: Text(
+                    'Leer alarma en voz alta',
+                    style: TextStyle(color: scheme.onSurface),
+                  ),
+                  subtitle: Text(
+                    _enableTts
+                        ? 'Se leerá el nombre y descripción al sonar'
+                        : 'Sin lectura en voz alta',
+                    style: TextStyle(color: scheme.onSurface),
+                  ),
+                  value: _enableTts,
+                  activeColor: scheme.primary,
+                  onChanged: (value) {
+                    setState(() {
+                      _enableTts = value;
+                    });
+                  },
+                ),
+                if (_enableTts) ...[
+                  // Indicador de voz Piper activa
+                  if (_piperVoice != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.record_voice_over,
+                              size: 16, color: scheme.onPrimaryContainer),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Voz Piper: ${_piperVoiceName(_piperVoice!)}',
+                              style: TextStyle(
+                                  color: scheme.onPrimaryContainer,
+                                  fontSize: 13),
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close,
+                                size: 16, color: scheme.onPrimaryContainer),
+                            tooltip: 'Quitar voz Piper',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () =>
+                                setState(() => _piperVoice = null),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Text(
+                    'Idioma',
+                    style: TextStyle(color: scheme.onSurface, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _ttsLanguage,
+                    dropdownColor: scheme.surface,
+                    style: TextStyle(color: scheme.onSurface),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: scheme.surfaceContainerHighest,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    items: _availableLocales
+                        .map((locale) => DropdownMenuItem(
+                              value: locale,
+                              child: Text(_localeDisplayName(locale)),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) setState(() {
+                        _ttsLanguage = value;
+                        _ttsVoice = null;
+                      });
+                    },
+                  ),
+                  if (_availableVoices.isNotEmpty) ...[                    const SizedBox(height: 16),
+                    Text(
+                      'Voz',
+                      style: TextStyle(color: scheme.onSurface, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String?>(
+                      value: _ttsVoice,
+                      dropdownColor: scheme.surface,
+                      style: TextStyle(color: scheme.onSurface),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: scheme.surfaceContainerHighest,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Sistema (según idioma)'),
+                        ),
+                        ..._availableVoices
+                            .where((v) {
+                              final locale =
+                                  (v['locale'] as String? ?? '').toLowerCase();
+                              return locale == _ttsLanguage.toLowerCase();
+                            })
+                            .map((v) {
+                              final name = v['name'] as String? ?? '';
+                              final quality = v['quality'] as String? ?? '';
+                              final network = v['network_required'] as String?;
+                              final isNetwork = network == '1';
+                              final label = isNetwork ? '$quality (red)' : '$quality (local)';
+                              return DropdownMenuItem<String?>(
+                                value: name,
+                                child: Text(label),
+                              );
+                            })
+                            .toList(),
+                      ],
+                      onChanged: (value) => setState(() => _ttsVoice = value),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Text(
+                    'Volumen de voz: $_ttsVolume%',
+                    style: TextStyle(color: scheme.onSurface),
+                  ),
+                  Slider(
+                    value: _ttsVolume.toDouble(),
+                    min: 10,
+                    max: 100,
+                    divisions: 18,
+                    label: '$_ttsVolume%',
+                    activeColor: scheme.primary,
+                    onChanged: (value) {
+                      setState(() {
+                        _ttsVolume = value.toInt();
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: Icon(Icons.play_arrow, color: scheme.primary),
+                      label: Text(
+                        'Escuchar vista previa',
+                        style: TextStyle(color: scheme.primary),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: scheme.primary),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: _previewTts,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    title: Text(
+                      'Anunciar tipo: "Alarma: [nombre]"',
+                      style: TextStyle(color: scheme.onSurface),
+                    ),
+                    subtitle: Text(
+                      _ttsUsePrefix
+                          ? 'La voz dirá "Alarma:" antes del nombre'
+                          : 'La voz solo dirá el nombre y descripción',
+                      style: TextStyle(
+                        color: scheme.onSurface.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                    value: _ttsUsePrefix,
+                    activeColor: scheme.primary,
+                    checkColor: scheme.onPrimary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (value) =>
+                        setState(() => _ttsUsePrefix = value ?? false),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tono de voz',
+                    style: TextStyle(color: scheme.onSurface, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<double>(
+                    value: _ttsPitch,
+                    dropdownColor: scheme.surface,
+                    style: TextStyle(color: scheme.onSurface),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: scheme.surfaceContainerHighest,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 0.5, child: Text('Grave')),
+                      DropdownMenuItem(value: 1.0, child: Text('Normal')),
+                      DropdownMenuItem(value: 1.5, child: Text('Aguda')),
+                      DropdownMenuItem(value: 2.0, child: Text('Muy aguda')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) setState(() => _ttsPitch = value);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Repeticiones',
+                    style: TextStyle(color: scheme.onSurface, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final entry in const [
+                        (1, '1 vez'),
+                        (3, '3 veces'),
+                        (5, '5 veces'),
+                        (-1, 'Indefinido'),
+                      ])
+                        ChoiceChip(
+                          label: Text(entry.$2),
+                          selected: _ttsRepeatCount == entry.$1,
+                          selectedColor: scheme.primary,
+                          labelStyle: TextStyle(
+                            color: _ttsRepeatCount == entry.$1
+                                ? scheme.onPrimary
+                                : scheme.onSurface,
+                          ),
+                          onSelected: (_) =>
+                              setState(() => _ttsRepeatCount = entry.$1),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Pausa entre repeticiones',
+                    style: TextStyle(color: scheme.onSurface, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final s in const [1, 3, 5, 10, 15])
+                        ChoiceChip(
+                          label: Text('${s}s'),
+                          selected: _ttsRepeatDelaySeconds == s,
+                          selectedColor: scheme.primary,
+                          labelStyle: TextStyle(
+                            color: _ttsRepeatDelaySeconds == s
+                                ? scheme.onPrimary
+                                : scheme.onSurface,
+                          ),
+                          onSelected: (_) =>
+                              setState(() => _ttsRepeatDelaySeconds = s),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ],
         ),
       ),

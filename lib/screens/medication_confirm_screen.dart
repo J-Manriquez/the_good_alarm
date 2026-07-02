@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/medication_models.dart';
 import '../services/medication_repository.dart';
 import '../services/medication_scheduler.dart';
+import '../services/piper_tts_service.dart';
 import '../settings_screen.dart';
 
 class MedicationConfirmScreen extends StatefulWidget {
@@ -25,6 +27,7 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
   final MedicationRepository _repo = MedicationRepository();
   final MedicationScheduler _scheduler = MedicationScheduler();
   final FlutterTts _tts = FlutterTts();
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   bool _cloudSyncEnabled = false;
   bool _loading = true;
@@ -76,31 +79,82 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
 
   Future<void> _speakConfirmation(
       MedicationModel med, MedicationCompletionModel? existing) async {
+    // Configurar volumen: bloque independiente para que un fallo no aborte el TTS
     try {
-      // Override volúmen del sistema con la configuración del medicamento
-      final saved = await _channel.invokeMethod<int>('setMusicStreamVolume', {'volumePercent': med.ttsVolume});
+      final saved = await _channel.invokeMethod<int>(
+          'setMusicStreamVolume', {'volumePercent': med.ttsVolume});
       if (saved != null) _savedMusicVolume = saved;
       print('[MedicationConfirmScreen] volumen seteado a ${med.ttsVolume}% (guardado=$_savedMusicVolume)');
+    } catch (e) {
+      print('[MedicationConfirmScreen] setMusicStreamVolume error (continuando con TTS): $e');
+    }
+
+    _ttsRepeatCount = 0;
+    _ttsEnabled = true;
+
+    String textToSpeak;
+    if (existing != null && existing.status == 'taken') {
+      final hora = _confirmedAtText(existing);
+      textToSpeak = med.buildTtsAlreadyConfirmedText(hora,
+          scheduledTimeText: _scheduledTimeText);
+    } else {
+      textToSpeak =
+          med.buildTtsConfirmationText(scheduledTimeText: _scheduledTimeText);
+    }
+
+    // Intentar Piper TTS si la voz está configurada y descargada
+    if (med.piperVoice != null) {
+      try {
+        final isDownloaded =
+            await PiperTtsService.instance.isDownloaded(med.piperVoice!);
+        if (isDownloaded) {
+          final wav = await PiperTtsService.instance
+              .synthesizeToWav(textToSpeak, med.piperVoice!);
+          if (wav != null) {
+            print('[MedicationConfirmScreen] Piper TTS: $textToSpeak');
+            _audioPlayer.onPlayerComplete.listen((_) async {
+              final shouldRepeat = med.ttsRepeatCount == -1 ||
+                  _ttsRepeatCount < (med.ttsRepeatCount - 1);
+              if (shouldRepeat && _ttsEnabled && mounted) {
+                _ttsRepeatCount++;
+                print('[MedicationConfirmScreen] Piper TTS repetición $_ttsRepeatCount');
+                if (med.ttsRepeatDelaySeconds > 0) {
+                  await Future.delayed(
+                      Duration(seconds: med.ttsRepeatDelaySeconds));
+                }
+                if (_ttsEnabled && mounted) {
+                  await _audioPlayer.play(DeviceFileSource(wav));
+                }
+              }
+            });
+            await _audioPlayer.play(DeviceFileSource(wav));
+            return;
+          }
+        }
+      } catch (e) {
+        print(
+            '[MedicationConfirmScreen] Piper TTS error, fallback a flutter_tts: $e');
+      }
+    }
+
+    // Fallback: flutter_tts (voz del sistema)
+    try {
       await _tts.setLanguage(med.ttsLanguage);
       await _tts.setSpeechRate(0.5);
-      _ttsRepeatCount = 0;
-      _ttsEnabled = true;
-      String textToSpeak;
-      if (existing != null && existing.status == 'taken') {
-        final hora = _confirmedAtText(existing);
-        textToSpeak = med.buildTtsAlreadyConfirmedText(hora, scheduledTimeText: _timeText);
-      } else {
-        textToSpeak = med.buildTtsConfirmationText(scheduledTimeText: _timeText);
-      }
-      // Repetir hasta 3 veces en total
-      _tts.setCompletionHandler(() {
-        if (_ttsRepeatCount < 2 && _ttsEnabled && mounted) {
+      _tts.setCompletionHandler(() async {
+        final shouldRepeat = med.ttsRepeatCount == -1 ||
+            _ttsRepeatCount < (med.ttsRepeatCount - 1);
+        if (shouldRepeat && _ttsEnabled && mounted) {
           _ttsRepeatCount++;
-          print('[MedicationConfirmScreen] TTS repetición $_ttsRepeatCount/2');
-          _tts.speak(textToSpeak);
+          print('[MedicationConfirmScreen] TTS repetición $_ttsRepeatCount');
+          if (med.ttsRepeatDelaySeconds > 0) {
+            await Future.delayed(
+                Duration(seconds: med.ttsRepeatDelaySeconds));
+          }
+          if (_ttsEnabled && mounted) _tts.speak(textToSpeak);
         }
       });
-      print('[MedicationConfirmScreen] TTS: $textToSpeak');
+      print('[MedicationConfirmScreen] flutter_tts: $textToSpeak');
       await _tts.speak(textToSpeak);
     } catch (e) {
       print('[MedicationConfirmScreen] TTS error: $e');
@@ -114,8 +168,10 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
   }
 
   Future<void> _stopTts() async {
+    _ttsEnabled = false;
     try {
       await _tts.stop();
+      await _audioPlayer.stop();
       // Restaurar volúmen original
       if (_savedMusicVolume >= 0) {
         await _channel.invokeMethod('restoreMusicStreamVolume', {'savedVolume': _savedMusicVolume});
@@ -125,12 +181,37 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
     } catch (_) {}
   }
 
-  DateTime get _scheduledAtLocal =>
-      DateTime.fromMillisecondsSinceEpoch(_scheduledAtLocalMillis);
+  /// Hora original del recordatorio, extraída del occurrenceKey
+  /// (formato: "med|{id}|{yyyyMMdd}|{HHmm}").
+  /// Esto evita usar la hora en que suena la confirmación en lugar de
+  /// la hora a la que estaba programado el medicamento.
+  DateTime get _scheduledAtLocal {
+    try {
+      final parts = _occurrenceKey.split('|');
+      if (parts.length >= 4) {
+        final dateStr = parts[2]; // yyyyMMdd
+        final timeStr = parts[3]; // HHmm
+        return DateTime(
+          int.parse(dateStr.substring(0, 4)),
+          int.parse(dateStr.substring(4, 6)),
+          int.parse(dateStr.substring(6, 8)),
+          int.parse(timeStr.substring(0, 2)),
+          int.parse(timeStr.substring(2, 4)),
+        );
+      }
+    } catch (_) {}
+    // Fallback: usar milisegundos recibidos (será la hora de la confirmación)
+    return DateTime.fromMillisecondsSinceEpoch(_scheduledAtLocalMillis);
+  }
 
-  String get _timeText {
+  String get _scheduledTimeText {
     final dt = _scheduledAtLocal;
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  String get _currentTimeText {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
   }
 
   Future<void> _confirmTaken() async {
@@ -217,6 +298,56 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  Future<void> _snooze() async {
+    final med = _med;
+    if (med == null) return;
+    print('[MedicationConfirmScreen] snooze occurrenceKey=$_occurrenceKey');
+    await _stopTts();
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+
+    final existing = _existingCompletion;
+    final newSnoozeCount = (existing?.snoozeCount ?? 0) + 1;
+    final snoozeCompletion = MedicationCompletionModel(
+      id: _occurrenceKey,
+      ownerUid: med.ownerUid,
+      medicationId: med.id,
+      scheduledAtLocal: _scheduledAtLocal,
+      status: 'pending',
+      snoozeCount: newSnoozeCount,
+      dosageAmountTaken: med.dosageAmount,
+      dosageUnitTaken: med.dosageUnit,
+      note: '',
+    );
+    try {
+      await _repo.upsertCompletion(
+        completion: snoozeCompletion,
+        cloudSyncEnabled: _cloudSyncEnabled,
+        userId: userId,
+      );
+      print('[MedicationConfirmScreen] snooze registrado snoozeCount=$newSnoozeCount');
+    } catch (e) {
+      print('[MedicationConfirmScreen] error guardando snooze: $e');
+    }
+
+    final confirmAt =
+        DateTime.now().add(Duration(minutes: med.defaultSnoozeMinutes));
+    try {
+      await _scheduler.scheduleConfirmation(
+        med: med,
+        occurrenceKey: _occurrenceKey,
+        confirmAt: confirmAt,
+      );
+      print('[MedicationConfirmScreen] nueva confirmación programada para ${confirmAt.toIso8601String()}');
+    } catch (e) {
+      print('[MedicationConfirmScreen] error reprogramando confirmación: $e');
+    }
+
+    await _scheduler.dismissNotification(
+        occurrenceKey: _occurrenceKey, isConfirmation: true);
+    await _clearScreenFlag();
+    if (mounted) Navigator.of(context).pop();
+  }
+
   Future<void> _cancelConfirmation() async {
     try {
       await _scheduler.cancelConfirmation(occurrenceKey: _occurrenceKey);
@@ -233,7 +364,10 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
 
   @override
   void dispose() {
+    _ttsEnabled = false;
     _tts.stop();
+    _audioPlayer.stop();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -267,7 +401,7 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
     final alreadyTaken = _existingCompletion?.status == 'taken';
     final cardColor = med.colorHex.isNotEmpty
         ? Color(int.tryParse(med.colorHex.replaceFirst('#', '0xFF')) ?? scheme.surface.value)
-        : (alreadyTaken ? Colors.green.shade50 : scheme.surface);
+        : (alreadyTaken ? const Color.fromARGB(255, 6, 194, 16) : scheme.surface);
 
     final isLight = ThemeData.estimateBrightnessForColor(cardColor) == Brightness.light;
     final onCard = isLight ? Colors.black87 : Colors.white;
@@ -275,137 +409,185 @@ class _MedicationConfirmScreenState extends State<MedicationConfirmScreen> {
     return Scaffold(
       backgroundColor: scheme.background,
       body: SafeArea(
-        child: Center(
-          child: Card(
-            color: cardColor,
-            margin: const EdgeInsets.all(16),
-            elevation: 8,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: Padding(
-              padding: const EdgeInsets.all(22),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Ícono, hora y botón mute
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (med.enableTts) const SizedBox(width: 40),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            Icon(
-                              alreadyTaken ? Icons.check_circle : Icons.help_outline,
-                              size: 64,
-                              color: alreadyTaken ? Colors.green.shade600 : scheme.primary,
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              _timeText,
-                              style: TextStyle(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.w800,
-                                  color: onCard.withOpacity(0.7)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (med.enableTts)
-                        IconButton(
-                          icon: Icon(
-                            _ttsEnabled ? Icons.volume_up : Icons.volume_off,
-                            color: onCard.withOpacity(0.75),
+        child: SingleChildScrollView(
+          child: Center(
+            child: Card(
+              color: cardColor,
+              margin: const EdgeInsets.all(16),
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Ícono, hora y botón mute
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (med.enableTts) const SizedBox(width: 48),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Icon(
+                                alreadyTaken
+                                    ? Icons.check_circle
+                                    : Icons.help_outline,
+                                size: 88,
+                                color: alreadyTaken
+                                    ? const Color.fromARGB(255, 6, 194, 16)
+                                    : scheme.primary,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                _currentTimeText,
+                                style: TextStyle(
+                                    fontSize: 48,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white),
+                              ),
+                            ],
                           ),
-                          iconSize: 28,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          tooltip: _ttsEnabled ? 'Silenciar' : 'Silenciado',
-                          onPressed: () {
-                            if (_ttsEnabled) {
-                              setState(() => _ttsEnabled = false);
-                              _stopTts();
-                            }
-                          },
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Título de la confirmación
-                  Text(
-                    alreadyTaken
-                        ? '¿Confirmás que tomaste ${med.medicationName}?'
-                        : '¿Ya tomaste ${med.medicationName}?',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: onCard),
-                  ),
-                  const SizedBox(height: 6),
-
-                  // Dosis
-                  if (med.dosageAmount.isNotEmpty)
-                    Text(
-                      '${med.dosageAmount} ${med.dosageUnit}',
-                      style: TextStyle(
-                          fontSize: 16,
-                          color: onCard.withOpacity(0.8)),
+                        if (med.enableTts)
+                          IconButton(
+                            icon: Icon(
+                              _ttsEnabled
+                                  ? Icons.volume_up
+                                  : Icons.volume_off,
+                              color: onCard.withOpacity(0.75),
+                            ),
+                            iconSize: 36,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            tooltip:
+                                _ttsEnabled ? 'Silenciar' : 'Activar voz',
+                            onPressed: () {
+                              if (_ttsEnabled) {
+                                setState(() => _ttsEnabled = false);
+                                _stopTts();
+                              } else {
+                                setState(() => _ttsEnabled = true);
+                                _speakConfirmation(
+                                    med, _existingCompletion);
+                              }
+                            },
+                          ),
+                      ],
                     ),
+                    const SizedBox(height: 16),
 
-                  if (alreadyTaken && _existingCompletion?.confirmedAtLocal != null) ...[
-                    const SizedBox(height: 8),
+                    // Título de la confirmación
                     Text(
-                      'Confirmado previamente a las ${_confirmedAtText(_existingCompletion!)}',
-                      style: TextStyle(
-                          color: Colors.green.shade700,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ],
-
-                  if (med.instructions.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      med.instructions,
+                      alreadyTaken
+                          ? '¿Puedes confirmar que tomaste\n${med.medicationName}?'
+                          : '¿Ya tomaste\n${med.medicationName}?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          fontSize: 14, color: onCard.withOpacity(0.75)),
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: onCard,
+                          height: 1.25),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Dosis
+                    if (med.dosageAmount.isNotEmpty)
+                      Text(
+                        'Debías tomar ${med.dosageAmount} ${med.dosageUnit}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white),
+                      ),
+
+                    const SizedBox(height: 10),
+                    Text(
+                      'La dosis original era a las $_scheduledTimeText',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.orange.shade700,
+                          fontWeight: FontWeight.w600),
+                    ),
+
+                    if (med.instructions.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        med.instructions,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 18,
+                            color: onCard.withOpacity(0.75)),
+                      ),
+                    ],
+
+                    const SizedBox(height: 28),
+                    const Divider(),
+                    const SizedBox(height: 18),
+
+                    // Botón: Sí lo tomé
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _confirmTaken,
+                        icon: const Icon(Icons.check, size: 26),
+                        label: Text(
+                            alreadyTaken ? 'Sí, es correcto' : 'Sí, lo tomé'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color.fromARGB(255, 6, 194, 16),
+                          foregroundColor: Colors.white,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 18),
+                          textStyle: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Botón: Posponer
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _snooze,
+                        icon: const Icon(Icons.snooze, size: 26),
+                        label: Text(
+                            'Posponer ${med.defaultSnoozeMinutes} min'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.orange.shade700,
+                          foregroundColor: Colors.white,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 18),
+                          textStyle: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Botón: No lo tomé
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _confirmNotTaken,
+                        icon: const Icon(Icons.close, size: 26),
+                        label: Text(
+                            alreadyTaken ? 'No, no lo tomé' : 'No lo tomé'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 18),
+                          textStyle: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.w700),
+                        ),
+                      ),
                     ),
                   ],
-
-                  const SizedBox(height: 22),
-                  const Divider(),
-                  const SizedBox(height: 14),
-
-                  // Botones de confirmación en columna, ancho completo
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _confirmTaken,
-                      icon: const Icon(Icons.check),
-                      label: Text(alreadyTaken ? 'Sí, es correcto' : 'Sí, lo tomé'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.green.shade600,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _confirmNotTaken,
-                      icon: const Icon(Icons.close),
-                      label: Text(alreadyTaken ? 'No, no lo tomé' : 'No lo tomé'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.red.shade600,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

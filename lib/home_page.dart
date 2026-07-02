@@ -578,6 +578,12 @@ class _HomeShellState extends State<HomeShell> {
                   color: _tabIndex == 2 ? scheme.primary : scheme.onSurface,
                 ),
               ),
+              IconButton(
+                onPressed: () => Navigator.pushNamed(context, '/ai_assistant'),
+                iconSize: 36,
+                tooltip: 'Asistente IA',
+                icon: Icon(Icons.mic, color: scheme.tertiary),
+              ),
             ],
           ),
         ),
@@ -752,7 +758,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin<HomePage> {
   final List<Alarm> _alarms = [];
   static const platform = MethodChannel('com.andodevs.the_good_alarm/alarm');
 
@@ -778,6 +785,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   // NUEVO: Variables para controlar el estado de la aplicación
   final bool _isAppInForeground = true;
   final bool _hasUnhandledAlarm = false;
+
+  // Guard para evitar doble push de pantallas de medicamento
+  final Set<String> _showingMedicationScreens = {};
 
   // Variables de configuración de volumen
   int maxVolumePercent = 100;
@@ -842,28 +852,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final screenRoute = data['screenRoute'] as String? ?? '/medication';
       print('[HomePage] checkPending: medicationId=$medicationId screen=$screenRoute isConfirmation=$isConfirmation');
       if (!mounted) return;
+      if (_showingMedicationScreens.contains(occurrenceKey)) {
+        print('[HomePage] checkPending: $occurrenceKey ya está mostrándose, ignorando');
+        return;
+      }
       if (isConfirmation || screenRoute == '/medication_confirm') {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (context) => MedicationConfirmScreen(
-            arguments: {
-              'medicationId': medicationId,
-              'occurrenceKey': occurrenceKey,
-              'scheduledAtLocalMillis': scheduledAtLocalMillis,
-              ...Map<String, dynamic>.from(data),
-            },
-          ),
-        ));
+        _showingMedicationScreens.add(occurrenceKey);
+        Navigator.of(context)
+            .push(MaterialPageRoute(
+              builder: (context) => MedicationConfirmScreen(
+                arguments: {
+                  'medicationId': medicationId,
+                  'occurrenceKey': occurrenceKey,
+                  'scheduledAtLocalMillis': scheduledAtLocalMillis,
+                  ...Map<String, dynamic>.from(data),
+                },
+              ),
+            ))
+            .then((_) => _showingMedicationScreens.remove(occurrenceKey));
       } else {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (context) => MedicationAlertScreen(
-            arguments: {
-              'medicationId': medicationId,
-              'occurrenceKey': occurrenceKey,
-              'scheduledAtLocalMillis': scheduledAtLocalMillis,
-              ...Map<String, dynamic>.from(data),
-            },
-          ),
-        ));
+        _showingMedicationScreens.add(occurrenceKey);
+        Navigator.of(context)
+            .push(MaterialPageRoute(
+              builder: (context) => MedicationAlertScreen(
+                arguments: {
+                  'medicationId': medicationId,
+                  'occurrenceKey': occurrenceKey,
+                  'scheduledAtLocalMillis': scheduledAtLocalMillis,
+                  ...Map<String, dynamic>.from(data),
+                },
+              ),
+            ))
+            .then((_) => _showingMedicationScreens.remove(occurrenceKey));
       }
     } catch (e) {
       print('[HomePage] checkPendingMedicationScreen error: $e');
@@ -883,8 +903,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _consumeNativeAlarmEvents();
       _reloadNextCalendarAlarmFromPrefs();
+      _checkPendingMedicationScreen();
     }
   }
+
+  @override
+  bool get wantKeepAlive => true;
 
   List<int> _normalizeRepeatDaysForAlarm(Alarm alarm) {
     if (alarm.repeatDays.isNotEmpty) return List<int>.from(alarm.repeatDays);
@@ -1555,6 +1579,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         'volumeRampUpDurationSeconds': alarm.volumeRampUpDurationSeconds,
         'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
         'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
+        'enableTts': alarm.enableTts,
+        'ttsLanguage': alarm.ttsLanguage,
+        'ttsVolume': alarm.ttsVolume,
+        'ttsPitch': alarm.ttsPitch,
+        'ttsRepeatCount': alarm.ttsRepeatCount,
+        'ttsRepeatDelaySeconds': alarm.ttsRepeatDelaySeconds,
+        'ttsUsePrefix': alarm.ttsUsePrefix,
+        'ttsVoice': alarm.ttsVoice,
+        'piperVoice': alarm.piperVoice,
       },
     );
   }
@@ -1636,6 +1669,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   'volumeRampUpDurationSeconds': alarm.volumeRampUpDurationSeconds,
                   'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
                   'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
+                  'enableTts': alarm.enableTts,
+                  'ttsLanguage': alarm.ttsLanguage,
+                  'ttsVolume': alarm.ttsVolume,
+                  'ttsPitch': alarm.ttsPitch,
+                  'ttsRepeatCount': alarm.ttsRepeatCount,
+                  'ttsRepeatDelaySeconds': alarm.ttsRepeatDelaySeconds,
+                  'ttsUsePrefix': alarm.ttsUsePrefix,
+                  'ttsVoice': alarm.ttsVoice,
+                  'piperVoice': alarm.piperVoice,
                 },
               ),
             ),
@@ -1667,21 +1709,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             (call.arguments['scheduledAtLocalMillis'] as num?)?.toInt() ??
                 DateTime.now().millisecondsSinceEpoch;
         print('[HomePage] showMedicationScreen medId=$medId occurrenceKey=$medOccurrenceKey');
-        // Limpiar pending de prefs nativas para evitar doble navegación en próximo inicio
-        platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
-        if (mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => MedicationAlertScreen(
-                arguments: {
-                  'medicationId': medId,
-                  'occurrenceKey': medOccurrenceKey,
-                  'scheduledAtLocalMillis': medScheduledMillis,
-                  ...Map<String, dynamic>.from(call.arguments as Map),
-                },
-              ),
-            ),
-          );
+        if (mounted && !_showingMedicationScreens.contains(medOccurrenceKey)) {
+          _showingMedicationScreens.add(medOccurrenceKey);
+          // Limpiar pending solo si podemos mostrar la pantalla
+          platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
+          Navigator.of(context)
+              .push(
+                MaterialPageRoute(
+                  builder: (context) => MedicationAlertScreen(
+                    arguments: {
+                      'medicationId': medId,
+                      'occurrenceKey': medOccurrenceKey,
+                      'scheduledAtLocalMillis': medScheduledMillis,
+                      ...Map<String, dynamic>.from(call.arguments as Map),
+                    },
+                  ),
+                ),
+              )
+              .then((_) => _showingMedicationScreens.remove(medOccurrenceKey));
         }
         break;
       case 'showMedicationConfirmScreen':
@@ -1691,21 +1736,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             (call.arguments['scheduledAtLocalMillis'] as num?)?.toInt() ??
                 DateTime.now().millisecondsSinceEpoch;
         print('[HomePage] showMedicationConfirmScreen medId=$medConfirmId occurrenceKey=$medConfirmKey');
-        // Limpiar pending de prefs nativas para evitar doble navegación en próximo inicio
-        platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
-        if (mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => MedicationConfirmScreen(
-                arguments: {
-                  'medicationId': medConfirmId,
-                  'occurrenceKey': medConfirmKey,
-                  'scheduledAtLocalMillis': medConfirmMillis,
-                  ...Map<String, dynamic>.from(call.arguments as Map),
-                },
-              ),
-            ),
-          );
+        if (mounted && !_showingMedicationScreens.contains(medConfirmKey)) {
+          _showingMedicationScreens.add(medConfirmKey);
+          // Limpiar pending solo si podemos mostrar la pantalla
+          platform.invokeMethod('getPendingMedicationScreen').catchError((_) {});
+          Navigator.of(context)
+              .push(
+                MaterialPageRoute(
+                  builder: (context) => MedicationConfirmScreen(
+                    arguments: {
+                      'medicationId': medConfirmId,
+                      'occurrenceKey': medConfirmKey,
+                      'scheduledAtLocalMillis': medConfirmMillis,
+                      ...Map<String, dynamic>.from(call.arguments as Map),
+                    },
+                  ),
+                ),
+              )
+              .then((_) => _showingMedicationScreens.remove(medConfirmKey));
         }
         break;
       // NUEVO: Manejar notificación de alarma sonando
@@ -2023,6 +2071,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final volumeRampUpDurationSeconds = result['volumeRampUpDurationSeconds'] ?? 0;
       final tempVolumeReductionPercent = result['tempVolumeReductionPercent'] ?? 50;
       final tempVolumeReductionDurationSeconds = result['tempVolumeReductionDurationSeconds'] ?? 30;
+      final enableTts = result['enableTts'] as bool? ?? true;
+      final ttsLanguage = result['ttsLanguage'] as String? ?? 'es-MX';
+      final ttsVolume = result['ttsVolume'] as int? ?? 80;
+      final ttsPitch = (result['ttsPitch'] as num?)?.toDouble() ?? 1.0;
+      final ttsRepeatCount = result['ttsRepeatCount'] as int? ?? 3;
+      final ttsRepeatDelaySeconds = result['ttsRepeatDelaySeconds'] as int? ?? 5;
+      final ttsUsePrefix = result['ttsUsePrefix'] as bool? ?? false;
+      final ttsVoice = result['ttsVoice'] as String?;
+      final piperVoice = result['piperVoice'] as String?;
 
       final finalRepeatDays = _normalizeRepeatDaysFromEditorResult(
         repetitionType: repetitionType,
@@ -2073,6 +2130,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
         tempVolumeReductionPercent: tempVolumeReductionPercent,
         tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
+        enableTts: enableTts,
+        ttsLanguage: ttsLanguage,
+        ttsVolume: ttsVolume,
+        ttsPitch: ttsPitch,
+        ttsRepeatCount: ttsRepeatCount,
+        ttsRepeatDelaySeconds: ttsRepeatDelaySeconds,
+        ttsUsePrefix: ttsUsePrefix,
+        ttsVoice: ttsVoice,
+        piperVoice: piperVoice,
       );
 
       try {
@@ -2143,6 +2209,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final volumeRampUpDurationSeconds = result['volumeRampUpDurationSeconds'] ?? 0;
       final tempVolumeReductionPercent = result['tempVolumeReductionPercent'] ?? 50;
       final tempVolumeReductionDurationSeconds = result['tempVolumeReductionDurationSeconds'] ?? 30;
+      final enableTts = result['enableTts'] as bool? ?? true;
+      final ttsLanguage = result['ttsLanguage'] as String? ?? 'es-MX';
+      final ttsVolume = result['ttsVolume'] as int? ?? 80;
+      final ttsPitch = (result['ttsPitch'] as num?)?.toDouble() ?? 1.0;
+      final ttsRepeatCount = result['ttsRepeatCount'] as int? ?? 3;
+      final ttsRepeatDelaySeconds = result['ttsRepeatDelaySeconds'] as int? ?? 5;
+      final ttsUsePrefix = result['ttsUsePrefix'] as bool? ?? false;
+      final ttsVoice = result['ttsVoice'] as String?;
+      final piperVoice = result['piperVoice'] as String?;
 
       // Verificar si syncToCloud cambió de true a false para eliminar de Firebase
       final previousSyncToCloud = alarm.syncToCloud;
@@ -2194,7 +2269,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         volumeRampUpDurationSeconds: volumeRampUpDurationSeconds,
         tempVolumeReductionPercent: tempVolumeReductionPercent,
         tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds,
+        enableTts: enableTts,
+        ttsLanguage: ttsLanguage,
+        ttsVolume: ttsVolume,
+        ttsPitch: ttsPitch,
+        ttsRepeatCount: ttsRepeatCount,
+        ttsRepeatDelaySeconds: ttsRepeatDelaySeconds,
+        ttsUsePrefix: ttsUsePrefix,
       );
+      updatedAlarm.ttsVoice = ttsVoice;
+      updatedAlarm.piperVoice = piperVoice;
 
       final index = _alarms.indexWhere((a) => a.id == alarm.id);
       if (index != -1) {
@@ -3196,6 +3280,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     Map<String, List<Alarm>> groupedAlarms =
         _currentGroupingOption != AlarmGroupingOption.none
         ? _getGroupedAlarms()

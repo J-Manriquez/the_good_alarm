@@ -25,6 +25,16 @@ class Alarm {
   int volumeRampUpDurationSeconds;
   int tempVolumeReductionPercent;
   int tempVolumeReductionDurationSeconds;
+  // Configuración de TTS
+  bool enableTts;
+  String ttsLanguage;
+  int ttsVolume; // 0-100, porcentaje del volúmen máximo de STREAM_MUSIC
+  double ttsPitch; // 0.5-2.0 (0.5=grave, 1.0=normal, 1.5=aguda)
+  int ttsRepeatCount; // veces que se repite: 1, 3, 5 o -1=indefinido
+  int ttsRepeatDelaySeconds; // segundos entre repeticiones
+  bool ttsUsePrefix; // si true, antepone "Alarma: " al texto TTS
+  String? ttsVoice;  // nombre de voz específica del motor TTS del sistema
+  String? piperVoice; // ID de voz Piper descargada (null = usar flutter_tts)
   DateTime? createdAt;
   DateTime? updatedAt;
   DateTime? deletedAt;
@@ -53,6 +63,15 @@ class Alarm {
     this.volumeRampUpDurationSeconds = 30,
     this.tempVolumeReductionPercent = 30,
     this.tempVolumeReductionDurationSeconds = 60,
+    this.enableTts = true,
+    this.ttsLanguage = 'es-MX',
+    this.ttsVolume = 80,
+    this.ttsPitch = 1.0,
+    this.ttsRepeatCount = 3,
+    this.ttsRepeatDelaySeconds = 1,
+    this.ttsUsePrefix = false,
+    this.ttsVoice,
+    this.piperVoice,
     this.createdAt,
     this.updatedAt,
     this.deletedAt,
@@ -63,6 +82,18 @@ class Alarm {
 
   bool isRepeating() {
     return isDaily || isWeekly || isWeekend || repeatDays.isNotEmpty;
+  }
+
+  String buildTtsText() {
+    final name = title.trim();
+    final desc = message.trim();
+    final buffer = StringBuffer();
+    if (ttsUsePrefix) buffer.write('Alarma: ');
+    buffer.write('$name.');
+    if (desc.isNotEmpty) {
+      buffer.write(' $desc.');
+    }
+    return buffer.toString();
   }
 
   Map<String, dynamic> toJson() => {
@@ -86,6 +117,15 @@ class Alarm {
     'volumeRampUpDurationSeconds': volumeRampUpDurationSeconds,
     'tempVolumeReductionPercent': tempVolumeReductionPercent,
     'tempVolumeReductionDurationSeconds': tempVolumeReductionDurationSeconds,
+    'enableTts': enableTts,
+    'ttsLanguage': ttsLanguage,
+    'ttsVolume': ttsVolume,
+    'ttsPitch': ttsPitch,
+    'ttsRepeatCount': ttsRepeatCount,
+    'ttsRepeatDelaySeconds': ttsRepeatDelaySeconds,
+    'ttsUsePrefix': ttsUsePrefix,
+    if (ttsVoice != null) 'ttsVoice': ttsVoice,
+    if (piperVoice != null) 'piperVoice': piperVoice,
     'createdAt': createdAt?.toIso8601String(),
     'updatedAt': updatedAt?.toIso8601String(),
     'deletedAt': deletedAt?.toIso8601String(),
@@ -117,6 +157,15 @@ class Alarm {
       'volumeRampUpDurationSeconds',
       'tempVolumeReductionPercent',
       'tempVolumeReductionDurationSeconds',
+      'enableTts',
+      'ttsLanguage',
+      'ttsVolume',
+      'ttsPitch',
+      'ttsRepeatCount',
+      'ttsRepeatDelaySeconds',
+      'ttsUsePrefix',
+      'ttsVoice',
+      'piperVoice',
       'createdAt',
       'updatedAt',
       'deletedAt',
@@ -170,6 +219,15 @@ class Alarm {
       volumeRampUpDurationSeconds: (json['volumeRampUpDurationSeconds'] as num?)?.toInt() ?? 30,
       tempVolumeReductionPercent: (json['tempVolumeReductionPercent'] as num?)?.toInt() ?? 30,
       tempVolumeReductionDurationSeconds: (json['tempVolumeReductionDurationSeconds'] as num?)?.toInt() ?? 60,
+      enableTts: json['enableTts'] as bool? ?? true,
+      ttsLanguage: json['ttsLanguage'] as String? ?? 'es-MX',
+      ttsVolume: (json['ttsVolume'] as num?)?.toInt() ?? 80,
+      ttsPitch: (json['ttsPitch'] as num?)?.toDouble() ?? 1.0,
+      ttsRepeatCount: (json['ttsRepeatCount'] as num?)?.toInt() ?? 3,
+      ttsRepeatDelaySeconds: (json['ttsRepeatDelaySeconds'] as num?)?.toInt() ?? 5,
+      ttsUsePrefix: json['ttsUsePrefix'] as bool? ?? false,
+      ttsVoice: json['ttsVoice'] as String?,
+      piperVoice: json['piperVoice'] as String?,
       createdAt: _parseDate(json['createdAt']),
       updatedAt: _parseDate(json['updatedAt']),
       deletedAt: _parseDate(json['deletedAt']),
@@ -201,6 +259,15 @@ class Alarm {
     int? volumeRampUpDurationSeconds,
     int? tempVolumeReductionPercent,
     int? tempVolumeReductionDurationSeconds,
+    bool? enableTts,
+    String? ttsLanguage,
+    int? ttsVolume,
+    double? ttsPitch,
+    int? ttsRepeatCount,
+    int? ttsRepeatDelaySeconds,
+    bool? ttsUsePrefix,
+    String? ttsVoice,
+    String? piperVoice,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
@@ -229,6 +296,15 @@ class Alarm {
       volumeRampUpDurationSeconds: volumeRampUpDurationSeconds ?? this.volumeRampUpDurationSeconds,
       tempVolumeReductionPercent: tempVolumeReductionPercent ?? this.tempVolumeReductionPercent,
       tempVolumeReductionDurationSeconds: tempVolumeReductionDurationSeconds ?? this.tempVolumeReductionDurationSeconds,
+      enableTts: enableTts ?? this.enableTts,
+      ttsLanguage: ttsLanguage ?? this.ttsLanguage,
+      ttsVolume: ttsVolume ?? this.ttsVolume,
+      ttsPitch: ttsPitch ?? this.ttsPitch,
+      ttsRepeatCount: ttsRepeatCount ?? this.ttsRepeatCount,
+      ttsRepeatDelaySeconds: ttsRepeatDelaySeconds ?? this.ttsRepeatDelaySeconds,
+      ttsUsePrefix: ttsUsePrefix ?? this.ttsUsePrefix,
+      ttsVoice: ttsVoice ?? this.ttsVoice,
+      piperVoice: piperVoice ?? this.piperVoice,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
