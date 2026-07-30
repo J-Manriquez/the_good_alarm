@@ -14,3 +14,7 @@ Esto genera en `build/app/outputs/flutter-apk/`:
 - `app-x86_64-release.apk` — emuladores y dispositivos x86
 
 Los APKs se copian a la carpeta `releases/` en la raíz del proyecto.
+
+## Regla: preguntar antes de compilar
+
+Cada vez que termines una tarea de código, pregunta al usuario si quiere que compiles la app (no compilar automáticamente sin confirmación).

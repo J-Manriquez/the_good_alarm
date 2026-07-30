@@ -40,6 +40,9 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
   _ScreenState _state = _ScreenState.idle;
   bool _sttAvailable = false;
   bool _aiAvailable = false;
+  // Evita que el mismo input se procese dos veces (finalResult del STT y
+  // _stopListening pueden dispararse ambos para la misma frase).
+  bool _processing = false;
   String _partialText = '';
   final List<ConversationMessage> _history = [];
   AssistantResponse? _pendingResponse;
@@ -93,9 +96,10 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
     });
 
     final sttOk = await _stt.initialize(
-      onError: (error) => debugPrint('[STT] error: ${error.errorMsg}'),
+      onError: (error) => print('[AIVoiceScreen][STT] error: ${error.errorMsg}'),
     );
     final aiOk = await AiService.instance.isModelReady();
+    print('[AIVoiceScreen][_init] sttOk=$sttOk  aiOk=$aiOk  locale=$_ttsLocale');
 
     if (mounted) {
       setState(() {
@@ -132,7 +136,13 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
   }
 
   Future<void> _stopListening() async {
+    print('[AIVoiceScreen][_stopListening] state=$_state partial="$_partialText"');
     await _stt.stop();
+    // Si el finalResult del STT ya disparó el procesamiento, no repetir.
+    if (_processing || _state != _ScreenState.listening) {
+      print('[AIVoiceScreen][_stopListening] ya en procesamiento — se omite reenvío');
+      return;
+    }
     if (_partialText.trim().isNotEmpty) {
       await _processUserInput(_partialText.trim());
     } else {
@@ -142,6 +152,7 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
 
   void _onSttResult(SpeechRecognitionResult result) {
     if (!mounted) return;
+    print('[AIVoiceScreen][_onSttResult] final=${result.finalResult} words="${result.recognizedWords}"');
     setState(() => _partialText = result.recognizedWords);
     if (result.finalResult && result.recognizedWords.isNotEmpty) {
       _processUserInput(result.recognizedWords.trim());
@@ -151,33 +162,44 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
   // ── Procesamiento IA ─────────────────────────────────────────────────────
 
   Future<void> _processUserInput(String text) async {
+    if (_processing) {
+      print('[AIVoiceScreen][_processUserInput] DUPLICADO ignorado: "$text"');
+      return;
+    }
     if (text.isEmpty) {
       setState(() => _state = _ScreenState.idle);
       return;
     }
+    _processing = true;
+    print('[AIVoiceScreen][_processUserInput] START texto="$text"');
 
-    await _stt.stop();
-    _addMessage(text: text, isUser: true);
+    try {
+      await _stt.stop();
+      _addMessage(text: text, isUser: true);
 
-    setState(() {
-      _state = _ScreenState.thinking;
-      _partialText = '';
-    });
+      setState(() {
+        _state = _ScreenState.thinking;
+        _partialText = '';
+      });
 
-    final response = await _aiService.processMessage(
-      userMessage: text,
-      history: _history,
-    );
+      final response = await _aiService.processMessage(
+        userMessage: text,
+        history: _history,
+      );
+      print('[AIVoiceScreen][_processUserInput] respuesta IA  intent=${response.intent}  status=${response.status}  data=${response.data}  message="${response.message}"');
 
-    _addMessage(text: response.message, isUser: false);
+      _addMessage(text: response.message, isUser: false);
 
-    if (!mounted) return;
-    setState(() {
-      _pendingResponse = response;
-      _state = _ScreenState.responding;
-    });
+      if (!mounted) return;
+      setState(() {
+        _pendingResponse = response;
+        _state = _ScreenState.responding;
+      });
 
-    await _speakResponse(response.message);
+      await _speakResponse(response.message);
+    } finally {
+      _processing = false;
+    }
   }
 
   void _addMessage({required String text, required bool isUser}) {
@@ -185,6 +207,7 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
   }
 
   Future<void> _speakResponse(String text) async {
+    print('[AIVoiceScreen][_speakResponse] TTS speak: "$text"');
     await _tts.speak(text);
     // El handler de completion cambia el estado a confirming
     // Si TTS no dispara (silencio del sistema), cambiamos manualmente tras delay
@@ -198,10 +221,15 @@ class _AiVoiceAssistantScreenState extends State<AiVoiceAssistantScreen>
   // ── Confirmar creación ───────────────────────────────────────────────────
 
   Future<void> _confirm() async {
-    if (_pendingResponse == null) return;
+    if (_pendingResponse == null) {
+      print('[AIVoiceScreen][_confirm] pendingResponse es null — nada que crear');
+      return;
+    }
+    print('[AIVoiceScreen][_confirm] creando  intent=${_pendingResponse!.intent}  status=${_pendingResponse!.status}  data=${_pendingResponse!.data}');
     setState(() => _state = _ScreenState.creating);
 
     final result = await _aiService.createEntity(_pendingResponse!);
+    print('[AIVoiceScreen][_confirm] resultado: "$result"');
 
     _addMessage(text: result, isUser: false);
     await _speakResponse(result);

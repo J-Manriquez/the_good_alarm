@@ -61,8 +61,10 @@ class AiVoiceService {
 Tu única tarea: extraer información de lo que dice el usuario y responder con JSON.
 REGLA ABSOLUTA: responde SOLO con JSON válido, sin markdown, sin texto extra, sin bloques de código.
 
-Formato exacto de respuesta (una sola línea JSON):
-{"intent":"alarm|habit|event|medication|unknown","status":"need_info|ready","data":{},"missing":[],"message":"texto"}
+Formato exacto de respuesta (una sola línea JSON). "intent" debe ser SOLO UNO de estos 5 valores exactos (nunca copies varios separados por "|"): alarm, habit, event, medication, unknown. Lo mismo para "status": SOLO UNO de need_info o ready.
+
+Ejemplo de respuesta válida:
+{"intent":"alarm","status":"ready","data":{"time":"05:00","days":"once"},"missing":[],"message":"Creo una alarma para las 5:00."}
 
 Tipos de intent:
 - alarm: alarma que suena a una hora
@@ -92,7 +94,9 @@ Lógica:
     required String userMessage,
     required List<ConversationMessage> history,
   }) async {
+    print('[AiVoiceService][processMessage] START  userMessage="$userMessage"  historyLen=${history.length}');
     final ready = await AiService.instance.isModelReady();
+    print('[AiVoiceService][processMessage] modelReady=$ready');
     if (!ready) {
       return AssistantResponse(
         intent: AssistantIntent.unknown,
@@ -104,6 +108,7 @@ Lógica:
     }
 
     final prompt = _buildPrompt(userMessage: userMessage, history: history);
+    print('[AiVoiceService][processMessage] prompt construido:\n$prompt');
     String raw;
     try {
       raw = await AiService.instance.generateText(
@@ -112,7 +117,9 @@ Lógica:
         maxOutputTokens: 256,
         temperature: 0.2,
       );
-    } catch (e) {
+      print('[AiVoiceService][processMessage] respuesta cruda del modelo: "$raw"');
+    } catch (e, st) {
+      print('[AiVoiceService][processMessage] ERROR en generateText: $e\n$st');
       return AssistantResponse(
         intent: AssistantIntent.unknown,
         status: AssistantStatus.needInfo,
@@ -164,10 +171,12 @@ Lógica:
       cleaned = cleaned.substring(start, end + 1);
     }
 
+    print('[AiVoiceService][_parseResponse] JSON limpio a parsear: "$cleaned"');
     Map<String, dynamic> json;
     try {
       json = jsonDecode(cleaned) as Map<String, dynamic>;
-    } catch (_) {
+    } catch (e) {
+      print('[AiVoiceService][_parseResponse] ERROR al parsear JSON: $e — se responde intent=unknown');
       return AssistantResponse(
         intent: AssistantIntent.unknown,
         status: AssistantStatus.needInfo,
@@ -187,6 +196,7 @@ Lógica:
     final status = statusStr == 'ready'
         ? AssistantStatus.ready
         : AssistantStatus.needInfo;
+    print('[AiVoiceService][_parseResponse] OK  intent=$intent  status=$status  data=$data  missing=$missing  message="$message"');
 
     return AssistantResponse(
       intent: intent,
@@ -215,6 +225,7 @@ Lógica:
   // ── Crear entidades ──────────────────────────────────────────────────────
 
   Future<String> createEntity(AssistantResponse response) async {
+    print('[AiVoiceService][createEntity] START  intent=${response.intent}  data=${response.data}');
     try {
       switch (response.intent) {
         case AssistantIntent.alarm:
@@ -226,9 +237,11 @@ Lógica:
         case AssistantIntent.medication:
           return await _createMedication(response.data);
         case AssistantIntent.unknown:
+          print('[AiVoiceService][createEntity] intent=unknown — no hay nada que crear');
           return 'No se pudo identificar qué crear.';
       }
-    } catch (e) {
+    } catch (e, st) {
+      print('[AiVoiceService][createEntity] ERROR: $e\n$st');
       return 'Error al crear: $e';
     }
   }
@@ -291,8 +304,10 @@ Lógica:
       createdAt: DateTime.now(),
     );
 
+    print('[AiVoiceService][_createAlarm] guardando alarma id=$id time=$finalTime title="$title" repeatDays=$repeatDays isDaily=$isDaily');
     await _alarmService.upsertAlarm(alarm);
     await _scheduleNativeAlarm(alarm);
+    print('[AiVoiceService][_createAlarm] alarma guardada y programada OK');
 
     final timeLabel = '${alarmTime.hour.toString().padLeft(2, '0')}:${alarmTime.minute.toString().padLeft(2, '0')}';
     return 'Alarma "$title" creada para las $timeLabel.';
@@ -322,8 +337,9 @@ Lógica:
         'tempVolumeReductionPercent': alarm.tempVolumeReductionPercent,
         'tempVolumeReductionDurationSeconds': alarm.tempVolumeReductionDurationSeconds,
       });
+      print('[AiVoiceService][_scheduleNativeAlarm] setAlarm nativo OK id=${alarm.id}');
     } catch (e) {
-      debugPrint('[AiVoiceService] Error scheduling native alarm: $e');
+      print('[AiVoiceService][_scheduleNativeAlarm] ERROR programando alarma nativa: $e');
     }
   }
 
@@ -353,7 +369,9 @@ Lógica:
       createdAt: DateTime.now(),
     );
 
+    print('[AiVoiceService][_createHabit] guardando hábito id=$id title="$title" time=$timeStr repeatMode=$repeatMode weekdays=$weekdays');
     await _habitService.upsertHabit(habit);
+    print('[AiVoiceService][_createHabit] hábito guardado OK');
 
     final timeLabel = '${tod.hour.toString().padLeft(2, '0')}:${tod.minute.toString().padLeft(2, '0')}';
     return 'Hábito "$title" creado a las $timeLabel.';
@@ -401,7 +419,9 @@ Lógica:
       createdAt: DateTime.now(),
     );
 
+    print('[AiVoiceService][_createEvent] guardando evento id=$eventId title="$title" startAt=$startAt calendarId=$calendarId');
     await _calendarService.upsertEvent(event);
+    print('[AiVoiceService][_createEvent] evento guardado OK');
 
     final dateLabel = '${eventDate.day}/${eventDate.month}/${eventDate.year}';
     final timeLabel = '${tod.hour.toString().padLeft(2, '0')}:${tod.minute.toString().padLeft(2, '0')}';
@@ -446,7 +466,9 @@ Lógica:
       createdAt: DateTime.now(),
     );
 
+    print('[AiVoiceService][_createMedication] guardando medicamento id=$id name="$name" times=$times repeatMode=$repeatMode weekdays=$weekdays');
     await _medicationService.upsertMedication(medication);
+    print('[AiVoiceService][_createMedication] medicamento guardado OK');
 
     final timeLabels = times
         .map((t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}')

@@ -45,3 +45,8 @@ app.*.map.json
 /android/app/release
 
 releases/
+
+# Release signing (nunca subir a git)
+android/key.properties
+android/*.jks
+android/*.keystore
